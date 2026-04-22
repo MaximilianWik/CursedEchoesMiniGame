@@ -1,0 +1,39 @@
+@import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700&family=EB+Garamond:ital,wght@0,400;0,700;1,400&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-serif: "EB Garamond", serif;
+  --font-display: "Cinzel", serif;
+  --font-mono: "JetBrains Mono", monospace;
+  
+  --color-bg-dark: #050505;
+  --color-gold: #d1c7b7;
+  --color-accent: #ff4500;
+  --color-danger: #8b0000;
+}
+
+@layer utilities {
+  .animate-shake {
+    animation: shake 0.1s cubic-bezier(0.36, 0.07, 0.19, 0.97) infinite;
+  }
+  @keyframes shake {
+    0%, 100% { transform: translateX(0); }
+    25% { transform: translateX(-4px); }
+    50% { transform: translateX(4px); }
+    75% { transform: translateX(-4px); }
+  }
+  
+  .fade-in { animation: fadeIn 1s ease-out forwards; opacity: 0; }
+  .zoom-in { animation: zoomIn 0.8s ease-out forwards; opacity: 0; }
+  .slide-in { animation: slideUp 0.8s ease-out forwards; opacity: 0; }
+  .animate-float-heart { animation: floatHeart 2s ease-out forwards; }
+  
+  @keyframes fadeIn { to { opacity: 1; } }
+  @keyframes zoomIn { from { transform: scale(0.9); } to { transform: scale(1); opacity: 1; } }
+  @keyframes slideUp { from { transform: translateY(20px); } to { transform: translateY(0); opacity: 1; } }
+  @keyframes floatHeart {
+      0% { transform: scale(var(--scale)) translateY(0); opacity: 1; filter: drop-shadow(0 0 10px #ff80cc); }
+      100% { transform: scale(calc(var(--scale) * 1.5)) translateY(-150px); opacity: 0; filter: drop-shadow(0 0 20px #ff80cc); }
+  }
+}
+
