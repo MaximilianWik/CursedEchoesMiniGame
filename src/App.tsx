@@ -459,7 +459,7 @@ export default function App() {
             <div className="mt-2 text-2xl opacity-60 font-[Cinzel] slide-in" style={{ animationDelay: '700ms' }}>Accuracy: {accuracy}%</div>
             
             <div className="mt-12 flex flex-col items-center fade-in" style={{ animationDelay: '1000ms' }}>
-                <p className="text-lg text-[#ff4444] font-bold mb-4 font-[Cinzel] tracking-[0.5em] uppercase drop-shadow-[0_0_15px_rgba(255,0,0,0.8)] animate-pulse">Seek Truth</p>
+                <p className="text-lg text-[#ff4444] font-bold mb-4 font-[Cinzel] tracking-[0.5em] uppercase drop-shadow-[0_0_15px_rgba(255,0,0,0.8)] animate-pulse">Secret Password</p>
                 <form onSubmit={(e) => {
                     e.preventDefault();
                     if (secretPassword.toUpperCase() === 'ILOVEMYGF') {
