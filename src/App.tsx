@@ -443,8 +443,35 @@ export default function App() {
         />
 
         {!started && (
-          <div className="absolute top-0 left-0 w-full h-full bg-black/90 flex flex-col items-center justify-center z-50">
-            <button onClick={() => setStarted(true)} className="px-12 py-6 border-2 border-amber-900 bg-black text-amber-600 font-[Cinzel] text-2xl tracking-[0.2em] shadow-[0_0_20px_rgba(127,29,29,0.5)] hover:bg-amber-900/20 transition-all animate-pulse">CHALLENGE THE ABYSS</button>
+          <div className="absolute top-0 left-0 w-full h-full bg-black/95 flex flex-col items-center justify-center z-50 p-8 text-center">
+            <h1 className="font-[Cinzel] text-5xl text-amber-700 mb-8 tracking-[0.3em] drop-shadow-[0_0_15px_rgba(180,83,9,0.4)]">CURSED ECHOES</h1>
+            
+            <div className="max-w-md bg-amber-950/20 border border-amber-900/40 p-6 rounded mb-12 backdrop-blur-sm shadow-[0_0_30px_rgba(0,0,0,0.5)]">
+              <h2 className="font-[Cinzel] text-amber-600 text-xl mb-4 tracking-widest uppercase border-b border-amber-900/30 pb-2">How to Play</h2>
+              <ul className="text-amber-100/70 text-sm space-y-3 font-serif tracking-wide text-left list-none">
+                <li className="flex items-start gap-2">
+                  <span className="text-amber-600 mt-1">◈</span>
+                  <span>Type the echoes appearing from the darkness to banish them with fire.</span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <span className="text-amber-600 mt-1">◈</span>
+                  <span>Do not let the echoes reach your position, or your life will wither.</span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <span className="text-amber-600 mt-1">◈</span>
+                  <span>Maintain your combo to ascend through the ranks of the Abyss.</span>
+                </li>
+              </ul>
+            </div>
+
+            <button 
+                onClick={() => setStarted(true)} 
+                className="group relative px-16 py-6 overflow-hidden border border-amber-900 bg-black text-amber-600 font-[Cinzel] text-2xl tracking-[0.3em] transition-all hover:text-amber-400 hover:border-amber-500 shadow-[0_0_20px_rgba(127,29,29,0.3)]"
+            >
+                <div className="absolute inset-0 w-0 bg-amber-900/20 transition-all duration-300 ease-out group-hover:w-full"></div>
+                <span className="relative z-10 animate-pulse">CHALLENGE THE ABYSS</span>
+            </button>
+            <p className="mt-8 text-amber-900/40 font-serif text-xs tracking-widest uppercase">The darkness waits for no one</p>
           </div>
         )}
 
