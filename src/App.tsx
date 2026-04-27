@@ -135,6 +135,7 @@ export default function App() {
     if (!ctx || !textCtx) return;
 
     let animationFrameId: number;
+    let lastTime = performance.now();
     if (startTimeRef.current === 0) startTimeRef.current = Date.now();
     const PLAYER = { x: 512, y: 700 };
 
@@ -201,8 +202,11 @@ export default function App() {
 
     window.addEventListener('keydown', handleKeyDown);
 
-    const gameLoop = () => {
+    const gameLoop = (time: number = performance.now()) => {
       if (gameOver || paused) return;
+      const dt = Math.min((time - lastTime) / (1000 / 60), 3); // Normalize to 60fps, cap at 3 frames to prevent huge jumps
+      lastTime = time;
+
       const elapsed = (Date.now() - startTimeRef.current - totalPausedDurationRef.current) / 1000;
       const currentDifficulty = Math.min(elapsed / 210, 5); // Reach max difficulty in 3.5 mins
       
@@ -211,7 +215,7 @@ export default function App() {
         setDifficulty(Math.round(currentDifficulty * 10));
       }
 
-      const spawnChance = 0.017 + (currentDifficulty * 0.007); // Adjusted for 3.5m
+      const spawnChance = (0.017 + (currentDifficulty * 0.007)) * dt; // Adjusted for 3.5m, scaled by dt
       const speedModifier = 1 + (currentDifficulty * 0.4); // Adjusted for 3.5m
 
       ctx.fillStyle = "#050505";
@@ -246,7 +250,7 @@ export default function App() {
       }
 
       fireballsRef.current.forEach((fb, i) => {
-        fb.progress += fb.isSpecial ? 0.02 : 0.04; // Slower for special
+        fb.progress += (fb.isSpecial ? 0.02 : 0.04) * dt; // Slower for special, adjusted by dt
         fb.x = PLAYER.x + (fb.tx - PLAYER.x) * fb.progress;
         fb.y = PLAYER.y + (fb.ty - PLAYER.y) * fb.progress;
         
@@ -335,7 +339,7 @@ export default function App() {
       });
       
       particlesRef.current.forEach((p, i) => { 
-        p.x += p.vx; p.y += p.vy; p.life -= 1; 
+        p.x += p.vx * dt; p.y += p.vy * dt; p.life -= 1 * dt; 
         ctx.fillStyle = p.color || "orange"; 
         if (p.isHeart) {                
             const size = 3; // Smaller hearts
@@ -361,8 +365,8 @@ export default function App() {
         const dist = Math.sqrt(dx * dx + dy * dy);
         
         // Move towards player
-        word.x += (dx / dist) * word.speed * 2;
-        word.y += (dy / dist) * word.speed * 2;
+        word.x += (dx / dist) * word.speed * 2 * dt;
+        word.y += (dy / dist) * word.speed * 2 * dt;
         
         // Render word letter by letter to fix alignment with non-monospaced fonts
         let currentX = word.x;
