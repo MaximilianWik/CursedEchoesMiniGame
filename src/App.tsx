@@ -3,701 +3,917 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {useEffect, useRef, useState} from 'react';
-import {GOTHIC_WORDS, THEME} from './constants';
+import React, {useEffect, useRef, useState, useCallback, memo} from 'react';
+import {GOTHIC_WORDS} from './constants';
+import {
+  DESIGN_W, DESIGN_H, PARTICLE_CAP, BG_EMBER_CAP, COMBO_RANKS,
+  rankForCombo, setupHiDPICanvas, buildCharWidthCache, seedEmbers,
+  drawBackground, drawWordAura, drawFireball, drawShockwave, drawParticle,
+  type Word, type Fireball, type Particle, type Shockwave, type Ember, type Rank,
+} from './graphics';
 
-type HighScore = {
-    souls: number;
-    maxCombo: number;
+type HighScore = {souls: number; maxCombo: number};
+
+const PLAYER = {x: 512, y: 700};
+
+// ─────────────────────────────────────────────────────────────
+// HUD — a memoized subcomponent driven by a low-frequency tick,
+// reading game values via a shared ref bag. Re-renders ~10×/s
+// instead of on every keystroke.
+// ─────────────────────────────────────────────────────────────
+
+type HudStats = {
+  score: number;
+  health: number;
+  combo: number;
+  maxCombo: number;
+  difficulty: number;
+  accuracy: number;
+  isBlessed: boolean;
+  currentRank: Rank;
 };
 
-const COMBO_RANKS = [
-    {count: 0, label: 'Dismal', id: 'D'}, {count: 20, label: 'Crazy', id: 'C'}, {count: 40, label: 'Badass', id: 'B'}, 
-    {count: 60, label: 'Apocalyptic', id: 'A'}, {count: 80, label: 'Savage!', id: 'S'}, {count: 100, label: 'Sick Skills!!', id: 'SS'}, {count: 120, label: 'Smokin\' Sexy Style!!', id: 'SSS'}
-];
+const Hud = memo(function Hud({stats}: {stats: HudStats}) {
+  const hpPct = (stats.health / 10) * 100;
+  const lowHp = stats.health <= 3;
+  return (
+    <div className="absolute top-8 left-8 flex flex-col gap-2 z-30 pointer-events-none select-none">
+      {stats.isBlessed && (
+        <div className="text-xl text-[#ff80cc] font-[Cinzel] font-bold tracking-widest animate-pulse drop-shadow-[0_0_15px_rgba(255,128,204,0.8)] mb-1">
+          BLESSED BY GODESS
+        </div>
+      )}
+      <div className={`relative h-4 w-[300px] border transition-all duration-300 ${
+        stats.isBlessed
+          ? 'bg-[#1a000d] border-[#ff80cc] shadow-[0_0_20px_rgba(255,128,204,0.8)]'
+          : lowHp
+            ? 'bg-[#1a0a0a] border-[#ff3030] shadow-[0_0_18px_rgba(255,30,30,0.7)] animate-pulse'
+            : 'bg-[#1a0a0a] border-[#3d1a1a]'
+      }`}>
+        <div
+          className={`h-full transition-all duration-300 ${
+            stats.isBlessed
+              ? 'bg-linear-to-r from-[#ff0080] to-[#ff80cc]'
+              : 'bg-linear-to-r from-[#8b0000] to-[#ff0000]'
+          }`}
+          style={{width: `${hpPct}%`}}
+        />
+        {/* Ember tick marks on the HP bar */}
+        <div className="absolute inset-0 pointer-events-none bg-[repeating-linear-gradient(90deg,transparent_0,transparent_28px,rgba(0,0,0,0.35)_28px,rgba(0,0,0,0.35)_30px)]" />
+      </div>
+      <div className="text-xl opacity-70 font-[Cinzel] hud-glow">Souls: {stats.score.toString().padStart(6, '0')}</div>
+      <div className="text-xl opacity-60 font-[Cinzel]">Difficulty: {stats.difficulty}</div>
+      <div className="text-sm opacity-60 font-[Cinzel]">Accuracy: {stats.accuracy}%</div>
+      <div className="flex flex-col items-start gap-1 mt-2">
+        <img
+          src={`/${stats.currentRank.id}-removebg-preview.png`}
+          alt={stats.currentRank.label}
+          className={`h-18 object-contain ${stats.currentRank.id === 'SSS' ? 'animate-shake' : ''}`}
+          draggable={false}
+        />
+        <div className={`text-xl font-[Cinzel] hud-glow ${stats.combo > 0 ? 'opacity-80' : 'opacity-50'}`}>
+          x{stats.combo}
+        </div>
+      </div>
+    </div>
+  );
+});
+
+// ─────────────────────────────────────────────────────────────
+// App
+// ─────────────────────────────────────────────────────────────
 
 export default function App() {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const textCanvasRef = useRef<HTMLCanvasElement>(null);
-  const [score, setScore] = useState(0);
-  const [health, setHealth] = useState(10);
+  // Screen & session state — drives React layout, not the game loop.
   const [started, setStarted] = useState(false);
   const [gameOver, setGameOver] = useState(false);
   const [paused, setPaused] = useState(false);
-  const [difficulty, setDifficulty] = useState(0);
-  const [manusCasting, setManusCasting] = useState(false);
-  const [totalKeyPresses, setTotalKeyPresses] = useState(0);
-  const [correctKeyPresses, setCorrectKeyPresses] = useState(0);
-  const [combo, setCombo] = useState(0); // Combo count
-  const [maxCombo, setMaxCombo] = useState(0);
-  
+  const [scale, setScale] = useState(1);
+  const [isMobileFocused, setIsMobileFocused] = useState(false);
+  const [highscores, setHighscores] = useState<HighScore[]>([]);
+  const [finalStats, setFinalStats] = useState<{score: number; maxCombo: number; accuracy: number; topRank: Rank} | null>(null);
+
+  // Hidden-romance side-screen state.
   const [secretPassword, setSecretPassword] = useState('');
   const [passwordError, setPasswordError] = useState(false);
   const [showSecretScreen, setShowSecretScreen] = useState(false);
   const [yesChecked, setYesChecked] = useState(false);
-  const [noHoverPos, setNoHoverPos] = useState<{x: number, y: number} | null>(null);
-  const [secretHearts, setSecretHearts] = useState<{id: number, x: number, y: number, scale: number}[]>([]);
-  const [kissPos, setKissPos] = useState<{x: number, y: number} | null>(null);
-  const [isBlessed, setIsBlessed] = useState(false);
-  const blessedTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const [highscores, setHighscores] = useState<HighScore[]>([]);
+  const [noHoverPos, setNoHoverPos] = useState<{x: number; y: number} | null>(null);
+  const [secretHearts, setSecretHearts] = useState<{id: number; x: number; y: number; scale: number}[]>([]);
+  const [kissPos, setKissPos] = useState<{x: number; y: number} | null>(null);
 
-  useEffect(() => {
-      // Load initial on mount just in case
-      const stored = localStorage.getItem('abyss_highscores');
-      if (stored) setHighscores(JSON.parse(stored));
-  }, []);
-
-  useEffect(() => {
-      if (gameOver) {
-          const stored = localStorage.getItem('abyss_highscores');
-          let current: HighScore[] = stored ? JSON.parse(stored) : [];
-          if (score > 0) {
-              current.push({ souls: score, maxCombo });
-              current.sort((a, b) => b.souls - a.souls);
-              current = current.slice(0, 5);
-              localStorage.setItem('abyss_highscores', JSON.stringify(current));
-          }
-          setHighscores(current);
-      }
-  }, [gameOver]);
-
-  const runAway = (e?: React.MouseEvent | React.TouchEvent) => {
-      if (e) {
-          e.preventDefault();
-          e.stopPropagation();
-      }
-      const maxX = 1024 - 200; // Constrain to the 1024x768 scaleable container
-      const maxY = 768 - 100;
-      const x = Math.max(50, Math.floor(Math.random() * maxX));
-      const y = Math.max(50, Math.floor(Math.random() * maxY));
-      setNoHoverPos({ x, y });
-  };
-
-  const comboRef = useRef(0); // Ref for game loop access
-  const pauseTimeRef = useRef(0);
-  const totalPausedDurationRef = useRef(0);
-  const lastPauseTimeRef = useRef(0);
-  const startTimeRef = useRef<number>(0);
-
-  const [scale, setScale] = useState(1);
-
-  useEffect(() => {
-    const handleResize = () => {
-      const scaleX = window.innerWidth / 1024;
-      const scaleY = window.innerHeight / 768;
-      // Use 0.98 to give a tiny bit of breathing room so standard scrollbars don't miscalculate
-      setScale(Math.min(scaleX, scaleY) * 0.98); 
-    };
-    handleResize();
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
-  }, []);
-
-  const [isMobileFocused, setIsMobileFocused] = useState(false);
+  // Canvas refs.
+  const bgCanvasRef = useRef<HTMLCanvasElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const textCanvasRef = useRef<HTMLCanvasElement>(null);
+  const playerImgRef = useRef<HTMLImageElement>(null);
+  const shakeRef = useRef<HTMLDivElement>(null);
   const mobileInputRef = useRef<HTMLInputElement>(null);
 
-  // Sync state to ref and update maxCombo
-  useEffect(() => {
-    comboRef.current = combo;
-    if (combo > maxCombo) setMaxCombo(combo);
-  }, [combo]);
+  // Game-state refs (mutated inside the rAF loop, never cause re-renders).
+  const scoreRef = useRef(0);
+  const healthRef = useRef(10);
+  const comboRef = useRef(0);
+  const maxComboRef = useRef(0);
+  const correctKeyRef = useRef(0);
+  const totalKeyRef = useRef(0);
+  const difficultyRef = useRef(0);
+  const isBlessedRef = useRef(false);
+  const gameOverRef = useRef(false);
+  const pausedRef = useRef(false);
 
-  // Track when we pause/resume to adjust startTime
-  useEffect(() => {
-    if (paused) {
-        lastPauseTimeRef.current = Date.now();
-    } else if (lastPauseTimeRef.current > 0) {
-        totalPausedDurationRef.current += Date.now() - lastPauseTimeRef.current;
-        lastPauseTimeRef.current = 0;
-    }
-  }, [paused]);
-
-  const currentRank = COMBO_RANKS.slice().reverse().find(r => combo >= r.count) || COMBO_RANKS[0];
-  const topRank = COMBO_RANKS.slice().reverse().find(r => maxCombo >= r.count) || COMBO_RANKS[0];
-  
-  const wordsRef = useRef<{text: string, x: number, y: number, speed: number, typed: string, isSpecial: boolean}[]>([]);
-  const fireballsRef = useRef<{x: number, y: number, tx: number, ty: number, progress: number, isSpecial: boolean}[]>([]);
+  const wordsRef = useRef<Word[]>([]);
+  const fireballsRef = useRef<Fireball[]>([]);
+  const particlesRef = useRef<Particle[]>([]);
+  const shockwavesRef = useRef<Shockwave[]>([]);
+  const embersRef = useRef<Ember[]>(seedEmbers(BG_EMBER_CAP));
   const activeWordRef = useRef<number | null>(null);
   const lastWordsRef = useRef<string[]>([]);
   const totalWordsSpawnedRef = useRef(0);
-  const particlesRef = useRef<{x: number, y: number, vx: number, vy: number, life: number, isHeart?: boolean, color?: string}[]>([]);
 
-  const accuracy = totalKeyPresses > 0 ? Math.round((correctKeyPresses / totalKeyPresses) * 100) : 100;
+  const shakeUntilRef = useRef(0);
+  const shakeMagRef = useRef(0);
+  const castingUntilRef = useRef(0);
+  const blessedTimeoutRef = useRef<number | null>(null);
 
+  const startTimeRef = useRef(0);
+  const totalPausedMsRef = useRef(0);
+  const lastPauseAtRef = useRef(0);
+  const charWidthsRef = useRef<Record<string, number>>({});
+
+  // Preloaded audio for the smooch easter egg.
+  const smoochAudioRef = useRef<HTMLAudioElement | null>(null);
   useEffect(() => {
-    if (!started || gameOver || paused) return;
-    const canvas = canvasRef.current;
-    const textCanvas = textCanvasRef.current;
-    if (!canvas || !textCanvas) return;
-    const ctx = canvas.getContext('2d');
-    const textCtx = textCanvas.getContext('2d');
-    if (!ctx || !textCtx) return;
+    const a = new Audio('/smooch.mp3');
+    a.preload = 'auto';
+    smoochAudioRef.current = a;
+  }, []);
 
-    let animationFrameId: number;
-    let lastTime = performance.now();
-    if (startTimeRef.current === 0) startTimeRef.current = Date.now();
-    const PLAYER = { x: 512, y: 700 };
+  // Low-frequency tick that drives the HUD re-render.
+  const [hudStats, setHudStats] = useState<HudStats>({
+    score: 0, health: 10, combo: 0, maxCombo: 0, difficulty: 0,
+    accuracy: 100, isBlessed: false, currentRank: COMBO_RANKS[0],
+  });
 
-    const handleKeyDown = (e: KeyboardEvent) => {
-      const char = e.key.toUpperCase();
-      if (!/[A-Z]/.test(char)) return;
+  // Load highscores on mount.
+  useEffect(() => {
+    const stored = localStorage.getItem('abyss_highscores');
+    if (stored) {
+      try { setHighscores(JSON.parse(stored)); } catch { /* ignore */ }
+    }
+  }, []);
 
-      setTotalKeyPresses(prev => prev + 1);
+  // Persist highscore once when the game ends — uses the frozen finalStats snapshot.
+  useEffect(() => {
+    if (!gameOver || !finalStats) return;
+    const stored = localStorage.getItem('abyss_highscores');
+    let current: HighScore[] = [];
+    if (stored) { try { current = JSON.parse(stored); } catch { current = []; } }
+    if (finalStats.score > 0) {
+      current.push({souls: finalStats.score, maxCombo: finalStats.maxCombo});
+      current.sort((a, b) => b.souls - a.souls);
+      current = current.slice(0, 5);
+      localStorage.setItem('abyss_highscores', JSON.stringify(current));
+    }
+    setHighscores(current);
+  }, [gameOver, finalStats]);
 
-      // Trigger casting animation
-      setManusCasting(true);
-      setTimeout(() => setManusCasting(false), 200);
+  // Scale container to fit viewport.
+  useEffect(() => {
+    const onResize = () => {
+      const sx = window.innerWidth / DESIGN_W;
+      const sy = window.innerHeight / DESIGN_H;
+      setScale(Math.min(sx, sy) * 0.98);
+    };
+    onResize();
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
 
-      if (activeWordRef.current !== null) {
-        const word = wordsRef.current[activeWordRef.current];
-        if (word.text[word.typed.length] === char) {
-          word.typed += char;
-          setCorrectKeyPresses(prev => prev + 1);
-          setCombo(prev => prev + 1); // Combo up
-          fireballsRef.current.push({ x: PLAYER.x, y: PLAYER.y, tx: word.x, ty: word.y, progress: 0, isSpecial: word.isSpecial });
-          if (word.typed === word.text) {
-                    // Massive explosion if it was a special word
-                    if (word.isSpecial) {
-                        for(let i=0; i<100; i++) {
-                            const angle = Math.random() * Math.PI * 2;
-                            const speed = Math.random() * 8 + 2;
-                            particlesRef.current.push({
-                                x: word.x, 
-                                y: word.y, 
-                                vx: Math.cos(angle) * speed, 
-                                vy: Math.sin(angle) * speed, 
-                                life: 40,
-                                color: "#ff80cc",
-                                isHeart: true
-                            });
-                        }
-                        setHealth(10);
-                        setIsBlessed(true);
-                        if (blessedTimeoutRef.current) clearTimeout(blessedTimeoutRef.current);
-                        blessedTimeoutRef.current = setTimeout(() => setIsBlessed(false), 10000);
-                    }
+  // Track paused state in ref + accumulate paused duration.
+  useEffect(() => {
+    pausedRef.current = paused;
+    if (paused) {
+      lastPauseAtRef.current = Date.now();
+    } else if (lastPauseAtRef.current > 0) {
+      totalPausedMsRef.current += Date.now() - lastPauseAtRef.current;
+      lastPauseAtRef.current = 0;
+    }
+  }, [paused]);
 
-            wordsRef.current.splice(activeWordRef.current, 1);
-            activeWordRef.current = null;
-            setScore(prev => prev + word.text.length * 10);
-            setCombo(prev => prev + 5); // Bonus combo
+  // Clear blessed timeout on unmount.
+  useEffect(() => {
+    return () => {
+      if (blessedTimeoutRef.current !== null) window.clearTimeout(blessedTimeoutRef.current);
+    };
+  }, []);
+
+  // Keydown handler — stable reference, reads/writes refs only.
+  const handleChar = useCallback((rawChar: string) => {
+    if (gameOverRef.current || pausedRef.current || !started) return;
+    const char = rawChar.toUpperCase();
+    if (char.length !== 1 || char < 'A' || char > 'Z') return;
+
+    totalKeyRef.current += 1;
+
+    // Trigger casting sprite swap (no React state).
+    const img = playerImgRef.current;
+    if (img) {
+      castingUntilRef.current = performance.now() + 180;
+      if (img.dataset.state !== 'casting') {
+        img.src = '/casting2.png';
+        img.dataset.state = 'casting';
+      }
+    }
+
+    const words = wordsRef.current;
+    if (activeWordRef.current !== null) {
+      const word = words[activeWordRef.current];
+      if (word && word.text[word.typed.length] === char) {
+        word.typed += char;
+        correctKeyRef.current += 1;
+        comboRef.current += 1;
+        fireballsRef.current.push({
+          x: PLAYER.x, y: PLAYER.y, tx: word.x, ty: word.y, progress: 0, isSpecial: word.isSpecial,
+        });
+        if (word.typed === word.text) {
+          // Special word → heart-burst + full heal + blessed aura.
+          if (word.isSpecial) {
+            for (let i = 0; i < 80; i++) {
+              const ang = Math.random() * Math.PI * 2;
+              const spd = Math.random() * 6 + 2;
+              particlesRef.current.push({
+                x: word.x, y: word.y,
+                vx: Math.cos(ang) * spd, vy: Math.sin(ang) * spd,
+                life: 40, maxLife: 40,
+                size: 3, color: '#ff80cc', isHeart: true,
+              });
+            }
+            healthRef.current = 10;
+            isBlessedRef.current = true;
+            if (blessedTimeoutRef.current !== null) window.clearTimeout(blessedTimeoutRef.current);
+            blessedTimeoutRef.current = window.setTimeout(() => {
+              isBlessedRef.current = false;
+              blessedTimeoutRef.current = null;
+            }, 10000);
           }
-        } else {
-             setCombo(0); // Reset combo
+          words.splice(activeWordRef.current, 1);
+          activeWordRef.current = null;
+          scoreRef.current += word.text.length * 10;
+          comboRef.current += 5;
+          if (comboRef.current > maxComboRef.current) maxComboRef.current = comboRef.current;
         }
       } else {
-        const index = wordsRef.current.findIndex(w => w.text.startsWith(char));
-        if (index !== -1) {
-          wordsRef.current[index].typed = char;
-          setCorrectKeyPresses(prev => prev + 1);
-          setCombo(prev => prev + 1); // Combo up
-          activeWordRef.current = index;
-          fireballsRef.current.push({ x: PLAYER.x, y: PLAYER.y, tx: wordsRef.current[index].x, ty: wordsRef.current[index].y, progress: 0, isSpecial: wordsRef.current[index].isSpecial });
-        } else {
-            setCombo(0); // Reset on miss
-        }
+        comboRef.current = 0;
       }
+    } else {
+      const idx = words.findIndex(w => w.text.startsWith(char));
+      if (idx !== -1) {
+        words[idx].typed = char;
+        correctKeyRef.current += 1;
+        comboRef.current += 1;
+        activeWordRef.current = idx;
+        fireballsRef.current.push({
+          x: PLAYER.x, y: PLAYER.y, tx: words[idx].x, ty: words[idx].y, progress: 0, isSpecial: words[idx].isSpecial,
+        });
+      } else {
+        comboRef.current = 0;
+      }
+    }
+    if (comboRef.current > maxComboRef.current) maxComboRef.current = comboRef.current;
+  }, [started]);
+
+  // Main game loop.
+  useEffect(() => {
+    if (!started || gameOver) return;
+
+    const bg = bgCanvasRef.current;
+    const canvas = canvasRef.current;
+    const textCanvas = textCanvasRef.current;
+    if (!bg || !canvas || !textCanvas) return;
+
+    const bgCtx = setupHiDPICanvas(bg, DESIGN_W, DESIGN_H);
+    const ctx = setupHiDPICanvas(canvas, DESIGN_W, DESIGN_H);
+    const textCtx = setupHiDPICanvas(textCanvas, DESIGN_W, DESIGN_H);
+
+    // Build char-width cache once fonts are loaded — Cinzel is an @import.
+    const buildWidths = () => {
+      charWidthsRef.current = buildCharWidthCache(textCtx);
     };
+    if (document.fonts?.ready) {
+      document.fonts.ready.then(buildWidths);
+    }
+    buildWidths(); // fallback — uses whatever is loaded now.
 
-    window.addEventListener('keydown', handleKeyDown);
+    if (startTimeRef.current === 0) startTimeRef.current = Date.now();
 
-    const gameLoop = (time: number = performance.now()) => {
-      if (gameOver || paused) return;
-      const dt = Math.min((time - lastTime) / (1000 / 60), 3); // Normalize to 60fps, cap at 3 frames to prevent huge jumps
+    const keyListener = (e: KeyboardEvent) => {
+      if (e.key.length === 1) handleChar(e.key);
+    };
+    window.addEventListener('keydown', keyListener);
+
+    let rafId = 0;
+    let lastTime = performance.now();
+    let lastHudBump = 0;
+
+    const loop = (time: number) => {
+      if (gameOverRef.current) return;
+      rafId = requestAnimationFrame(loop);
+
+      if (pausedRef.current) { lastTime = time; return; }
+
+      const dt = Math.min((time - lastTime) / (1000 / 60), 3);
       lastTime = time;
 
-      const elapsed = (Date.now() - startTimeRef.current - totalPausedDurationRef.current) / 1000;
-      const currentDifficulty = Math.min(elapsed / 210, 5); // Reach max difficulty in 3.5 mins
-      
-      // Update difficulty state less frequently for better performance
-      if (Math.round(currentDifficulty * 10) !== difficulty) {
-        setDifficulty(Math.round(currentDifficulty * 10));
+      // Restore idle sprite when casting window expires.
+      if (castingUntilRef.current > 0 && time > castingUntilRef.current) {
+        castingUntilRef.current = 0;
+        const img = playerImgRef.current;
+        if (img && img.dataset.state !== 'idle') {
+          img.src = '/idle1.png';
+          img.dataset.state = 'idle';
+        }
       }
 
-      const spawnChance = (0.017 + (currentDifficulty * 0.007)) * dt; // Adjusted for 3.5m, scaled by dt
-      const speedModifier = 1 + (currentDifficulty * 0.4); // Adjusted for 3.5m
+      const elapsed = (Date.now() - startTimeRef.current - totalPausedMsRef.current) / 1000;
+      const diff = Math.min(elapsed / 210, 5);
+      difficultyRef.current = Math.round(diff * 10);
 
-      ctx.fillStyle = "#050505";
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      textCtx.clearRect(0, 0, textCanvas.width, textCanvas.height);
+      const spawnChance = (0.017 + diff * 0.007) * dt;
+      const speedMod = 1 + diff * 0.4;
 
+      // Background layer.
+      const lowHp = healthRef.current <= 3;
+      drawBackground(bgCtx, embersRef.current, time, dt, lowHp);
+
+      // Camera shake (applied to the game + text canvases via CSS transform on the wrapper).
+      let shakeX = 0, shakeY = 0;
+      if (time < shakeUntilRef.current) {
+        const mag = shakeMagRef.current;
+        shakeX = (Math.random() - 0.5) * mag;
+        shakeY = (Math.random() - 0.5) * mag;
+      }
+      if (shakeRef.current) {
+        shakeRef.current.style.transform = `translate(${shakeX.toFixed(2)}px, ${shakeY.toFixed(2)}px)`;
+      }
+
+      // Clear action + text layers.
+      ctx.clearRect(0, 0, DESIGN_W, DESIGN_H);
+      textCtx.clearRect(0, 0, DESIGN_W, DESIGN_H);
+
+      // Spawn a new word?
       if (Math.random() < spawnChance) {
-        const minLength = Math.min(Math.floor(3 + currentDifficulty * 1.5), 12);
-        const availableWords = GOTHIC_WORDS.filter(word => 
-          word.length >= minLength && 
-          !wordsRef.current.some(existing => existing.text[0] === word[0]) &&
-          !lastWordsRef.current.includes(word)
+        const minLength = Math.min(Math.floor(3 + diff * 1.5), 12);
+        const available = GOTHIC_WORDS.filter(w =>
+          w.length >= minLength &&
+          !wordsRef.current.some(existing => existing.text[0] === w[0]) &&
+          !lastWordsRef.current.includes(w),
         );
-
-        if (availableWords.length > 0) {
+        if (available.length > 0) {
           totalWordsSpawnedRef.current++;
-          let newText = availableWords[Math.floor(Math.random() * availableWords.length)];
+          let newText = available[Math.floor(Math.random() * available.length)];
           let isSpecial = false;
-
           if (totalWordsSpawnedRef.current === 5 || (totalWordsSpawnedRef.current > 5 && Math.random() < 0.1)) {
             newText = 'JESSYKA';
             isSpecial = true;
           }
-
-          const newX = Math.random() * (canvas.width - 200);
-          if (!wordsRef.current.some(existing => Math.abs(existing.x - newX) < 150 && Math.abs(existing.y - (-50)) < 100)) {
-            wordsRef.current.push({ text: newText, x: newX, y: -50, speed: (0.15 + Math.random() * 0.3) * speedModifier, typed: '', isSpecial });
+          const newX = Math.random() * (DESIGN_W - 200);
+          if (!wordsRef.current.some(e => Math.abs(e.x - newX) < 150 && Math.abs(e.y - -50) < 100)) {
+            wordsRef.current.push({
+              text: newText, x: newX, y: -50,
+              speed: (0.15 + Math.random() * 0.3) * speedMod,
+              typed: '', isSpecial,
+            });
             lastWordsRef.current.push(newText);
             if (lastWordsRef.current.length > 20) lastWordsRef.current.shift();
           }
         }
       }
 
-      fireballsRef.current.forEach((fb, i) => {
-        fb.progress += (fb.isSpecial ? 0.02 : 0.04) * dt; // Slower for special, adjusted by dt
+      // Hoist current rank once per frame.
+      const curRank = rankForCombo(comboRef.current);
+      const curRankId = curRank.id;
+
+      // ── Fireballs (reverse iteration so splice is safe).
+      for (let i = fireballsRef.current.length - 1; i >= 0; i--) {
+        const fb = fireballsRef.current[i];
+        fb.progress += (fb.isSpecial ? 0.02 : 0.04) * dt;
         fb.x = PLAYER.x + (fb.tx - PLAYER.x) * fb.progress;
         fb.y = PLAYER.y + (fb.ty - PLAYER.y) * fb.progress;
-        
-        // Dynamic fireball appearance
-        const currentRank = COMBO_RANKS.slice().reverse().find(r => comboRef.current >= r.count) || COMBO_RANKS[0];
-        const isSpear = ['S', 'SS', 'SSS'].includes(currentRank.id);
-        const isSSS = currentRank.id === 'SSS';
-        
-        // Define colors and spear scaling
-        const fireballColor = fb.isSpecial ? "#ff80cc" : `hsl(${20 + comboRef.current}, 100%, 50%)`;
-        const sssColorPrimary = "#00ddff";
-        const sssColorSecondary = "#ffffff";
-        const spearMultiplier = isSSS ? 1.0 : (currentRank.id === 'SS' ? 0.7 : 0.4);
-        
-        // Dramatically scaling size (much slower now)
-        const baseSize = isSpear ? (10 * spearMultiplier) : 5;
-        const scale = 1 + (comboRef.current / 150); 
-        const fireballSize = baseSize * scale;
 
-        ctx.shadowBlur = isSpear ? 40 : 10 + (comboRef.current / 5); 
-        ctx.shadowColor = fb.isSpecial ? "#ff0099" : (isSpear ? (isSSS ? "#00ffff" : "#0055ff") : "#ff4500");
-        ctx.fillStyle = fb.isSpecial ? "#ff80cc" : (isSpear ? (isSSS ? sssColorPrimary :'#55bbff') : fireballColor);
-        
-        ctx.beginPath();
-        if (fb.isSpecial) {
-           const size = fireballSize * 6;
-           // Slimmer heart shape
-           ctx.moveTo(fb.x, fb.y + size / 4);
-           ctx.bezierCurveTo(fb.x, fb.y, fb.x - size / 3, fb.y - size / 4, fb.x - size / 3, fb.y + size / 4);
-           ctx.bezierCurveTo(fb.x - size / 3, fb.y + size / 2, fb.x, fb.y + size * 0.8, fb.x, fb.y + size);
-           ctx.bezierCurveTo(fb.x, fb.y + size * 0.8, fb.x + size / 3, fb.y + size / 2, fb.x + size / 3, fb.y + size / 4);
-           ctx.bezierCurveTo(fb.x + size / 3, fb.y - size / 4, fb.x, fb.y, fb.x, fb.y + size / 4);
-        } else if (isSpear) {
-            // Draw SSS spear/missile shape
-            const angle = Math.atan2(fb.ty - fb.y, fb.tx - fb.x);
-            const length = fireballSize * 3;
-            ctx.moveTo(fb.x + Math.cos(angle) * length, fb.y + Math.sin(angle) * length);
-            ctx.lineTo(fb.x + Math.cos(angle + Math.PI * 0.8) * length * 0.3, fb.y + Math.sin(angle + Math.PI * 0.8) * length * 0.3);
-            ctx.lineTo(fb.x - Math.cos(angle) * length * 0.5, fb.y - Math.sin(angle) * length * 0.5);
-            ctx.lineTo(fb.x + Math.cos(angle - Math.PI * 0.8) * length * 0.3, fb.y + Math.sin(angle - Math.PI * 0.8) * length * 0.3);
-            ctx.closePath();
-        } else {
-            ctx.arc(fb.x, fb.y, fireballSize, 0, Math.PI * 2);
-        }
-        ctx.fill();
-        ctx.shadowBlur = 0;
-        
-        // Spawn particles based on type
-        const particleCount = fb.isSpecial ? 3 : (isSpear ? 6 : Math.floor(comboRef.current/25) + 1);
-        for(let k=0; k < particleCount; k++) {
-            particlesRef.current.push({
-                x: fb.x, 
-                y: fb.y, 
-                vx: (Math.random()-0.5) * (isSpear ? 6 : 3), 
-                vy: (Math.random()-0.5) * (isSpear ? 6 : 3), 
-                life: isSpear ? 15 : 8,
-                color: fb.isSpecial ? "#ff80cc" : (isSpear ? (Math.random() > 0.5 ? (isSSS ? sssColorPrimary : '#55bbff') : sssColorSecondary) : fireballColor),
-                isHeart: fb.isSpecial
-            });
+        const color = drawFireball(ctx, fb, comboRef.current, curRankId);
+
+        // Trailing sparks — throttled + capped.
+        const isSpear = curRankId === 'S' || curRankId === 'SS' || curRankId === 'SSS';
+        const trailCount = fb.isSpecial ? 2 : isSpear ? 4 : Math.min(3, Math.floor(comboRef.current / 30) + 1);
+        for (let k = 0; k < trailCount; k++) {
+          if (particlesRef.current.length >= PARTICLE_CAP) break;
+          particlesRef.current.push({
+            x: fb.x, y: fb.y,
+            vx: (Math.random() - 0.5) * (isSpear ? 5 : 3),
+            vy: (Math.random() - 0.5) * (isSpear ? 5 : 3),
+            life: isSpear ? 14 : 8,
+            maxLife: isSpear ? 14 : 8,
+            size: 3,
+            color: fb.isSpecial ? '#ff80cc' : color,
+            isHeart: fb.isSpecial,
+          });
         }
 
         if (fb.progress >= 1) {
-            fireballsRef.current.splice(i, 1);
-            // Huge explosion at higher combos (scaled down division)
-            const explosionSize = 10 + Math.floor(comboRef.current / 50);
-            for(let j=0; j < explosionSize * 5; j++) {
-                particlesRef.current.push({
-                    x: fb.tx, 
-                    y: fb.ty, 
-                    vx: Math.random()*8-4, 
-                    vy: Math.random()*8-4, 
-                    life: 20,
-                    color: fb.isSpecial ? "#ff80cc" : fireballColor,
-                    isHeart: fb.isSpecial
-                });
-            }
-            
-            const wordIndex = wordsRef.current.findIndex(w => Math.abs(w.x - fb.tx) < 70);
-            if(wordIndex !== -1) {
-                const word = wordsRef.current[wordIndex];
-                const resistance = Math.min(word.typed.length / word.text.length, 0.9);
-                // Reduce impact pushback
-                word.y -= (5 * (1 - resistance) * scale);
-            }
-        }
-      });
-      
-      particlesRef.current.forEach((p, i) => { 
-        p.x += p.vx * dt; p.y += p.vy * dt; p.life -= 1 * dt; 
-        ctx.fillStyle = p.color || "orange"; 
-        if (p.isHeart) {                
-            const size = 3; // Smaller hearts
-            ctx.beginPath();
-            ctx.moveTo(p.x, p.y + size / 4);
-            ctx.bezierCurveTo(p.x, p.y, p.x - size / 2, p.y, p.x - size / 2, p.y + size / 2);
-            ctx.bezierCurveTo(p.x - size / 2, p.y + size * 0.75, p.x, p.y + size, p.x, p.y + size);
-            ctx.bezierCurveTo(p.x, p.y + size, p.x + size / 2, p.y + size * 0.75, p.x + size / 2, p.y + size / 2);
-            ctx.bezierCurveTo(p.x + size / 2, p.y, p.x, p.y, p.x, p.y + size / 4);
-            ctx.fill();
-        } else {                
-            ctx.fillRect(p.x, p.y, 3, 3);
-        }
-        if(p.life <= 0) particlesRef.current.splice(i, 1); 
-      });
-
-      // Update Words
-      for (let index = wordsRef.current.length - 1; index >= 0; index--) {
-        const word = wordsRef.current[index];
-        // Homing logic: move towards PLAYER.x, PLAYER.y
-        const dx = PLAYER.x - word.x;
-        const dy = PLAYER.y - word.y;
-        const dist = Math.sqrt(dx * dx + dy * dy);
-        
-        // Move towards player
-        word.x += (dx / dist) * word.speed * 2 * dt;
-        word.y += (dy / dist) * word.speed * 2 * dt;
-        
-        // Render word letter by letter to fix alignment with non-monospaced fonts
-        let currentX = word.x;
-        textCtx.font = `24px "Cinzel"`;
-        for (let i = 0; i < word.text.length; i++) {
-            const char = word.text[i];
-            const isTyped = i < word.typed.length;
-            
-            textCtx.fillStyle = isTyped ? (word.isSpecial ? "#ff80cc" : "#ff4500") : "#d1c7b7";
-            textCtx.fillText(char, currentX, word.y);
-            currentX += textCtx.measureText(char).width;
-        }
-
-        // Damage on contact with player
-        if (dist < 50) {
-          wordsRef.current.splice(index, 1);
-          
-          if (activeWordRef.current !== null) {
-              if (activeWordRef.current === index) {
-                  activeWordRef.current = null;
-              } else if (activeWordRef.current > index) {
-                  activeWordRef.current--;
-              }
+          // Impact.
+          const explosion = 8 + Math.floor(comboRef.current / 60);
+          for (let j = 0; j < explosion * 4; j++) {
+            if (particlesRef.current.length >= PARTICLE_CAP) break;
+            particlesRef.current.push({
+              x: fb.tx, y: fb.ty,
+              vx: Math.random() * 8 - 4,
+              vy: Math.random() * 8 - 4,
+              life: 20, maxLife: 20, size: 3,
+              color: fb.isSpecial ? '#ff80cc' : color,
+              isHeart: fb.isSpecial,
+            });
           }
-
-          setHealth(prev => {
-            const nextHealth = Math.max(0, prev - 4); // 4x damage
-            if (nextHealth === 0) setGameOver(true);
-            return nextHealth;
+          // Shockwave ring.
+          shockwavesRef.current.push({
+            x: fb.tx, y: fb.ty, radius: 4, maxRadius: isSpear ? 90 : 55,
+            color: fb.isSpecial
+              ? 'rgba(255,128,204,ALPHA)'
+              : isSpear
+                ? 'rgba(180,230,255,ALPHA)'
+                : 'rgba(255,160,60,ALPHA)',
           });
+          // Screen shake on impact — stronger for spears/specials.
+          const mag = fb.isSpecial ? 8 : isSpear ? 6 : 3;
+          shakeMagRef.current = Math.max(shakeMagRef.current, mag);
+          shakeUntilRef.current = Math.max(shakeUntilRef.current, time + 140);
+
+          // Knockback on nearby word.
+          const wIdx = wordsRef.current.findIndex(w => Math.abs(w.x - fb.tx) < 70);
+          if (wIdx !== -1) {
+            const w = wordsRef.current[wIdx];
+            const resistance = Math.min(w.typed.length / w.text.length, 0.9);
+            const scl = 1 + comboRef.current / 150;
+            w.y -= 5 * (1 - resistance) * scl;
+          }
+          fireballsRef.current.splice(i, 1);
         }
       }
-      animationFrameId = requestAnimationFrame(gameLoop);
-    };
-    gameLoop();
-    return () => { cancelAnimationFrame(animationFrameId); window.removeEventListener('keydown', handleKeyDown); };
-  }, [started, gameOver, paused]);
 
+      // ── Shockwaves.
+      for (let i = shockwavesRef.current.length - 1; i >= 0; i--) {
+        const sw = shockwavesRef.current[i];
+        sw.radius += 3.5 * dt;
+        drawShockwave(ctx, sw);
+        if (sw.radius >= sw.maxRadius) shockwavesRef.current.splice(i, 1);
+      }
+
+      // Decay shake magnitude once the window ends.
+      if (time > shakeUntilRef.current) shakeMagRef.current = 0;
+
+      // ── Particles.
+      for (let i = particlesRef.current.length - 1; i >= 0; i--) {
+        const p = particlesRef.current[i];
+        p.x += p.vx * dt;
+        p.y += p.vy * dt;
+        p.life -= dt;
+        if (p.life <= 0) {
+          particlesRef.current.splice(i, 1);
+          continue;
+        }
+        drawParticle(ctx, p);
+      }
+      // Cap by dropping oldest if overflowed.
+      if (particlesRef.current.length > PARTICLE_CAP) {
+        particlesRef.current.splice(0, particlesRef.current.length - PARTICLE_CAP);
+      }
+
+      // ── Words: homing movement + aura + text rendering.
+      const widths = charWidthsRef.current;
+      textCtx.font = '24px "Cinzel", serif';
+      textCtx.textBaseline = 'alphabetic';
+
+      for (let i = wordsRef.current.length - 1; i >= 0; i--) {
+        const w = wordsRef.current[i];
+        const dx = PLAYER.x - w.x;
+        const dy = PLAYER.y - w.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist > 0.001) {
+          const v = (w.speed * 2 * dt) / dist;
+          w.x += dx * v;
+          w.y += dy * v;
+        }
+
+        // Compute total word width for aura sizing.
+        let wordW = 0;
+        for (let k = 0; k < w.text.length; k++) {
+          wordW += widths[w.text[k]] ?? 14;
+        }
+        drawWordAura(ctx, w, wordW, time);
+
+        // Render text letter-by-letter with cached widths.
+        let cx = w.x;
+        for (let k = 0; k < w.text.length; k++) {
+          const ch = w.text[k];
+          const typed = k < w.typed.length;
+          textCtx.fillStyle = typed ? (w.isSpecial ? '#ff80cc' : '#ff6a20') : '#e6dcc5';
+          if (typed) {
+            textCtx.shadowBlur = 12;
+            textCtx.shadowColor = w.isSpecial ? '#ff80cc' : '#ff4500';
+          } else {
+            textCtx.shadowBlur = 4;
+            textCtx.shadowColor = 'rgba(0,0,0,0.9)';
+          }
+          textCtx.fillText(ch, cx, w.y);
+          cx += widths[ch] ?? 14;
+        }
+        textCtx.shadowBlur = 0;
+
+        // Contact damage.
+        if (dist < 50) {
+          wordsRef.current.splice(i, 1);
+          if (activeWordRef.current !== null) {
+            if (activeWordRef.current === i) activeWordRef.current = null;
+            else if (activeWordRef.current > i) activeWordRef.current -= 1;
+          }
+          healthRef.current = Math.max(0, healthRef.current - 4);
+          shakeMagRef.current = Math.max(shakeMagRef.current, 10);
+          shakeUntilRef.current = Math.max(shakeUntilRef.current, time + 220);
+          // Red blood burst.
+          for (let j = 0; j < 28; j++) {
+            if (particlesRef.current.length >= PARTICLE_CAP) break;
+            const ang = Math.random() * Math.PI * 2;
+            const spd = 2 + Math.random() * 5;
+            particlesRef.current.push({
+              x: PLAYER.x, y: PLAYER.y,
+              vx: Math.cos(ang) * spd, vy: Math.sin(ang) * spd,
+              life: 22, maxLife: 22, size: 3,
+              color: '#9b0000',
+            });
+          }
+          if (healthRef.current === 0) {
+            gameOverRef.current = true;
+            // Freeze final stats then unblock React.
+            const accuracy = totalKeyRef.current > 0
+              ? Math.round((correctKeyRef.current / totalKeyRef.current) * 100) : 100;
+            const top = rankForCombo(maxComboRef.current);
+            setFinalStats({
+              score: scoreRef.current,
+              maxCombo: maxComboRef.current,
+              accuracy,
+              topRank: top,
+            });
+            setGameOver(true);
+          }
+        }
+      }
+
+      // ── HUD tick — 10 Hz is plenty for a counter.
+      if (time - lastHudBump > 100) {
+        lastHudBump = time;
+        const accuracy = totalKeyRef.current > 0
+          ? Math.round((correctKeyRef.current / totalKeyRef.current) * 100) : 100;
+        setHudStats({
+          score: scoreRef.current,
+          health: healthRef.current,
+          combo: comboRef.current,
+          maxCombo: maxComboRef.current,
+          difficulty: difficultyRef.current,
+          accuracy,
+          isBlessed: isBlessedRef.current,
+          currentRank: rankForCombo(comboRef.current),
+        });
+      }
+    };
+
+    rafId = requestAnimationFrame(loop);
+    return () => {
+      cancelAnimationFrame(rafId);
+      window.removeEventListener('keydown', keyListener);
+    };
+  }, [started, gameOver, handleChar]);
+
+  // ── Side screen: romance easter egg.
+  const runAway = (e?: React.MouseEvent | React.TouchEvent) => {
+    if (e) { e.preventDefault(); e.stopPropagation(); }
+    const maxX = DESIGN_W - 200;
+    const maxY = DESIGN_H - 100;
+    setNoHoverPos({
+      x: Math.max(50, Math.floor(Math.random() * maxX)),
+      y: Math.max(50, Math.floor(Math.random() * maxY)),
+    });
+  };
+
+  // UI render — everything below is pure layout.
   return (
-    <div 
-        className="w-full h-[100dvh] bg-black flex items-center justify-center font-serif text-[#d1c7b7] overflow-hidden"
-        onClick={() => {
-            if (started && !gameOver && !paused && mobileInputRef.current) {
-                mobileInputRef.current.focus();
-                setIsMobileFocused(true);
-            }
-        }}
+    <div
+      className="w-full h-[100dvh] bg-black flex items-center justify-center font-serif text-[#d1c7b7] overflow-hidden"
+      onClick={() => {
+        if (started && !gameOver && !paused && mobileInputRef.current) {
+          mobileInputRef.current.focus();
+          setIsMobileFocused(true);
+        }
+      }}
     >
       {/* Hidden input for mobile keyboard triggering */}
-      <input 
+      <input
         ref={mobileInputRef}
         type="text"
         className="absolute top-[-100px] left-0 opacity-0"
         value=""
         onBlur={() => setIsMobileFocused(false)}
         onChange={(e) => {
-            const val = e.target.value;
-            if (val.length > 0) {
-                const char = val[val.length - 1];
-                window.dispatchEvent(new KeyboardEvent('keydown', { key: char }));
-            }
+          const val = e.target.value;
+          if (val.length > 0) handleChar(val[val.length - 1]);
         }}
         autoComplete="off"
         autoCapitalize="none"
         autoCorrect="off"
-        spellCheck="false"
+        spellCheck={false}
       />
 
-      <div className="relative shrink-0 w-[1024px] h-[768px] bg-[radial-gradient(circle_at_center,#1a1a1a_0%,#050505_100%)] border-4 border-[#1c1c1c] shadow-2xl overflow-hidden" 
-           style={{border: '4px solid #1c1c1c', transform: `scale(${scale})`, transformOrigin: 'center center'}}>
-        <canvas ref={canvasRef} width={1024} height={768} className="absolute top-0 left-0 z-10" />
-        <canvas ref={textCanvasRef} width={1024} height={768} className="absolute top-0 left-0 z-40 pointer-events-none" />
-        
-        <img 
-          src={manusCasting ? "/casting2.png" : "/idle1.png"} 
-          alt="Manus"
-          className="absolute bottom-4 left-[512px] -translate-x-1/2 w-32 h-32 object-contain transition-all duration-100 z-20"
-        />
+      <div
+        className="relative shrink-0 w-[1024px] h-[768px] bg-black border-4 border-[#1c1c1c] shadow-[0_0_60px_rgba(0,0,0,0.8)] overflow-hidden ce-frame"
+        style={{transform: `scale(${scale})`, transformOrigin: 'center center'}}
+      >
+        {/* Shake wrapper — only wraps the canvases + player sprite so UI doesn't jitter. */}
+        <div ref={shakeRef} className="absolute top-0 left-0 w-full h-full will-change-transform">
+          <canvas ref={bgCanvasRef} width={DESIGN_W} height={DESIGN_H} className="absolute top-0 left-0 z-0" />
+          <canvas ref={canvasRef} width={DESIGN_W} height={DESIGN_H} className="absolute top-0 left-0 z-10" />
+          <canvas ref={textCanvasRef} width={DESIGN_W} height={DESIGN_H} className="absolute top-0 left-0 z-40 pointer-events-none" />
+          <img
+            ref={playerImgRef}
+            src="/idle1.png"
+            data-state="idle"
+            alt="Manus"
+            className="absolute bottom-4 left-[512px] -translate-x-1/2 w-32 h-32 object-contain z-20 player-sprite"
+            draggable={false}
+          />
+        </div>
 
-        {!started && (
-          <div className="absolute top-0 left-0 w-full h-full bg-black/95 flex flex-col items-center justify-center z-50 p-8 text-center">
-            <h1 className="font-[Cinzel] text-5xl text-amber-700 mb-8 tracking-[0.3em] drop-shadow-[0_0_15px_rgba(180,83,9,0.4)]">CURSED ECHOES</h1>
-            
-            <div className="max-w-md bg-amber-950/20 border border-amber-900/40 p-6 rounded mb-12 backdrop-blur-sm shadow-[0_0_30px_rgba(0,0,0,0.5)]">
-              <h2 className="font-[Cinzel] text-amber-600 text-xl mb-4 tracking-widest uppercase border-b border-amber-900/30 pb-2">How to Play</h2>
-              <ul className="text-amber-100/70 text-sm space-y-3 font-serif tracking-wide text-left list-none">
-                <li className="flex items-start gap-2">
-                  <span className="text-amber-600 mt-1">◈</span>
-                  <span>Type the echoes appearing from the darkness to banish them with fire.</span>
-                </li>
-                <li className="flex items-start gap-2">
-                  <span className="text-amber-600 mt-1">◈</span>
-                  <span>Do not let the echoes reach your position, or your life will wither.</span>
-                </li>
-                <li className="flex items-start gap-2">
-                  <span className="text-amber-600 mt-1">◈</span>
-                  <span>Maintain your combo to ascend through the ranks of the Abyss.</span>
-                </li>
-              </ul>
-            </div>
+        {!started && <MenuScreen onStart={() => setStarted(true)} />}
 
-            <button 
-                onClick={() => setStarted(true)} 
-                className="group relative px-16 py-6 overflow-hidden border border-amber-900 bg-black text-amber-600 font-[Cinzel] text-2xl tracking-[0.3em] transition-all hover:text-amber-400 hover:border-amber-500 shadow-[0_0_20px_rgba(127,29,29,0.3)]"
-            >
-                <div className="absolute inset-0 w-0 bg-amber-900/20 transition-all duration-300 ease-out group-hover:w-full"></div>
-                <span className="relative z-10 animate-pulse">CHALLENGE THE ABYSS</span>
-            </button>
-            <p className="mt-8 text-amber-900/40 font-serif text-xs tracking-widest uppercase">The darkness waits for no one</p>
-          </div>
-        )}
-
-        {gameOver && !showSecretScreen && (
-          <div className="absolute top-0 left-0 w-full h-full bg-black/95 z-50 flex flex-col items-center justify-center fade-in backdrop-blur-sm">
-            <div className="font-[Cinzel] text-[100px] text-[#8b0000] font-bold tracking-[0.15em] drop-shadow-[0_0_20px_rgba(139,0,0,0.5)] zoom-in">YOU DIED</div>
-            <div className="mt-8 text-2xl opacity-60 font-[Cinzel] slide-in" style={{ animationDelay: '300ms' }}>Souls Harvested: {score}</div>
-            <div className="mt-2 text-2xl opacity-60 font-[Cinzel] slide-in flex items-center" style={{ animationDelay: '500ms' }}>
-              Max Combo: {maxCombo}
-              <img src={`/${topRank.id}-removebg-preview.png`} alt={topRank.label} className="h-10 object-contain mx-2" />
-            </div>
-            <div className="mt-2 text-2xl opacity-60 font-[Cinzel] slide-in" style={{ animationDelay: '700ms' }}>Accuracy: {accuracy}%</div>
-            
-            <div className="mt-12 flex flex-col items-center fade-in" style={{ animationDelay: '1000ms' }}>
-                <p className="text-lg text-[#ff4444] font-bold mb-4 font-[Cinzel] tracking-[0.5em] uppercase drop-shadow-[0_0_15px_rgba(255,0,0,0.8)] animate-pulse">Secret Password</p>
-                <form onSubmit={(e) => {
-                    e.preventDefault();
-                    if (secretPassword.toUpperCase() === 'ILOVEMYGF') {
-                        setShowSecretScreen(true);
-                    } else {
-                        setPasswordError(true);
-                        setTimeout(() => setPasswordError(false), 500);
-                        setSecretPassword('');
-                    }
-                }} className="flex">
-                    <input 
-                        type="password" 
-                        value={secretPassword}
-                        onChange={(e) => setSecretPassword(e.target.value)}
-                        className={`bg-[#0a0000] border ${passwordError ? 'border-red-500 shadow-[0_0_20px_rgba(255,0,0,0.6)]' : 'border-[#ff4444]/60 shadow-[0_0_20px_rgba(255,0,0,0.3)]'} text-red-100 font-serif text-center px-6 py-3 outline-none focus:border-[#ff4444] focus:shadow-[0_0_25px_rgba(255,0,0,0.5)] transition-all tracking-[0.4em] placeholder:text-[#ff4444]/30 w-64 ${passwordError ? 'animate-[shake_0.5s_ease-in-out]' : ''}`}
-                        placeholder="..."
-                    />
-                </form>
-            </div>
-
-            <button onClick={() => location.reload()} className="mt-12 px-8 py-2 border border-amber-900/40 hover:bg-amber-900/10 transition-colors uppercase text-lg tracking-widest font-[Cinzel] fade-in" style={{ animationDelay: '1500ms' }}>Try Again</button>
-
-            <div className="absolute right-8 bottom-8 flex flex-col items-center z-[60] fade-in w-48" style={{ animationDelay: '1200ms' }}>
-                <h2 className="text-[#8b0000] font-[Cinzel] tracking-widest text-[1rem] leading-none mb-3 border-b border-[#8b0000]/50 pb-1 drop-shadow-[0_0_10px_rgba(139,0,0,0.8)] uppercase">Hall of Records</h2>
-                {highscores.length === 0 ? (
-                    <div className="text-amber-700/50 font-[Cinzel] italic text-xs">No legendary souls yet...</div>
-                ) : highscores.map((hs, i) => (
-                    <div key={i} className="flex flex-col w-full mb-2 bg-black/60 px-3 py-2 rounded-sm border border-amber-900/40 hover:bg-amber-900/10 transition-colors shadow-lg">
-                        <div className="flex justify-between items-end mb-1">
-                            <span className="text-amber-700/80 font-[Cinzel] text-xs tracking-widest">Rank {i + 1}</span>
-                            <span className="text-[#8b0000] font-[Cinzel] text-xl drop-shadow-[0_0_8px_rgba(139,0,0,0.6)] font-bold">{hs.souls.toString().padStart(6, '0')}</span>
-                        </div>
-                        <div className="flex justify-between border-t border-amber-900/30 pt-1 mt-1">
-                            <span className="text-[#a19787] font-[Cinzel] text-[9px] uppercase tracking-widest">Max Combo</span>
-                            <span className="text-amber-500 font-[Cinzel] text-xs font-bold">{hs.maxCombo}</span>
-                        </div>
-                    </div>
-                ))}
-            </div>
-          </div>
+        {gameOver && !showSecretScreen && finalStats && (
+          <GameOverScreen
+            finalStats={finalStats}
+            highscores={highscores}
+            secretPassword={secretPassword}
+            passwordError={passwordError}
+            setSecretPassword={setSecretPassword}
+            setPasswordError={setPasswordError}
+            onUnlock={() => setShowSecretScreen(true)}
+          />
         )}
 
         {showSecretScreen && !yesChecked && (
-            <div className="absolute top-0 left-0 w-full h-full bg-[#050002] z-[100] flex flex-col items-center justify-center fade-in">
-                <button 
-                    onClick={() => setShowSecretScreen(false)} 
-                    className="absolute top-8 left-8 z-[120] text-[#ff80cc]/60 hover:text-[#ff80cc] font-[Cinzel] tracking-widest transition-all drop-shadow-[0_0_10px_rgba(255,128,204,0.3)] hover:drop-shadow-[0_0_15px_rgba(255,128,204,0.8)]"
-                >
-                    ← BACK
-                </button>
-
-                <img 
-                    src="/Jessyka.gif" 
-                    alt="Jessyka" 
-                    className="w-auto h-[350px] object-cover rounded-2xl mb-8"
-                />
-                
-                <h1 className="text-4xl md:text-5xl text-[#ff80cc] font-[Cinzel] font-bold tracking-widest drop-shadow-[0_0_20px_rgba(255,128,204,0.9)] animate-pulse text-center mb-12">
-                    Får jag chans på dig? &lt;3
-                </h1>
-
-                <div className="flex gap-16 w-full justify-center">
-                    <label className="flex items-center gap-2 cursor-pointer group">
-                        <div className="relative flex items-center justify-center">
-                            <input 
-                                type="checkbox" 
-                                checked={yesChecked}
-                                onChange={(e) => {
-                                    setYesChecked(e.target.checked);
-                                }}
-                                className="peer appearance-none w-4 h-4 border border-[#ff80cc]/50 rounded-[2px] bg-black/50 checked:bg-[#ff80cc] checked:border-[#ff80cc] transition-all cursor-pointer shadow-[0_0_10px_rgba(255,128,204,0.2)]"
-                            />
-                            <svg className="absolute w-2.5 h-2.5 text-[#050002] pointer-events-none opacity-0 peer-checked:opacity-100 transition-opacity" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="4"><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
-                        </div>
-                        <span className="text-xl text-[#ff80cc]/70 font-[Cinzel] tracking-widest group-hover:text-[#ff80cc] group-hover:drop-shadow-[0_0_15px_rgba(255,128,204,0.8)] transition-all">JA OMG</span>
-                    </label>
-
-                    <label 
-                        className={`flex items-center gap-2 cursor-pointer group ${noHoverPos ? 'absolute' : ''} transition-all duration-100 z-[110]`}
-                        style={noHoverPos ? { left: `${noHoverPos.x}px`, top: `${noHoverPos.y}px` } : {}}
-                        onMouseEnter={runAway}
-                        onClick={runAway}
-                        onTouchStart={runAway}
-                    >
-                        <div className="relative flex items-center justify-center pointer-events-none">
-                            <input 
-                                type="checkbox" 
-                                checked={false}
-                                onChange={() => {}}
-                                className="peer appearance-none w-4 h-4 border border-[#ff80cc]/50 rounded-[2px] bg-black/50 transition-all shadow-[0_0_10px_rgba(255,128,204,0.2)]"
-                                tabIndex={-1}
-                            />
-                            <svg className="absolute w-2.5 h-2.5 text-[#050002] opacity-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="4"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
-                        </div>
-                        <span className="text-xl text-[#ff80cc]/70 font-[Cinzel] tracking-widest group-hover:text-[#ff80cc] group-hover:drop-shadow-[0_0_15px_rgba(255,128,204,0.8)] transition-all pointer-events-none">NEJ USCHH</span>
-                    </label>
-                </div>
-            </div>
+          <SecretAskScreen
+            yesChecked={yesChecked}
+            setYesChecked={setYesChecked}
+            noHoverPos={noHoverPos}
+            runAway={runAway}
+            onBack={() => setShowSecretScreen(false)}
+          />
         )}
 
         {showSecretScreen && yesChecked && (
-            <div className="absolute top-0 left-0 w-full h-full bg-[#050002] z-[100] flex flex-col items-center justify-center fade-in">
-                <button 
-                    onClick={() => { setYesChecked(false); setNoHoverPos(null); }} 
-                    className="absolute top-8 left-8 z-[120] text-[#ff80cc]/60 hover:text-[#ff80cc] font-[Cinzel] tracking-widest transition-all drop-shadow-[0_0_10px_rgba(255,128,204,0.3)] hover:drop-shadow-[0_0_15px_rgba(255,128,204,0.8)]"
-                >
-                    ← BACK
-                </button>
-
-                <h1 className="text-4xl md:text-5xl text-[#ff80cc] font-[Cinzel] font-bold tracking-widest drop-shadow-[0_0_20px_rgba(255,128,204,0.9)] animate-pulse text-center mb-8">
-                    CLICK ME!!!!
-                </h1>
-                
-                <img 
-                    src="/placeholder.jpg" 
-                    alt="Placeholder" 
-                    className="w-auto h-[350px] object-cover rounded-2xl mb-8 hover:shadow-[0_0_30px_rgba(255,128,204,0.6)] transition-all active:scale-95 cursor-none"
-                    onMouseEnter={(e) => setKissPos({ x: e.clientX, y: e.clientY })}
-                    onMouseMove={(e) => setKissPos({ x: e.clientX, y: e.clientY })}
-                    onMouseLeave={() => setKissPos(null)}
-                    onClick={(e) => {
-                        const audio = new Audio('/smooch.mp3');
-                        audio.play().catch(err => console.log('Audio playback failed:', err));
-
-                        // Spawn hearts
-                        const rect = e.currentTarget.getBoundingClientRect();
-                        const xBase = e.clientX - rect.left;
-                        const yBase = e.clientY - rect.top;
-                        
-                        // we'll get the real absolute coordinates by removing rect offsets or just use client bounds
-                        // Since we have absolute scaling, it's safer to use event.clientX/Y from the wrapper, but let's just do random screen positions
-                        
-                        const numHearts = 15;
-                        const newHearts = Array.from({length: numHearts}).map((_, i) => ({
-                            id: Date.now() + i + Math.random(),
-                            x: Math.random() * 1024,
-                            y: Math.random() * 768,
-                            scale: Math.random() * 0.8 + 0.5
-                        }));
-                        
-                        setSecretHearts(prev => [...prev, ...newHearts]);
-                        
-                        setTimeout(() => {
-                            setSecretHearts(prev => prev.filter(h => !newHearts.find(n => n.id === h.id)));
-                        }, 2000);
-                    }}
-                />
-                
-                <h1 className="text-4xl md:text-5xl text-[#ff80cc] font-[Cinzel] font-bold tracking-widest drop-shadow-[0_0_20px_rgba(255,128,204,0.9)] animate-pulse text-center">
-                    Jag älskar dig baby &lt;333
-                </h1>
-
-                {secretHearts.map(heart => (
-                    <div 
-                        key={heart.id} 
-                        className="absolute pointer-events-none z-[120] animate-float-heart"
-                        style={{ left: heart.x, top: heart.y, '--scale': heart.scale } as any}
-                    >
-                        <span className="text-6xl drop-shadow-[0_0_10px_rgba(255,128,204,0.8)]">❤️</span>
-                    </div>
-                ))}
-            </div>
+          <SecretLoveScreen
+            secretHearts={secretHearts}
+            setSecretHearts={setSecretHearts}
+            setKissPos={setKissPos}
+            smoochAudio={smoochAudioRef.current}
+            onBack={() => { setYesChecked(false); setNoHoverPos(null); }}
+          />
         )}
 
         {started && !gameOver && (
           <>
-            <button onClick={() => setPaused(!paused)} className="absolute top-8 right-8 z-50 px-4 py-2 border border-amber-900 text-amber-600 font-[Cinzel] hover:bg-amber-900/20">{paused ? "RESUME" : "PAUSE"}</button>
-            <div className="absolute top-8 left-8 flex flex-col gap-2 z-30">
-                {isBlessed && (
-                    <div className="text-xl text-[#ff80cc] font-[Cinzel] font-bold tracking-widest animate-pulse drop-shadow-[0_0_15px_rgba(255,128,204,0.8)] mb-1">
-                        BLESSED BY GODESS
-                    </div>
-                )}
-                <div className={`h-4 w-[300px] border transition-all duration-300 ${isBlessed ? 'bg-[#1a000d] border-[#ff80cc] shadow-[0_0_20px_rgba(255,128,204,0.8)]' : 'bg-[#1a0a0a] border-[#3d1a1a]'}`}>
-                    <div className={`h-full transition-all duration-300 ${isBlessed ? 'bg-linear-to-r from-[#ff0080] to-[#ff80cc]' : 'bg-linear-to-r from-[#8b0000] to-[#ff0000]'}`} style={{width: `${(health / 10) * 100}%`}}></div>
-                </div>
-                <div className="text-xl opacity-60 font-[Cinzel]">Souls: {score.toString().padStart(6, '0')}</div>
-                <div className="text-xl opacity-60 font-[Cinzel]">Difficulty: {difficulty}</div>
-                <div className="text-sm opacity-60 font-[Cinzel]">Accuracy: {accuracy}%</div>
-                {/* Combo Display */}
-                <div className="flex flex-col items-start gap-1 mt-2">
-                    <img 
-                        src={`/${currentRank.id}-removebg-preview.png`}
-                        alt={currentRank.label}
-                        className={`h-18 object-contain ${currentRank.id === 'SSS' ? 'animate-shake' : ''}`}
-                    />
-                    <div className="text-xl opacity-60 font-[Cinzel]">x{combo}</div>
-                </div>
-            </div>
+            <button
+              onClick={() => setPaused(p => !p)}
+              className="absolute top-8 right-8 z-50 px-4 py-2 border border-amber-900 text-amber-600 font-[Cinzel] hover:bg-amber-900/20 tracking-widest"
+            >
+              {paused ? 'RESUME' : 'PAUSE'}
+            </button>
+            <Hud stats={hudStats} />
           </>
         )}
 
         {started && !gameOver && !paused && !isMobileFocused && (
-            <div className="absolute top-[80%] left-1/2 -translate-x-1/2 z-[60] bg-black/60 px-6 py-2 border border-amber-900/40 animate-pulse pointer-events-none md:hidden">
-                <span className="font-[Cinzel] tracking-[0.2em] text-amber-600/80 uppercase">Tap screen to type</span>
-            </div>
+          <div className="absolute top-[80%] left-1/2 -translate-x-1/2 z-[60] bg-black/60 px-6 py-2 border border-amber-900/40 animate-pulse pointer-events-none md:hidden">
+            <span className="font-[Cinzel] tracking-[0.2em] text-amber-600/80 uppercase">Tap screen to type</span>
+          </div>
         )}
       </div>
 
       {kissPos && (
-          <img 
-              src="/kiss-removebg-preview.png"
-              alt="Kiss Cursor"
-              className="fixed pointer-events-none z-[9999] w-24 h-24 object-contain -translate-x-1/2 -translate-y-1/2"
-              style={{ left: kissPos.x, top: kissPos.y }}
-          />
+        <img
+          src="/kiss-removebg-preview.png"
+          alt="Kiss Cursor"
+          className="fixed pointer-events-none z-[9999] w-24 h-24 object-contain -translate-x-1/2 -translate-y-1/2"
+          style={{left: kissPos.x, top: kissPos.y}}
+        />
       )}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// Screens — pulled out so App's render stays focused on layout.
+// ─────────────────────────────────────────────────────────────
+
+function MenuScreen({onStart}: {onStart: () => void}) {
+  return (
+    <div className="absolute top-0 left-0 w-full h-full bg-black/90 flex flex-col items-center justify-center z-50 p-8 text-center ce-menu-bg">
+      <div className="ce-menu-embers" aria-hidden />
+      <h1 className="relative font-[Cinzel] text-5xl md:text-6xl text-amber-700 mb-2 tracking-[0.3em] drop-shadow-[0_0_25px_rgba(180,83,9,0.6)] ce-title">
+        CURSED ECHOES
+      </h1>
+      <div className="ce-sigil mb-8" aria-hidden />
+      <div className="relative max-w-md bg-amber-950/20 border border-amber-900/40 p-6 rounded mb-12 backdrop-blur-sm shadow-[0_0_30px_rgba(0,0,0,0.5)]">
+        <h2 className="font-[Cinzel] text-amber-600 text-xl mb-4 tracking-widest uppercase border-b border-amber-900/30 pb-2">How to Play</h2>
+        <ul className="text-amber-100/70 text-sm space-y-3 font-serif tracking-wide text-left list-none">
+          <li className="flex items-start gap-2"><span className="text-amber-600 mt-1">◈</span><span>Type the echoes appearing from the darkness to banish them with fire.</span></li>
+          <li className="flex items-start gap-2"><span className="text-amber-600 mt-1">◈</span><span>Do not let the echoes reach your position, or your life will wither.</span></li>
+          <li className="flex items-start gap-2"><span className="text-amber-600 mt-1">◈</span><span>Maintain your combo to ascend through the ranks of the Abyss.</span></li>
+        </ul>
+      </div>
+      <button
+        onClick={onStart}
+        className="relative group px-16 py-6 overflow-hidden border border-amber-900 bg-black text-amber-600 font-[Cinzel] text-2xl tracking-[0.3em] transition-all hover:text-amber-300 hover:border-amber-500 shadow-[0_0_20px_rgba(127,29,29,0.3)] ce-start-btn"
+      >
+        <div className="absolute inset-0 w-0 bg-amber-900/20 transition-all duration-300 ease-out group-hover:w-full"></div>
+        <span className="relative z-10 animate-pulse">CHALLENGE THE ABYSS</span>
+      </button>
+      <p className="mt-8 text-amber-900/40 font-serif text-xs tracking-widest uppercase">The darkness waits for no one</p>
+    </div>
+  );
+}
+
+function GameOverScreen({
+  finalStats, highscores, secretPassword, passwordError, setSecretPassword, setPasswordError, onUnlock,
+}: {
+  finalStats: {score: number; maxCombo: number; accuracy: number; topRank: Rank};
+  highscores: HighScore[];
+  secretPassword: string;
+  passwordError: boolean;
+  setSecretPassword: (v: string) => void;
+  setPasswordError: (v: boolean) => void;
+  onUnlock: () => void;
+}) {
+  return (
+    <div className="absolute top-0 left-0 w-full h-full bg-black/95 z-50 flex flex-col items-center justify-center fade-in backdrop-blur-sm ce-death-bg">
+      <div className="ce-death-embers" aria-hidden />
+      <div className="font-[Cinzel] text-[100px] text-[#8b0000] font-bold tracking-[0.15em] drop-shadow-[0_0_25px_rgba(139,0,0,0.7)] zoom-in ce-died">YOU DIED</div>
+      <div className="mt-8 text-2xl opacity-60 font-[Cinzel] slide-in" style={{animationDelay: '300ms'}}>Souls Harvested: {finalStats.score}</div>
+      <div className="mt-2 text-2xl opacity-60 font-[Cinzel] slide-in flex items-center" style={{animationDelay: '500ms'}}>
+        Max Combo: {finalStats.maxCombo}
+        <img src={`/${finalStats.topRank.id}-removebg-preview.png`} alt={finalStats.topRank.label} className="h-10 object-contain mx-2" />
+      </div>
+      <div className="mt-2 text-2xl opacity-60 font-[Cinzel] slide-in" style={{animationDelay: '700ms'}}>Accuracy: {finalStats.accuracy}%</div>
+
+      <div className="mt-12 flex flex-col items-center fade-in" style={{animationDelay: '1000ms'}}>
+        <p className="text-lg text-[#ff4444] font-bold mb-4 font-[Cinzel] tracking-[0.5em] uppercase drop-shadow-[0_0_15px_rgba(255,0,0,0.8)] animate-pulse">Secret Password</p>
+        <form onSubmit={(e) => {
+          e.preventDefault();
+          if (secretPassword.toUpperCase() === 'ILOVEMYGF') {
+            onUnlock();
+          } else {
+            setPasswordError(true);
+            window.setTimeout(() => setPasswordError(false), 500);
+            setSecretPassword('');
+          }
+        }} className="flex">
+          <input
+            type="password"
+            value={secretPassword}
+            onChange={(e) => setSecretPassword(e.target.value)}
+            className={`bg-[#0a0000] border ${passwordError ? 'border-red-500 shadow-[0_0_20px_rgba(255,0,0,0.6)]' : 'border-[#ff4444]/60 shadow-[0_0_20px_rgba(255,0,0,0.3)]'} text-red-100 font-serif text-center px-6 py-3 outline-none focus:border-[#ff4444] focus:shadow-[0_0_25px_rgba(255,0,0,0.5)] transition-all tracking-[0.4em] placeholder:text-[#ff4444]/30 w-64 ${passwordError ? 'animate-[shake_0.5s_ease-in-out]' : ''}`}
+            placeholder="..."
+          />
+        </form>
+      </div>
+
+      <button onClick={() => location.reload()} className="mt-12 px-8 py-2 border border-amber-900/40 hover:bg-amber-900/10 transition-colors uppercase text-lg tracking-widest font-[Cinzel] fade-in" style={{animationDelay: '1500ms'}}>Try Again</button>
+
+      <div className="absolute right-8 bottom-8 flex flex-col items-center z-[60] fade-in w-48" style={{animationDelay: '1200ms'}}>
+        <h2 className="text-[#8b0000] font-[Cinzel] tracking-widest text-[1rem] leading-none mb-3 border-b border-[#8b0000]/50 pb-1 drop-shadow-[0_0_10px_rgba(139,0,0,0.8)] uppercase">Hall of Records</h2>
+        {highscores.length === 0 ? (
+          <div className="text-amber-700/50 font-[Cinzel] italic text-xs">No legendary souls yet...</div>
+        ) : highscores.map((hs, i) => (
+          <div key={i} className="flex flex-col w-full mb-2 bg-black/60 px-3 py-2 rounded-sm border border-amber-900/40 hover:bg-amber-900/10 transition-colors shadow-lg">
+            <div className="flex justify-between items-end mb-1">
+              <span className="text-amber-700/80 font-[Cinzel] text-xs tracking-widest">Rank {i + 1}</span>
+              <span className="text-[#8b0000] font-[Cinzel] text-xl drop-shadow-[0_0_8px_rgba(139,0,0,0.6)] font-bold">{hs.souls.toString().padStart(6, '0')}</span>
+            </div>
+            <div className="flex justify-between border-t border-amber-900/30 pt-1 mt-1">
+              <span className="text-[#a19787] font-[Cinzel] text-[9px] uppercase tracking-widest">Max Combo</span>
+              <span className="text-amber-500 font-[Cinzel] text-xs font-bold">{hs.maxCombo}</span>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function SecretAskScreen({
+  yesChecked, setYesChecked, noHoverPos, runAway, onBack,
+}: {
+  yesChecked: boolean;
+  setYesChecked: (v: boolean) => void;
+  noHoverPos: {x: number; y: number} | null;
+  runAway: (e?: React.MouseEvent | React.TouchEvent) => void;
+  onBack: () => void;
+}) {
+  return (
+    <div className="absolute top-0 left-0 w-full h-full bg-[#050002] z-[100] flex flex-col items-center justify-center fade-in">
+      <button onClick={onBack} className="absolute top-8 left-8 z-[120] text-[#ff80cc]/60 hover:text-[#ff80cc] font-[Cinzel] tracking-widest transition-all drop-shadow-[0_0_10px_rgba(255,128,204,0.3)] hover:drop-shadow-[0_0_15px_rgba(255,128,204,0.8)]">← BACK</button>
+      <img src="/Jessyka.gif" alt="Jessyka" className="w-auto h-[350px] object-cover rounded-2xl mb-8" />
+      <h1 className="text-4xl md:text-5xl text-[#ff80cc] font-[Cinzel] font-bold tracking-widest drop-shadow-[0_0_20px_rgba(255,128,204,0.9)] animate-pulse text-center mb-12">
+        Får jag chans på dig? &lt;3
+      </h1>
+      <div className="flex gap-16 w-full justify-center">
+        <label className="flex items-center gap-2 cursor-pointer group">
+          <div className="relative flex items-center justify-center">
+            <input
+              type="checkbox"
+              checked={yesChecked}
+              onChange={(e) => setYesChecked(e.target.checked)}
+              className="peer appearance-none w-4 h-4 border border-[#ff80cc]/50 rounded-[2px] bg-black/50 checked:bg-[#ff80cc] checked:border-[#ff80cc] transition-all cursor-pointer shadow-[0_0_10px_rgba(255,128,204,0.2)]"
+            />
+            <svg className="absolute w-2.5 h-2.5 text-[#050002] pointer-events-none opacity-0 peer-checked:opacity-100 transition-opacity" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="4"><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
+          </div>
+          <span className="text-xl text-[#ff80cc]/70 font-[Cinzel] tracking-widest group-hover:text-[#ff80cc] group-hover:drop-shadow-[0_0_15px_rgba(255,128,204,0.8)] transition-all">JA OMG</span>
+        </label>
+        <label
+          className={`flex items-center gap-2 cursor-pointer group ${noHoverPos ? 'absolute' : ''} transition-all duration-100 z-[110]`}
+          style={noHoverPos ? {left: `${noHoverPos.x}px`, top: `${noHoverPos.y}px`} : {}}
+          onMouseEnter={runAway}
+          onClick={runAway}
+          onTouchStart={runAway}
+        >
+          <div className="relative flex items-center justify-center pointer-events-none">
+            <input type="checkbox" checked={false} onChange={() => {}} className="peer appearance-none w-4 h-4 border border-[#ff80cc]/50 rounded-[2px] bg-black/50 transition-all shadow-[0_0_10px_rgba(255,128,204,0.2)]" tabIndex={-1} />
+            <svg className="absolute w-2.5 h-2.5 text-[#050002] opacity-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="4"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+          </div>
+          <span className="text-xl text-[#ff80cc]/70 font-[Cinzel] tracking-widest group-hover:text-[#ff80cc] group-hover:drop-shadow-[0_0_15px_rgba(255,128,204,0.8)] transition-all pointer-events-none">NEJ USCHH</span>
+        </label>
+      </div>
+    </div>
+  );
+}
+
+function SecretLoveScreen({
+  secretHearts, setSecretHearts, setKissPos, smoochAudio, onBack,
+}: {
+  secretHearts: {id: number; x: number; y: number; scale: number}[];
+  setSecretHearts: React.Dispatch<React.SetStateAction<{id: number; x: number; y: number; scale: number}[]>>;
+  setKissPos: (p: {x: number; y: number} | null) => void;
+  smoochAudio: HTMLAudioElement | null;
+  onBack: () => void;
+}) {
+  return (
+    <div className="absolute top-0 left-0 w-full h-full bg-[#050002] z-[100] flex flex-col items-center justify-center fade-in">
+      <button onClick={onBack} className="absolute top-8 left-8 z-[120] text-[#ff80cc]/60 hover:text-[#ff80cc] font-[Cinzel] tracking-widest transition-all drop-shadow-[0_0_10px_rgba(255,128,204,0.3)] hover:drop-shadow-[0_0_15px_rgba(255,128,204,0.8)]">← BACK</button>
+      <h1 className="text-4xl md:text-5xl text-[#ff80cc] font-[Cinzel] font-bold tracking-widest drop-shadow-[0_0_20px_rgba(255,128,204,0.9)] animate-pulse text-center mb-8">CLICK ME!!!!</h1>
+      <img
+        src="/placeholder.jpg"
+        alt="Placeholder"
+        className="w-auto h-[350px] object-cover rounded-2xl mb-8 hover:shadow-[0_0_30px_rgba(255,128,204,0.6)] transition-all active:scale-95 cursor-none"
+        onMouseEnter={(e) => setKissPos({x: e.clientX, y: e.clientY})}
+        onMouseMove={(e) => setKissPos({x: e.clientX, y: e.clientY})}
+        onMouseLeave={() => setKissPos(null)}
+        onClick={() => {
+          if (smoochAudio) {
+            try {
+              smoochAudio.currentTime = 0;
+              void smoochAudio.play();
+            } catch { /* ignore */ }
+          }
+          const numHearts = 15;
+          const newHearts = Array.from({length: numHearts}).map((_, i) => ({
+            id: Date.now() + i + Math.random(),
+            x: Math.random() * DESIGN_W,
+            y: Math.random() * DESIGN_H,
+            scale: Math.random() * 0.8 + 0.5,
+          }));
+          setSecretHearts(prev => [...prev, ...newHearts]);
+          window.setTimeout(() => {
+            setSecretHearts(prev => prev.filter(h => !newHearts.find(n => n.id === h.id)));
+          }, 2000);
+        }}
+      />
+      <h1 className="text-4xl md:text-5xl text-[#ff80cc] font-[Cinzel] font-bold tracking-widest drop-shadow-[0_0_20px_rgba(255,128,204,0.9)] animate-pulse text-center">
+        Jag älskar dig baby &lt;333
+      </h1>
+      {secretHearts.map(heart => (
+        <div
+          key={heart.id}
+          className="absolute pointer-events-none z-[120] animate-float-heart"
+          style={{left: heart.x, top: heart.y, ['--scale' as any]: heart.scale}}
+        >
+          <span className="text-6xl drop-shadow-[0_0_10px_rgba(255,128,204,0.8)]">❤️</span>
+        </div>
+      ))}
     </div>
   );
 }
