@@ -48,6 +48,8 @@ export type Word = {
   scrambled: boolean;                 // reserved (unused — kept for schema stability)
   stationaryX: number;                // chanter: fixed x; words keep their own
   spawnTime: number;
+  isBossAttack?: boolean;             // word-projectile fired by a boss (moves toward player, dmg on contact)
+  isBossPhrase?: boolean;             // stationary phrase that damages the boss when completed
 };
 
 export type Fireball = {
@@ -93,6 +95,15 @@ export type Projectile = {
   char: string;
   fromBoss: boolean;
   life: number;                      // seconds
+  // Spiral-pattern fields — when set, position is computed from origin/ang/radius
+  // each frame instead of from linear vx/vy. Used by the "wave" bullet-hell attack.
+  spiralOrigin?: {x: number; y: number};
+  spiralAng?: number;
+  spiralRadius?: number;
+  spiralAngVel?: number;
+  spiralRadVel?: number;
+  // Trail points for dramatic caster projectiles.
+  trail?: {x: number; y: number}[];
 };
 
 export type ImpactDecal = {
@@ -1351,12 +1362,16 @@ export function drawWordText(
   ctx.font = fontSize + 'px "Cinzel", serif';
   ctx.textBaseline = 'alphabetic';
 
-  // Base alpha (ghost flickers).
+  // Base alpha (ghost flickers — irregular rhythm with long invisible periods).
   let baseAlpha = 1.0;
   if (word.kind === 'ghost') {
-    const phase = (time * 0.005 + word.ghostPhase * 10);
-    baseAlpha = 0.4 + Math.sin(phase) * 0.35 + 0.25;
-    baseAlpha = Math.max(0.15, Math.min(1, baseAlpha));
+    // Two detuned sines create an irregular beat pattern.
+    const a = Math.sin(time * 0.0055 + word.ghostPhase * 10);
+    const b = Math.sin(time * 0.013  + word.ghostPhase * 7);
+    const t = a * 0.55 + b * 0.45;
+    // Asymmetric curve — peaks feel visible, troughs hold very low alpha longer.
+    baseAlpha = t > 0.15 ? 0.25 + t * 0.75 : 0.03 + Math.max(0, (t + 0.4)) * 0.2;
+    baseAlpha = Math.max(0.03, Math.min(1, baseAlpha));
   }
 
   // Runner: streak trailing AWAY from the player (behind motion direction).
@@ -1543,23 +1558,109 @@ export function drawParticle(ctx: CanvasRenderingContext2D, p: Particle): void {
 // Projectile rendering (caster & boss)
 // ─────────────────────────────────────────────────────────────
 
-export function drawProjectile(ctx: CanvasRenderingContext2D, p: Projectile): void {
+export function drawProjectile(ctx: CanvasRenderingContext2D, p: Projectile, time: number = 0): void {
+  if (p.fromBoss) {
+    drawBossProjectile(ctx, p);
+  } else {
+    drawCasterProjectile(ctx, p, time);
+  }
+}
+
+/** Boss projectile — a burning amber letter. Heavy but simple. */
+function drawBossProjectile(ctx: CanvasRenderingContext2D, p: Projectile): void {
   ctx.save();
   ctx.globalCompositeOperation = 'lighter';
-  const color = p.fromBoss ? '#ff4a28' : '#ff80ff';
-  const halo = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, 28);
-  halo.addColorStop(0, p.fromBoss ? 'rgba(255, 80, 30, 0.75)' : 'rgba(255, 130, 255, 0.7)');
+  const halo = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, 32);
+  halo.addColorStop(0, 'rgba(255, 80, 30, 0.8)');
+  halo.addColorStop(0.5, 'rgba(200, 40, 20, 0.35)');
   halo.addColorStop(1, 'rgba(0,0,0,0)');
   ctx.fillStyle = halo;
-  ctx.fillRect(p.x - 28, p.y - 28, 56, 56);
+  ctx.fillRect(p.x - 32, p.y - 32, 64, 64);
   ctx.restore();
   ctx.save();
   ctx.font = 'bold 20px "Cinzel", serif';
-  ctx.fillStyle = '#fff';
+  ctx.fillStyle = '#ffe4c0';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.shadowBlur = 10;
-  ctx.shadowColor = color;
+  ctx.shadowBlur = 14;
+  ctx.shadowColor = '#ff4010';
+  ctx.fillText(p.char, p.x, p.y);
+  ctx.restore();
+}
+
+/** Caster projectile — dramatic magenta magic orb with rune ring and trail. */
+function drawCasterProjectile(ctx: CanvasRenderingContext2D, p: Projectile, time: number): void {
+  // Trail — fading smaller orbs behind the main one.
+  if (p.trail && p.trail.length > 1) {
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    for (let i = 0; i < p.trail.length; i++) {
+      const t = i / p.trail.length;         // 0 = oldest, 1 = newest
+      const pt = p.trail[i];
+      const r = 4 + t * 8;
+      const g = ctx.createRadialGradient(pt.x, pt.y, 0, pt.x, pt.y, r);
+      g.addColorStop(0, 'rgba(255, 130, 255, ' + (0.5 * t).toFixed(3) + ')');
+      g.addColorStop(1, 'rgba(200, 40, 200, 0)');
+      ctx.fillStyle = g;
+      ctx.fillRect(pt.x - r, pt.y - r, r * 2, r * 2);
+    }
+    ctx.restore();
+  }
+
+  // Outer halo.
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  const pulse = 0.8 + Math.sin(time * 0.012) * 0.2;
+  const haloR = 36 * pulse;
+  const halo = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, haloR);
+  halo.addColorStop(0, 'rgba(255, 200, 255, 0.8)');
+  halo.addColorStop(0.3, 'rgba(255, 100, 255, 0.55)');
+  halo.addColorStop(0.7, 'rgba(180, 40, 200, 0.2)');
+  halo.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = halo;
+  ctx.fillRect(p.x - haloR, p.y - haloR, haloR * 2, haloR * 2);
+
+  // Rotating rune ring.
+  const ringAng = time * 0.004;
+  for (let i = 0; i < 5; i++) {
+    const ang = ringAng + (i / 5) * Math.PI * 2;
+    const rx = p.x + Math.cos(ang) * 20;
+    const ry = p.y + Math.sin(ang) * 20;
+    ctx.fillStyle = 'rgba(255, 220, 255, 0.85)';
+    ctx.beginPath();
+    ctx.arc(rx, ry, 2, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // Counter-rotating inner ring.
+  const ring2Ang = -time * 0.006;
+  for (let i = 0; i < 3; i++) {
+    const ang = ring2Ang + (i / 3) * Math.PI * 2;
+    const rx = p.x + Math.cos(ang) * 12;
+    const ry = p.y + Math.sin(ang) * 12;
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+    ctx.beginPath();
+    ctx.arc(rx, ry, 1.5, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // Hot core.
+  const coreGrad = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, 14);
+  coreGrad.addColorStop(0, 'rgba(255, 255, 255, 1)');
+  coreGrad.addColorStop(0.4, 'rgba(255, 170, 255, 0.9)');
+  coreGrad.addColorStop(1, 'rgba(255, 80, 255, 0)');
+  ctx.fillStyle = coreGrad;
+  ctx.fillRect(p.x - 14, p.y - 14, 28, 28);
+  ctx.restore();
+
+  // Letter on top.
+  ctx.save();
+  ctx.font = 'bold 18px "Cinzel", serif';
+  ctx.fillStyle = '#ffffff';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.shadowBlur = 16;
+  ctx.shadowColor = '#ff00ff';
   ctx.fillText(p.char, p.x, p.y);
   ctx.restore();
 }
@@ -1614,7 +1715,7 @@ export function drawBoss(
   state: BossRenderState,
   time: number,
 ): void {
-  const cx = 512, baseY = 520;
+  const cx = 512, baseY = 440;
   const breath = Math.sin(time * 0.002) * 6;
   const hpT = state.currentHp / state.maxHp;
 

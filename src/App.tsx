@@ -35,7 +35,6 @@ import {
 
 import {Hud, type HudStats} from './hud/Hud';
 import {BossBar, type BossBarStats} from './hud/BossBar';
-import {RankUpBanner, rankColor, type RankUpEvent} from './hud/RankUpBanner';
 
 import {MenuScreen} from './screens/Menu';
 import {SettingsScreen} from './screens/Settings';
@@ -61,7 +60,16 @@ const DODGE_DURATION = 360;            // ms
 const DODGE_IFRAME_DURATION = 200;
 const ESTUS_CHUG_MS = 1150;
 const ESTUS_HEAL = 4;
-const BOSS_AIM = {x: DESIGN_W / 2, y: 470};
+const BOSS_AIM = {x: DESIGN_W / 2, y: 380};
+
+/** Small helper — convert a #rrggbb color + alpha into an rgba() string. */
+function hexA(hex: string, alpha: number): string {
+  const h = hex.replace('#', '');
+  const r = parseInt(h.length === 3 ? h[0] + h[0] : h.slice(0, 2), 16);
+  const g = parseInt(h.length === 3 ? h[1] + h[1] : h.slice(2, 4), 16);
+  const b = parseInt(h.length === 3 ? h[2] + h[2] : h.slice(4, 6), 16);
+  return 'rgba(' + r + ',' + g + ',' + b + ',' + alpha.toFixed(3) + ')';
+}
 
 type Phase = 'menu' | 'zone' | 'boss' | 'bonfire' | 'victory' | 'gameover';
 
@@ -108,7 +116,6 @@ export default function App() {
 
   const [hudStats, setHudStats] = useState<HudStats>(() => initialHudStats());
   const [bossBarStats, setBossBarStats] = useState<BossBarStats | null>(null);
-  const [rankUpEvent, setRankUpEvent] = useState<RankUpEvent | null>(null);
   const [bonfireInfo, setBonfireInfo] = useState<BonfireInfo | null>(null);
   const [finalSnapshot, setFinalSnapshot] = useState<FinalSnapshot | null>(null);
 
@@ -215,17 +222,11 @@ export default function App() {
     damageTextsRef.current.push({x, y, value, life: 55, maxLife: 55, color});
   }, []);
 
+  // On rank change we just play the bell — the HUD's rank-icon animation
+  // provides the visual. No more full-screen toast.
   const triggerRankUp = useCallback((rank: Rank) => {
-    setRankUpEvent({
-      id: Date.now() + Math.random(),
-      rankId: rank.id,
-      label: rank.label.toUpperCase().replace(/!+$/, '!'),
-      color: rankColor(rank.id),
-      timestamp: Date.now(),
-    });
     const idx = COMBO_RANKS.findIndex(r => r.id === rank.id);
     sfxRankUp(Math.max(0, idx));
-    window.setTimeout(() => setRankUpEvent(null), 1600);
   }, []);
 
   const resetRunState = useCallback(() => {
@@ -380,7 +381,6 @@ export default function App() {
   const tryAgain = useCallback(() => {
     setFinalSnapshot(null);
     setBonfireInfo(null);
-    setRankUpEvent(null);
     setBossBarStats(null);
     setShowSecretAsk(false);
     setYesChecked(false); setNoHoverPos(null);
@@ -491,8 +491,20 @@ export default function App() {
     window.setTimeout(() => {
       if (phaseRef.current === 'gameover' || phaseRef.current === 'victory') return;
       healthRef.current = Math.min(MAX_HEALTH, healthRef.current + ESTUS_HEAL);
-      // Small green pop up.
+      // Small green pop up + celebratory particle burst.
       pushDamageText('+' + ESTUS_HEAL, PLAYER.x, PLAYER.y - 50, '#6dffaa');
+      for (let i = 0; i < 22; i++) {
+        if (particlesRef.current.length >= PARTICLE_CAP) break;
+        const ang = Math.random() * Math.PI * 2;
+        const spd = 1.5 + Math.random() * 3;
+        particlesRef.current.push({
+          x: PLAYER.x + (Math.random() - 0.5) * 30,
+          y: PLAYER.y + (Math.random() - 0.5) * 20,
+          vx: Math.cos(ang) * spd, vy: Math.sin(ang) * spd - 1,
+          life: 25, maxLife: 25, size: 2 + Math.random() * 2,
+          color: Math.random() < 0.5 ? '#9dff7a' : '#ffd060',
+        });
+      }
     }, ESTUS_CHUG_MS);
   }, [pushDamageText]);
 
@@ -576,7 +588,7 @@ export default function App() {
     yesChecked, setYesChecked, noHoverPos, runAway,
     secretHearts, setSecretHearts, kissPos, setKissPos,
     secretPassword, setSecretPassword, passwordError, setPasswordError,
-    hudStats, bossBarStats, rankUpEvent, bonfireInfo, finalSnapshot,
+    hudStats, bossBarStats, bonfireInfo, finalSnapshot,
     highscores, isMobileFocused,
     bgCanvasRef, canvasRef, textCanvasRef, playerImgRef, shakeRef, screenFlashRef, mobileInputRef,
     smoochAudioRef,
@@ -734,6 +746,7 @@ function runGameLoop(d: LoopDeps): () => void {
     updateProjectiles(d, ctx, time, dt);
     updateShockwaves(d, ctx, dt);
     updateParticles(d, ctx, dt);
+    drawEstusChug(d, ctx, time);
 
     // ── Words (enemy update + draw + contact check) ───────────
     updateWords(d, ctx, textCtx, time, dt, s.fontScale);
@@ -821,6 +834,14 @@ function updateSprites(d: LoopDeps, time: number): void {
       img.src = '/idle1.png';
       img.dataset.state = 'idle';
     }
+  }
+  // Toggle the drinking CSS class based on estus activity.
+  const img = d.playerImgRef.current;
+  if (img) {
+    const drinking = time < d.estusActiveUntilRef.current;
+    const hasClass = img.classList.contains('is-drinking');
+    if (drinking && !hasClass) img.classList.add('is-drinking');
+    else if (!drinking && hasClass) img.classList.remove('is-drinking');
   }
   // Stamina regen.
   const staminaRegen = 0.6;
@@ -984,24 +1005,23 @@ function updateBoss(d: LoopDeps, time: number, dt: number): void {
 
   const phase = b.def.phases[b.phaseIdx];
 
-  // ── Phrase spawning: always exactly ONE visible phrase at a time, placed
-  //    near the top of the screen with good horizontal variety. The player
-  //    never has to parse multiple phrases in parallel — this keeps focus.
-  const phraseExists = d.wordsRef.current.length > 0;
+  // ── Phrase spawning: always exactly ONE visible phrase at a time, centered
+  //    at the top of the screen with a gothic frame (see updateWords render).
+  //    The player never has to parse multiple phrases in parallel — focus stays
+  //    singular, and attack-words (isBossAttack) don't count toward phraseExists.
+  const phraseExists = d.wordsRef.current.some(w => w.isBossPhrase);
   if (!phraseExists && time >= b.nextPhraseAt) {
     const pool = phase.phraseBank;
     const text = pool[Math.floor(Math.random() * pool.length)];
-    // Phrase width (rough estimate — 14px per char at default font) used to pick a
-    // safe x so the phrase doesn't clip the edges.
     const widthEst = text.length * 14;
-    const minX = 60, maxX = DESIGN_W - widthEst - 60;
-    const xPos = minX + Math.random() * Math.max(10, maxX - minX);
+    const xPos = (DESIGN_W - widthEst) / 2;     // dead center
     d.wordsRef.current.push({
-      text, x: xPos, y: 130 + Math.random() * 30,
-      speed: 0,                                  // stationary — bosses phrases never descend
+      text, x: xPos, y: 150,
+      speed: 0,
       typed: '', kind: 'normal', isSpecial: false,
       hp: 1, fireCooldown: 0, ghostPhase: 0,
       scrambled: false, stationaryX: xPos, spawnTime: time,
+      isBossPhrase: true,
     });
   }
 
@@ -1017,8 +1037,9 @@ function updateBoss(d: LoopDeps, time: number, dt: number): void {
 /** Spawn a wave of boss projectiles following the given pattern. */
 function spawnBossAttack(d: LoopDeps, pattern: BossPattern, letters: string, time: number): void {
   const pick = () => letters[Math.floor(Math.random() * letters.length)];
-  // Boss body position (silhouette is drawn centered at x=512, baseY=520 with breath offset).
-  const BOSS_BODY_Y = 440;
+  // Boss body position — projectiles spawn here (moved up so they don't
+  // appear right next to the player).
+  const BOSS_BODY_Y = 360;
 
   if (pattern === 'single') {
     // One letter, launched from boss center, slight aim toward player.
@@ -1032,13 +1053,14 @@ function spawnBossAttack(d: LoopDeps, pattern: BossPattern, letters: string, tim
       life: 520,
     });
   } else if (pattern === 'volley') {
-    // Three simultaneous drops spread across the screen — chord-like.
-    const xs = [BOSS_AIM.x - 220, BOSS_AIM.x, BOSS_AIM.x + 220];
+    // Three simultaneous drops spread across the middle third of the screen —
+    // chord-like. Drop at positions the player actually occupies horizontally.
+    const xs = [BOSS_AIM.x - 140, BOSS_AIM.x, BOSS_AIM.x + 140];
     for (const x of xs) {
       d.projectilesRef.current.push({
         x, y: BOSS_BODY_Y + (Math.random() - 0.5) * 20,
         vx: 0,
-        vy: 1.8,
+        vy: 1.9,
         char: pick(),
         fromBoss: true,
         life: 500,
@@ -1047,24 +1069,49 @@ function spawnBossAttack(d: LoopDeps, pattern: BossPattern, letters: string, tim
     // Small telegraph — quick screen flicker.
     triggerLightning(d.bgStateRef.current, time);
   } else if (pattern === 'wave') {
-    // Five letters in an arc from left to right, staggered vertically so they
-    // arrive at the player in sequence. Each one fans slightly outward.
-    const count = 5;
+    // Slow-spinning bullet-hell spiral. 12 projectiles arranged around the boss,
+    // rotating slowly while expanding outward. Passes through the player zone.
+    const count = 12;
+    const direction = Math.random() > 0.5 ? 1 : -1;
+    const angVel = direction * (0.012 + Math.random() * 0.008);
+    const radVel = 0.9;
     for (let i = 0; i < count; i++) {
-      const tNorm = i / (count - 1);
-      const x = 140 + tNorm * (DESIGN_W - 280);
-      // Higher starting y for later arrivals so the wave sweeps L→R at player.
-      const staggerY = BOSS_BODY_Y - i * 48;
+      const startAng = (i / count) * Math.PI * 2;
       d.projectilesRef.current.push({
-        x,
-        y: staggerY,
-        vx: (tNorm - 0.5) * 0.4,
-        vy: 1.5,
+        x: BOSS_AIM.x + Math.cos(startAng) * 50,
+        y: BOSS_BODY_Y + Math.sin(startAng) * 50,
+        vx: 0, vy: 0,
         char: pick(),
         fromBoss: true,
-        life: 640,
+        life: 900,
+        spiralOrigin: {x: BOSS_AIM.x, y: BOSS_BODY_Y},
+        spiralAng: startAng,
+        spiralRadius: 50,
+        spiralAngVel: angVel,
+        spiralRadVel: radVel,
       });
     }
+  } else if (pattern === 'word') {
+    // Fire a multi-letter WORD as a single falling projectile. Damages player
+    // on contact; typing it destroys it (but doesn't damage the boss).
+    const pool = ['DEATH', 'DOOM', 'WITHER', 'RUIN', 'ASHES', 'CURSE', 'PYRE', 'DUSK', 'ABYSS', 'BLIGHT'];
+    const existingFirstLetters = new Set(d.wordsRef.current.map(w => w.text[0]));
+    const available = pool.filter(w => !existingFirstLetters.has(w[0]));
+    if (available.length === 0) return;
+    const text = available[Math.floor(Math.random() * available.length)];
+    // Spawn from boss center, drifting toward player.
+    d.wordsRef.current.push({
+      text,
+      x: BOSS_AIM.x - text.length * 7,       // roughly centered on boss x
+      y: BOSS_BODY_Y + 10,
+      speed: 0.45,
+      typed: '', kind: 'runner', isSpecial: false,
+      hp: 1, fireCooldown: 0, ghostPhase: 0,
+      scrambled: false, stationaryX: 0, spawnTime: time,
+      isBossAttack: true,
+    });
+    // Telegraph.
+    triggerLightning(d.bgStateRef.current, time);
   }
 }
 
@@ -1236,24 +1283,47 @@ function defeatBoss(d: LoopDeps, time: number): void {
 function updateProjectiles(d: LoopDeps, ctx: CanvasRenderingContext2D, time: number, dt: number): void {
   for (let i = d.projectilesRef.current.length - 1; i >= 0; i--) {
     const p = d.projectilesRef.current[i];
-    p.x += p.vx * dt;
-    p.y += p.vy * dt;
+
+    // ── Movement: spiral pattern if configured, else linear.
+    if (p.spiralOrigin && p.spiralAng !== undefined && p.spiralRadius !== undefined
+        && p.spiralAngVel !== undefined && p.spiralRadVel !== undefined) {
+      p.spiralAng += p.spiralAngVel * dt;
+      p.spiralRadius += p.spiralRadVel * dt;
+      p.x = p.spiralOrigin.x + Math.cos(p.spiralAng) * p.spiralRadius;
+      p.y = p.spiralOrigin.y + Math.sin(p.spiralAng) * p.spiralRadius;
+    } else {
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+    }
     p.life -= dt;
-    drawProjectile(ctx, p);
+
+    // ── Record trail for caster projectiles (dramatic magic streak).
+    if (!p.fromBoss) {
+      if (!p.trail) p.trail = [];
+      p.trail.push({x: p.x, y: p.y});
+      if (p.trail.length > 6) p.trail.shift();
+    }
+
+    drawProjectile(ctx, p, time);
+
     // Contact with player.
     const dxp = PLAYER.x - p.x, dyp = PLAYER.y - p.y;
     const distP = Math.sqrt(dxp * dxp + dyp * dyp);
     if (distP < 45) {
       if (time < d.iFramesUntilRef.current) {
-        // Dodged.
         d.statsRef.current.dodgesSuccessful += 1;
+        d.damageTextsRef.current.push({
+          x: PLAYER.x, y: PLAYER.y - 40,
+          value: 'DODGE', life: 50, maxLife: 50, color: '#90f0ff',
+        });
       } else {
         applyDamageToPlayer(d, p.fromBoss ? 2 : 1, time);
       }
       d.projectilesRef.current.splice(i, 1);
       continue;
     }
-    if (p.life <= 0 || p.y > DESIGN_H + 30) {
+    // Lifetime expiry OR off-screen (expanded bounds to allow spirals to leave).
+    if (p.life <= 0 || p.y > DESIGN_H + 30 || p.x < -50 || p.x > DESIGN_W + 50 || p.y < -50) {
       d.projectilesRef.current.splice(i, 1);
     }
   }
@@ -1265,6 +1335,77 @@ function updateShockwaves(d: LoopDeps, ctx: CanvasRenderingContext2D, dt: number
     sw.radius += 3.5 * dt;
     drawShockwave(ctx, sw);
     if (sw.radius >= sw.maxRadius) d.shockwavesRef.current.splice(i, 1);
+  }
+}
+
+/** Estus chug visualization — green halo at feet, floating flask glyph, progress ring. */
+function drawEstusChug(d: LoopDeps, ctx: CanvasRenderingContext2D, time: number): void {
+  const remaining = d.estusActiveUntilRef.current - time;
+  if (remaining <= 0) return;
+  const progress = 1 - remaining / 1150;        // 0..1 over the ESTUS_CHUG_MS window
+  const px = PLAYER.x, py = PLAYER.y;
+
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  // Warm green healing halo pulsing at the player's feet.
+  const pulse = 0.7 + Math.sin(time * 0.014) * 0.3;
+  const haloR = 90 * pulse;
+  const halo = ctx.createRadialGradient(px, py + 20, 0, px, py + 20, haloR);
+  halo.addColorStop(0, 'rgba(120, 255, 160, 0.55)');
+  halo.addColorStop(0.5, 'rgba(70, 200, 120, 0.25)');
+  halo.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = halo;
+  ctx.fillRect(px - haloR, py + 20 - haloR, haloR * 2, haloR * 2);
+  ctx.restore();
+
+  // Flask glyph rising from the player's mouth/chest. As progress climbs, it
+  // rises higher (like the player is tipping it up to drink).
+  const flaskX = px, flaskY = py - 40 - progress * 30;
+  ctx.save();
+  // Stem/neck.
+  ctx.fillStyle = 'rgba(40, 20, 8, 0.95)';
+  ctx.fillRect(flaskX - 3, flaskY - 12, 6, 10);
+  // Bottle body.
+  ctx.beginPath();
+  ctx.moveTo(flaskX - 8, flaskY - 2);
+  ctx.lineTo(flaskX - 10, flaskY + 4);
+  ctx.lineTo(flaskX - 10, flaskY + 12);
+  ctx.lineTo(flaskX + 10, flaskY + 12);
+  ctx.lineTo(flaskX + 10, flaskY + 4);
+  ctx.lineTo(flaskX + 8, flaskY - 2);
+  ctx.closePath();
+  ctx.fill();
+  // Amber glowing contents, fill height inversely proportional to progress.
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  const fluidH = 12 * (1 - progress);
+  const fluidY = flaskY + 12 - fluidH;
+  const fluid = ctx.createLinearGradient(flaskX, fluidY, flaskX, flaskY + 12);
+  fluid.addColorStop(0, 'rgba(255, 200, 100, 0.9)');
+  fluid.addColorStop(1, 'rgba(220, 130, 40, 0.9)');
+  ctx.fillStyle = fluid;
+  ctx.fillRect(flaskX - 9, fluidY, 18, fluidH);
+  ctx.restore();
+
+  // Amber progress ring around the player.
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.strokeStyle = 'rgba(255, 200, 100, 0.85)';
+  ctx.lineWidth = 2.5;
+  ctx.beginPath();
+  ctx.arc(px, py, 38, -Math.PI / 2, -Math.PI / 2 + progress * Math.PI * 2);
+  ctx.stroke();
+  ctx.restore();
+
+  // Small ember sparks rising around the player.
+  if (d.particlesRef.current.length < PARTICLE_CAP && Math.random() < 0.4) {
+    d.particlesRef.current.push({
+      x: px + (Math.random() - 0.5) * 60,
+      y: py + 20,
+      vx: (Math.random() - 0.5) * 0.6,
+      vy: -0.8 - Math.random() * 0.8,
+      life: 20, maxLife: 20, size: 2,
+      color: Math.random() < 0.5 ? '#9dff7a' : '#ffd060',
+    });
   }
 }
 
@@ -1295,18 +1436,33 @@ function updateWords(d: LoopDeps, ctx: CanvasRenderingContext2D, textCtx: Canvas
       }
     }
 
-    // Caster: fire projectiles on cooldown.
+    // Caster: fire projectiles on cooldown. Fires a char that's visibly muzzle-
+    // flashed at the caster's location so the player sees where it came from.
     if (w.kind === 'caster') {
       w.fireCooldown -= dt / 60;
       if (w.fireCooldown <= 0) {
         w.fireCooldown = 2.4 + Math.random() * 0.8;
+        const spawnX = w.x + 40, spawnY = w.y + 10;
         d.projectilesRef.current.push({
-          x: w.x + 40, y: w.y + 10,
-          vx: (PLAYER.x - w.x) * 0.004,
+          x: spawnX, y: spawnY,
+          vx: (PLAYER.x - spawnX) * 0.004,
           vy: 2.2 + Math.random() * 0.8,
           char: w.text[Math.min(w.typed.length, w.text.length - 1)],
           fromBoss: false, life: 280,
+          trail: [],
         });
+        // Muzzle flash — a burst of magenta sparks at the caster.
+        for (let k = 0; k < 12; k++) {
+          if (d.particlesRef.current.length >= PARTICLE_CAP) break;
+          const ang = Math.random() * Math.PI * 2;
+          const spd = 2 + Math.random() * 4;
+          d.particlesRef.current.push({
+            x: spawnX, y: spawnY,
+            vx: Math.cos(ang) * spd, vy: Math.sin(ang) * spd,
+            life: 18, maxLife: 18, size: 2 + Math.random() * 2,
+            color: Math.random() < 0.5 ? '#ff80ff' : '#ffaaff',
+          });
+        }
       }
     }
 
@@ -1337,11 +1493,59 @@ function updateWords(d: LoopDeps, ctx: CanvasRenderingContext2D, textCtx: Canvas
 
     // Aura on main canvas (action layer).
     drawWordAura(ctx, w, wordW, time, ENEMY_KINDS[w.kind].auraColor);
+
+    // Boss-phrase gothic frame: clearly marks the word tied to the boss HP bar.
+    if (w.isBossPhrase && d.bossRef.current) {
+      const color = d.bossRef.current.def.themeColor;
+      const padX = 18, padY = 14;
+      const fx = w.x - padX, fy = w.y - 28 - padY;
+      const fw = wordW + padX * 2, fh = 30 + padY * 2;
+      const pulse = 0.55 + Math.sin(time * 0.004) * 0.25;
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      // Soft radial glow fill behind the frame.
+      const g = ctx.createRadialGradient(fx + fw / 2, fy + fh / 2, 20, fx + fw / 2, fy + fh / 2, Math.max(fw, fh));
+      g.addColorStop(0, hexA(color, 0.22 * pulse));
+      g.addColorStop(1, hexA(color, 0));
+      ctx.fillStyle = g;
+      ctx.fillRect(fx - 40, fy - 40, fw + 80, fh + 80);
+      ctx.restore();
+      // Frame lines.
+      ctx.save();
+      ctx.strokeStyle = hexA(color, 0.85);
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.rect(fx, fy, fw, fh);
+      ctx.stroke();
+      // Gothic corner brackets.
+      ctx.lineWidth = 2;
+      const c = 10;
+      const corners: [number, number][] = [[fx, fy], [fx + fw, fy], [fx, fy + fh], [fx + fw, fy + fh]];
+      for (const [cx2, cy2] of corners) {
+        const sx = cx2 === fx ? 1 : -1;
+        const sy = cy2 === fy ? 1 : -1;
+        ctx.beginPath();
+        ctx.moveTo(cx2, cy2 + sy * c);
+        ctx.lineTo(cx2, cy2);
+        ctx.lineTo(cx2 + sx * c, cy2);
+        ctx.stroke();
+      }
+      // Central banner label below the frame.
+      ctx.fillStyle = hexA(color, 0.75);
+      ctx.font = 'bold 10px "Cinzel", serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('◈ BOSS PHRASE ◈', fx + fw / 2, fy - 8);
+      ctx.restore();
+    }
+
     // Glyphs on text canvas (front layer).
     drawWordText(textCtx, w, widths, time, fontScale);
 
-    // Contact with player — only in zone phase, and only for moving words.
-    if (d.phaseRef.current === 'zone' && w.kind !== 'chanter') {
+    // Contact with player — in zone phase for non-chanter enemies, OR during
+    // boss fights for boss-attack word-projectiles.
+    const canHitPlayer = (d.phaseRef.current === 'zone' && w.kind !== 'chanter')
+                       || (d.phaseRef.current === 'boss' && w.isBossAttack);
+    if (canHitPlayer) {
       const dx = PLAYER.x - w.x, dy = PLAYER.y - w.y;
       const dist = Math.sqrt(dx * dx + dy * dy);
       if (dist < HIT_RADIUS) {
@@ -1350,11 +1554,15 @@ function updateWords(d: LoopDeps, ctx: CanvasRenderingContext2D, textCtx: Canvas
           if (d.activeWordRef.current === i) d.activeWordRef.current = null;
           else if (d.activeWordRef.current > i) d.activeWordRef.current -= 1;
         }
-        const zone = ZONES[d.zoneIdxRef.current];
-        const diff = Math.min(d.zoneElapsedRef.current / zone.duration, 1) * 5;
-        const dmg = Math.ceil(1.5 + diff * 0.4 + w.text.length * 0.1);
+        const baseDmg = w.isBossAttack
+          ? Math.ceil(1.5 + w.text.length * 0.2)       // word-projectile: punchy
+          : (() => {
+              const zone = ZONES[d.zoneIdxRef.current];
+              const diff = Math.min(d.zoneElapsedRef.current / zone.duration, 1) * 5;
+              return Math.ceil(1.5 + diff * 0.4 + w.text.length * 0.1);
+            })();
         if (time >= d.iFramesUntilRef.current) {
-          applyDamageToPlayer(d, dmg, time);
+          applyDamageToPlayer(d, baseDmg, time);
         } else {
           d.statsRef.current.dodgesSuccessful += 1;
           d.damageTextsRef.current.push({
@@ -1595,18 +1803,19 @@ function handleCharLive(d: LoopDeps, rawChar: string): void {
 function spawnFireball(d: LoopDeps, w: Word): void {
   const isBoss = d.phaseRef.current === 'boss';
   let bossDamage: number | undefined;
-  if (isBoss && w.typed === w.text) {
-    // This IS the phrase-completing letter — carry the damage payload.
+  // Only the phrase's completion fireball carries HP damage. Word-projectiles
+  // (isBossAttack) never damage the boss — they're player-facing threats.
+  if (isBoss && w.isBossPhrase && w.typed === w.text) {
     const letters = w.text.replace(/ /g, '').length;
     bossDamage = Math.max(1, Math.ceil(letters / 7));
   }
   d.fireballsRef.current.push({
     x: PLAYER.x, y: PLAYER.y,
-    tx: isBoss ? BOSS_AIM.x : w.x,
-    ty: isBoss ? BOSS_AIM.y : w.y,
+    tx: isBoss && w.isBossPhrase ? BOSS_AIM.x : w.x,
+    ty: isBoss && w.isBossPhrase ? BOSS_AIM.y : w.y,
     progress: 0,
     isSpecial: w.isSpecial,
-    targetBoss: isBoss,
+    targetBoss: isBoss && w.isBossPhrase,
     bossDamage,
   });
   sfxFireball();
@@ -1724,7 +1933,6 @@ type RenderProps = {
   setPasswordError: (v: boolean) => void;
   hudStats: HudStats;
   bossBarStats: BossBarStats | null;
-  rankUpEvent: RankUpEvent | null;
   bonfireInfo: BonfireInfo | null;
   finalSnapshot: FinalSnapshot | null;
   highscores: HighScore[];
@@ -1787,11 +1995,13 @@ function renderAppTree(p: RenderProps) {
         className="relative shrink-0 w-[1024px] h-[768px] bg-black border-4 border-[#1c1c1c] shadow-[0_0_60px_rgba(0,0,0,0.8)] overflow-hidden ce-frame"
         style={{transform: `scale(${p.scale})`, transformOrigin: 'center center'}}
       >
-        {/* Shake wrapper */}
+        {/* Shake wrapper — contains bg/action/text canvases, player, screen
+            flash, AND the HUD. Putting the HUD inside this stacking context
+            lets the text canvas (z-40) render above the HUD (z-30) so words
+            visually pass OVER HUD elements instead of behind them. */}
         <div ref={p.shakeRef} className="absolute top-0 left-0 w-full h-full will-change-transform">
           <canvas ref={p.bgCanvasRef} width={DESIGN_W} height={DESIGN_H} className="absolute top-0 left-0 z-0" />
           <canvas ref={p.canvasRef} width={DESIGN_W} height={DESIGN_H} className="absolute top-0 left-0 z-10" />
-          <canvas ref={p.textCanvasRef} width={DESIGN_W} height={DESIGN_H} className="absolute top-0 left-0 z-40 pointer-events-none" />
           <img
             ref={p.playerImgRef}
             src="/idle1.png"
@@ -1811,22 +2021,27 @@ function renderAppTree(p: RenderProps) {
               willChange: 'opacity',
             }}
           />
+          {/* HUD + boss bar sit BETWEEN action (z-10) and text (z-40) so words glide over them. */}
+          {(p.phase === 'zone' || p.phase === 'boss') && (
+            <>
+              <Hud stats={p.hudStats} />
+              {p.bossBarStats && <BossBar stats={p.bossBarStats} />}
+            </>
+          )}
+          <canvas ref={p.textCanvasRef} width={DESIGN_W} height={DESIGN_H} className="absolute top-0 left-0 z-40 pointer-events-none" />
         </div>
 
-        {/* HUD / boss bar / rank-up (overlayed on top) */}
+        {/* Pause button stays outside the shake wrapper so it doesn't jitter. */}
         {(p.phase === 'zone' || p.phase === 'boss') && (
           <>
-            <Hud stats={p.hudStats} />
             <button
               onClick={() => p.setPaused(v => !v)}
               className="absolute top-8 right-8 z-50 px-4 py-2 border border-amber-900 text-amber-600 font-[Cinzel] hover:bg-amber-900/20 tracking-widest"
             >
               {p.paused ? 'RESUME' : 'PAUSE'}
             </button>
-            {p.bossBarStats && <BossBar stats={p.bossBarStats} />}
           </>
         )}
-        <RankUpBanner event={p.rankUpEvent} reduceMotion={p.settings.reduceMotion} />
 
         {/* Mobile-type hint */}
         {(p.phase === 'zone' || p.phase === 'boss') && !p.paused && !p.isMobileFocused && (
@@ -1871,6 +2086,7 @@ function renderAppTree(p: RenderProps) {
             setPasswordError={p.setPasswordError}
             onUnlock={() => p.setShowSecretAsk(true)}
             onTryAgain={p.tryAgain}
+            onOpenDev={() => p.setShowDevPanel(true)}
           />
         )}
 
@@ -1883,6 +2099,7 @@ function renderAppTree(p: RenderProps) {
             stats={p.finalSnapshot.stats}
             derived={deriveStats(p.finalSnapshot.stats)}
             onTryAgain={p.tryAgain}
+            onOpenDev={() => p.setShowDevPanel(true)}
           />
         )}
 
@@ -1911,6 +2128,7 @@ function renderAppTree(p: RenderProps) {
           <PauseScreen
             onResume={() => p.setPaused(false)}
             onOpenSettings={() => p.setShowSettings(true)}
+            onOpenDev={() => p.setShowDevPanel(true)}
             onAbandon={p.abandonRun}
           />
         )}
