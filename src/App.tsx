@@ -83,8 +83,11 @@ type BossRuntime = {
   enraged: boolean;
   attackWindupT: number;
   defeated: boolean;
-  deathStart: number;            // performance.now at moment of defeat (0 while alive)
+  deathStart: number;
+  introStart: number;          // performance.now at intro start; 0 once intro finishes
 };
+
+const BOSS_INTRO_MS = 4500;
 
 type BonfireInfo = {
   reason: BonfireReason;
@@ -310,22 +313,26 @@ export default function App() {
   const enterBoss = useCallback((bossId: string) => {
     const def = BOSSES[bossId];
     if (!def) { beginBonfire('zone-cleared', zoneIdxRef.current + 1); return; }
+    const nowMs = performance.now();
     bossRef.current = {
       def,
       currentHp: def.maxHp,
       phaseIdx: 0,
-      nextAttackAt: performance.now() + 1800,
-      nextPhraseAt: performance.now() + 600,
+      // Attacks and phrases are suppressed during the intro cutscene.
+      // Schedule the first phrase + first attack *after* the intro ends.
+      nextAttackAt: nowMs + BOSS_INTRO_MS + 1200,
+      nextPhraseAt: nowMs + BOSS_INTRO_MS + 400,
       patternRotationIdx: 0,
       enraged: false,
       attackWindupT: 0,
       defeated: false,
       deathStart: 0,
+      introStart: nowMs,
     };
     wordsRef.current = [];
     activeWordRef.current = null;
     projectilesRef.current = [];
-    bossAnnouncementRef.current = {text: def.name, life: 180};
+    // No announcement here — the new intro cutscene overlay handles boss name + lore.
     sfxBossAppear();
     playMusic('boss');
     phaseRef.current = 'boss';
@@ -710,11 +717,12 @@ function runGameLoop(d: LoopDeps): () => void {
     rafId = requestAnimationFrame(loop);
     if (d.pausedRef.current) { lastTime = time; return; }
 
-    const dt = Math.min((time - lastTime) / (1000 / 60), 3);
+    const realDtSec = Math.min((time - lastTime) / 1000, 0.1);  // cap to 100ms jumps
+    const dt = Math.min(realDtSec * 60, 3);                     // 60fps-normalized
     lastTime = time;
 
     updateSprites(d, time);
-    updateZoneTimer(d, time);
+    updateZoneTimer(d, realDtSec);
 
     // ── Background ─────────────
     const s = getSettings();
@@ -789,14 +797,19 @@ function runGameLoop(d: LoopDeps): () => void {
       }
     }
 
-    // ── Hit flash overlay ─────────────────────────────────────
+    // ── Boss intro cutscene overlay (name + title + lore text) ───
+    if (d.bossRef.current && d.bossRef.current.introStart > 0) {
+      drawBossIntroOverlay(d, textCtx, time);
+    }
+
+    // ── Hit flash overlay ────────────────────────────────────────
     updateHitFlash(d, time, s.reduceMotion);
 
     // ── HUD tick (10 Hz) ──────────────────────────────────────
     if (time - lastHudBump > 100) {
       lastHudBump = time;
       pushHudStats(d);
-      if (d.phaseRef.current === 'boss' && d.bossRef.current && !d.bossRef.current.defeated) {
+      if (d.phaseRef.current === 'boss' && d.bossRef.current && !d.bossRef.current.defeated && d.bossRef.current.introStart === 0) {
         const b = d.bossRef.current;
         d.setBossBarStats({
           name: b.def.name,
@@ -850,12 +863,13 @@ function updateSprites(d: LoopDeps, time: number): void {
   }
 }
 
-function updateZoneTimer(d: LoopDeps, time: number): void {
+function updateZoneTimer(d: LoopDeps, realDtSec: number): void {
   if (d.phaseRef.current !== 'zone') return;
-  const elapsed = (time - d.zoneStartTimeRef.current) / 1000;
-  d.zoneElapsedRef.current = elapsed;
+  // Accumulate per-frame seconds. Since this function only runs on active
+  // (un-paused) frames, pausing the game can't advance the timer.
+  d.zoneElapsedRef.current += realDtSec;
   const zone = ZONES[d.zoneIdxRef.current];
-  if (elapsed >= zone.duration) {
+  if (d.zoneElapsedRef.current >= zone.duration) {
     // End of zone: either go to boss or straight to bonfire.
     if (zone.bossId) {
       d.enterBoss(zone.bossId);
@@ -986,6 +1000,12 @@ function updateBoss(d: LoopDeps, time: number, dt: number): void {
 
   if (b.currentHp <= 0) return;
 
+  // Intro cutscene active — suppress phase/attack logic until it ends.
+  if (b.introStart > 0) {
+    if (time - b.introStart >= BOSS_INTRO_MS) b.introStart = 0;
+    else return;
+  }
+
   // Phase transition based on HP.
   const hpPct = b.currentHp / b.def.maxHp;
   let newPhase = 0;
@@ -1036,7 +1056,20 @@ function updateBoss(d: LoopDeps, time: number, dt: number): void {
 
 /** Spawn a wave of boss projectiles following the given pattern. */
 function spawnBossAttack(d: LoopDeps, pattern: BossPattern, letters: string, time: number): void {
-  const pick = () => letters[Math.floor(Math.random() * letters.length)];
+  // Build a projectile-letter pool that EXCLUDES every letter present in the
+  // current boss phrase. This guarantees typing-ambiguity can never happen:
+  // each keystroke is EITHER a phrase letter OR a projectile deflect, never
+  // both. If filtering removes every letter, fall back to the raw pool.
+  const activePhrase = d.wordsRef.current.find(w => w.isBossPhrase);
+  const forbidden = new Set<string>();
+  if (activePhrase) {
+    for (const ch of activePhrase.text.toUpperCase()) {
+      if (ch >= 'A' && ch <= 'Z') forbidden.add(ch);
+    }
+  }
+  const filtered = letters.split('').filter(l => !forbidden.has(l));
+  const pool = filtered.length > 0 ? filtered : letters.split('');
+  const pick = () => pool[Math.floor(Math.random() * pool.length)];
   // Boss body position — projectiles spawn here (moved up so they don't
   // appear right next to the player).
   const BOSS_BODY_Y = 360;
@@ -1127,6 +1160,8 @@ function drawBossToBg(bgCtx: CanvasRenderingContext2D, d: LoopDeps, time: number
     attackWindupT: b.attackWindupT,
     enraged: b.enraged,
     deathStart: b.deathStart,
+    introStart: b.introStart,
+    introDurationMs: BOSS_INTRO_MS,
   };
   drawBoss(bgCtx, state, time);
 }
@@ -1200,7 +1235,7 @@ function updateFireballs(d: LoopDeps, ctx: CanvasRenderingContext2D, time: numbe
         }
         if (d.bossRef.current.currentHp <= 0) defeatBoss(d, time);
       } else if (!fb.targetBoss) {
-        const wIdx = d.wordsRef.current.findIndex(w => Math.abs(w.x - fb.tx) < 70);
+        const wIdx = d.wordsRef.current.findIndex(w => Math.abs(w.x - fb.tx) < 70 && Math.abs(w.y - fb.ty) < 80);
         if (wIdx !== -1) {
           const w = d.wordsRef.current[wIdx];
           const resistance = Math.min(w.typed.length / w.text.length, 0.9);
@@ -1495,43 +1530,39 @@ function updateWords(d: LoopDeps, ctx: CanvasRenderingContext2D, textCtx: Canvas
     drawWordAura(ctx, w, wordW, time, ENEMY_KINDS[w.kind].auraColor);
 
     // Boss-phrase gothic frame: clearly marks the word tied to the boss HP bar.
+    // Just an outline + corner brackets + label — no rectangular fill (which
+    // created an ugly opaque box in an earlier revision).
     if (w.isBossPhrase && d.bossRef.current) {
       const color = d.bossRef.current.def.themeColor;
-      const padX = 18, padY = 14;
+      const padX = 20, padY = 16;
       const fx = w.x - padX, fy = w.y - 28 - padY;
       const fw = wordW + padX * 2, fh = 30 + padY * 2;
       const pulse = 0.55 + Math.sin(time * 0.004) * 0.25;
       ctx.save();
-      ctx.globalCompositeOperation = 'lighter';
-      // Soft radial glow fill behind the frame.
-      const g = ctx.createRadialGradient(fx + fw / 2, fy + fh / 2, 20, fx + fw / 2, fy + fh / 2, Math.max(fw, fh));
-      g.addColorStop(0, hexA(color, 0.22 * pulse));
-      g.addColorStop(1, hexA(color, 0));
-      ctx.fillStyle = g;
-      ctx.fillRect(fx - 40, fy - 40, fw + 80, fh + 80);
-      ctx.restore();
-      // Frame lines.
-      ctx.save();
-      ctx.strokeStyle = hexA(color, 0.85);
+      // Thin pulsing outline with a glowy shadow — no fill, no composite tricks.
+      ctx.shadowBlur = 18 * pulse;
+      ctx.shadowColor = color;
+      ctx.strokeStyle = hexA(color, 0.7 + pulse * 0.2);
       ctx.lineWidth = 1.5;
       ctx.beginPath();
       ctx.rect(fx, fy, fw, fh);
       ctx.stroke();
-      // Gothic corner brackets.
-      ctx.lineWidth = 2;
-      const c = 10;
+      // Gothic corner brackets — short heavier strokes at each corner.
+      ctx.shadowBlur = 0;
+      ctx.lineWidth = 2.2;
+      const cLen = 12;
       const corners: [number, number][] = [[fx, fy], [fx + fw, fy], [fx, fy + fh], [fx + fw, fy + fh]];
       for (const [cx2, cy2] of corners) {
         const sx = cx2 === fx ? 1 : -1;
         const sy = cy2 === fy ? 1 : -1;
         ctx.beginPath();
-        ctx.moveTo(cx2, cy2 + sy * c);
+        ctx.moveTo(cx2, cy2 + sy * cLen);
         ctx.lineTo(cx2, cy2);
-        ctx.lineTo(cx2 + sx * c, cy2);
+        ctx.lineTo(cx2 + sx * cLen, cy2);
         ctx.stroke();
       }
-      // Central banner label below the frame.
-      ctx.fillStyle = hexA(color, 0.75);
+      // Central banner label above the frame.
+      ctx.fillStyle = hexA(color, 0.8);
       ctx.font = 'bold 10px "Cinzel", serif';
       ctx.textAlign = 'center';
       ctx.fillText('◈ BOSS PHRASE ◈', fx + fw / 2, fy - 8);
@@ -1573,6 +1604,108 @@ function updateWords(d: LoopDeps, ctx: CanvasRenderingContext2D, textCtx: Canvas
       }
     }
   }
+}
+
+/** Boss intro cutscene overlay — renders the boss name, title, and lore text
+ * over the scene while the silhouette fades in. Fades out toward the end of
+ * the intro so the fight transition is smooth.
+ */
+function drawBossIntroOverlay(d: LoopDeps, textCtx: CanvasRenderingContext2D, time: number): void {
+  const b = d.bossRef.current;
+  if (!b || b.introStart <= 0) return;
+  const elapsed = time - b.introStart;
+  const total = BOSS_INTRO_MS;
+  if (elapsed >= total) return;
+
+  // Timeline: 0-800 blur-in title, 800-2600 hold, 2600-3800 lore visible, 3800-4500 fade.
+  const t = elapsed / total;
+  let alpha = 1;
+  if (elapsed < 600) alpha = elapsed / 600;
+  else if (elapsed > total - 700) alpha = (total - elapsed) / 700;
+  alpha = Math.max(0, Math.min(1, alpha));
+
+  const color = b.def.themeColor;
+
+  textCtx.save();
+  textCtx.textAlign = 'center';
+  textCtx.globalAlpha = alpha * 0.18;
+  textCtx.fillStyle = '#000';
+  textCtx.fillRect(0, 220, DESIGN_W, 180);
+  textCtx.restore();
+
+  // ── TITLE ("Beast of the Ramparts")
+  textCtx.save();
+  textCtx.textAlign = 'center';
+  textCtx.globalAlpha = alpha;
+  textCtx.font = '12px "Cinzel", serif';
+  textCtx.fillStyle = hexA(color, 0.75);
+  const letterSpacing = 0.3 + t * 0.2;
+  drawSpacedText(textCtx, b.def.title.toUpperCase(), DESIGN_W / 2, 250, letterSpacing);
+  textCtx.restore();
+
+  // ── NAME ("TAURUS DEMON") — big, letter-spaced, glowing
+  textCtx.save();
+  textCtx.textAlign = 'center';
+  textCtx.globalAlpha = alpha;
+  // Animate letter-spacing from tight → wide as the intro progresses
+  const nameSpacing = 0.05 + Math.min(1, elapsed / 1500) * 0.22;
+  textCtx.font = 'bold 52px "Cinzel", serif';
+  textCtx.shadowBlur = 32;
+  textCtx.shadowColor = color;
+  textCtx.fillStyle = color;
+  drawSpacedText(textCtx, b.def.name, DESIGN_W / 2, 308, nameSpacing);
+  textCtx.restore();
+
+  // ── LORE (italic, appears after a delay)
+  if (elapsed > 1000) {
+    const loreAlpha = Math.min(1, (elapsed - 1000) / 700) * alpha;
+    textCtx.save();
+    textCtx.textAlign = 'center';
+    textCtx.globalAlpha = loreAlpha;
+    textCtx.font = 'italic 18px "EB Garamond", serif';
+    textCtx.fillStyle = 'rgba(230, 210, 180, 0.9)';
+    textCtx.shadowBlur = 6;
+    textCtx.shadowColor = 'rgba(0,0,0,0.8)';
+    textCtx.fillText(b.def.introLore, DESIGN_W / 2, 360);
+    textCtx.restore();
+  }
+
+  // ── Sigil divider under the name
+  textCtx.save();
+  textCtx.globalAlpha = alpha * 0.7;
+  textCtx.strokeStyle = hexA(color, 0.8);
+  textCtx.lineWidth = 1;
+  const dividerY = 326;
+  const dividerHalfW = 120 + Math.min(60, elapsed / 40);
+  textCtx.beginPath();
+  textCtx.moveTo(DESIGN_W / 2 - dividerHalfW, dividerY);
+  textCtx.lineTo(DESIGN_W / 2 + dividerHalfW, dividerY);
+  textCtx.stroke();
+  textCtx.fillStyle = hexA(color, 1);
+  textCtx.beginPath(); textCtx.arc(DESIGN_W / 2 - dividerHalfW, dividerY, 2, 0, Math.PI * 2); textCtx.fill();
+  textCtx.beginPath(); textCtx.arc(DESIGN_W / 2 + dividerHalfW, dividerY, 2, 0, Math.PI * 2); textCtx.fill();
+  textCtx.restore();
+}
+
+/** Draw a string with manual letter-spacing (used for the intro title/name). */
+function drawSpacedText(ctx: CanvasRenderingContext2D, text: string, cx: number, cy: number, tracking: number): void {
+  const fontSize = parseInt(ctx.font, 10) || 20;
+  const spacePx = fontSize * tracking;
+  // Measure total width including spacing, then start left of center.
+  let totalW = 0;
+  const widths: number[] = [];
+  for (let i = 0; i < text.length; i++) {
+    const w = ctx.measureText(text[i]).width;
+    widths.push(w);
+    totalW += w + (i < text.length - 1 ? spacePx : 0);
+  }
+  let x = cx - totalW / 2;
+  for (let i = 0; i < text.length; i++) {
+    ctx.textAlign = 'left';
+    ctx.fillText(text[i], x, cy);
+    x += widths[i] + spacePx;
+  }
+  ctx.textAlign = 'center';  // restore
 }
 
 function drawDamageTexts(d: LoopDeps, textCtx: CanvasRenderingContext2D, dt: number): void {
@@ -1708,80 +1841,93 @@ function handleCharLive(d: LoopDeps, rawChar: string): void {
     if (img.dataset.state !== 'casting') { img.src = '/casting2.png'; img.dataset.state = 'casting'; }
   }
 
-  // Projectile deflection: any matching char destroys ALL in-flight projectiles with that char.
-  let deflectedAny = false;
+  const words = d.wordsRef.current;
+  let progressed = false;
+
+  // ── Phase 1: Projectile deflection.
+  //    Any in-flight projectile whose char matches fires a real fireball from
+  //    the player at its position + destroys it. Deflection is ATOMIC — it
+  //    credits the keystroke and a combo tick, and blocks any "wrong key"
+  //    combo reset further down. This way a successful parry never punishes.
+  let deflectedCount = 0;
   for (let i = d.projectilesRef.current.length - 1; i >= 0; i--) {
     if (d.projectilesRef.current[i].char === char) {
       const p = d.projectilesRef.current[i];
-      for (let k = 0; k < 14; k++) {
+      // Visible fireball from player toward the projectile.
+      d.fireballsRef.current.push({
+        x: PLAYER.x, y: PLAYER.y,
+        tx: p.x, ty: p.y,
+        progress: 0,
+        isSpecial: false,
+        targetBoss: false,
+      });
+      // Parry sparks at the projectile's position.
+      for (let k = 0; k < 10; k++) {
         if (d.particlesRef.current.length >= PARTICLE_CAP) break;
         d.particlesRef.current.push({
           x: p.x, y: p.y,
-          vx: (Math.random() - 0.5) * 5, vy: (Math.random() - 0.5) * 5,
-          life: 16, maxLife: 16, size: 2.5,
+          vx: (Math.random() - 0.5) * 4, vy: (Math.random() - 0.5) * 4,
+          life: 14, maxLife: 14, size: 2.5,
           color: p.fromBoss ? '#ffaa55' : '#ff88ff',
         });
       }
       d.projectilesRef.current.splice(i, 1);
-      deflectedAny = true;
+      deflectedCount += 1;
       d.statsRef.current.projectilesDeflected += 1;
     }
   }
-  if (deflectedAny) sfxShatter();
+  const deflectedAny = deflectedCount > 0;
+  if (deflectedAny) {
+    sfxFireball();
+    d.correctKeyRef.current += 1;
+    d.statsRef.current.correctLetters += 1;
+    d.comboRef.current += 1;
+    progressed = true;
+  }
 
-  // Word typing.
-  const words = d.wordsRef.current;
-  let progressed = false;
-
-  if (d.activeWordRef.current !== null) {
-    const w = words[d.activeWordRef.current];
-    if (w) {
-      // Skip auto-spaces.
-      while (w.text[w.typed.length] === ' ') w.typed += ' ';
-      if (w.text[w.typed.length] === char) {
-        w.typed += char;
+  // ── Phase 2: Word typing. Skipped entirely if the keystroke was consumed
+  //    by a deflection — the player's input was for the projectile, not the
+  //    word. (The new projectile-letter filter in spawnBossAttack guarantees
+  //    phrase letters and projectile letters never overlap, so this rule
+  //    doesn't cause double-duty loss.)
+  if (!deflectedAny) {
+    if (d.activeWordRef.current !== null) {
+      const w = words[d.activeWordRef.current];
+      if (w) {
+        // Skip auto-spaces.
+        while (w.text[w.typed.length] === ' ') w.typed += ' ';
+        if (w.text[w.typed.length] === char) {
+          w.typed += char;
+          d.correctKeyRef.current += 1;
+          d.statsRef.current.correctLetters += 1;
+          d.comboRef.current += 1;
+          progressed = true;
+          spawnFireball(d, w);
+          if (w.typed === w.text) completeWord(d, w, d.activeWordRef.current, now);
+        } else {
+          registerWrong(d.statsRef.current, char);
+          sfxMiss();
+          d.comboRef.current = 0;
+        }
+      }
+    } else {
+      const idx = words.findIndex(w => w.text.startsWith(char));
+      if (idx !== -1) {
+        const w = words[idx];
+        w.typed = char;
         d.correctKeyRef.current += 1;
         d.statsRef.current.correctLetters += 1;
         d.comboRef.current += 1;
+        d.activeWordRef.current = idx;
         progressed = true;
         spawnFireball(d, w);
-        if (w.typed === w.text) completeWord(d, w, d.activeWordRef.current, now);
-      } else if (deflectedAny) {
-        // Neutral: parried a projectile, active word untouched.
-        d.correctKeyRef.current += 1;
-        d.statsRef.current.correctLetters += 1;
-        d.comboRef.current += 1;
-        progressed = true;
+        if (w.typed === w.text) completeWord(d, w, idx, now);
       } else {
         registerWrong(d.statsRef.current, char);
         sfxMiss();
         d.comboRef.current = 0;
       }
     }
-  } else if (!deflectedAny) {
-    // Only start a new word if the keystroke wasn't consumed by a deflection.
-    const idx = words.findIndex(w => w.text.startsWith(char));
-    if (idx !== -1) {
-      const w = words[idx];
-      w.typed = char;
-      d.correctKeyRef.current += 1;
-      d.statsRef.current.correctLetters += 1;
-      d.comboRef.current += 1;
-      d.activeWordRef.current = idx;
-      progressed = true;
-      spawnFireball(d, w);
-      if (w.typed === w.text) completeWord(d, w, idx, now);
-    } else {
-      registerWrong(d.statsRef.current, char);
-      sfxMiss();
-      d.comboRef.current = 0;
-    }
-  } else {
-    // Deflection happened; count the keystroke as correct work.
-    d.correctKeyRef.current += 1;
-    d.statsRef.current.correctLetters += 1;
-    d.comboRef.current += 1;
-    progressed = true;
   }
 
   if (progressed) {
