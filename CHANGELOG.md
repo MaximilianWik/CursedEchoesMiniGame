@@ -4,6 +4,51 @@ All notable changes to Cursed Echoes. Format loosely follows [Keep a Changelog](
 
 ---
 
+## [0.2.2] — Deflection, cutscene, and clarity
+
+### 🐛 Bug fixes
+
+- **Deflection now fires an actual fireball from the player** toward each deflected projectile — previously only particles and a shatter sound played, so the parry felt invisible. The fireball explodes at the projectile's original position.
+- **Combo-reset-during-deflection fixed.** The keystroke-routing logic is now atomic: if any projectile is deflected, the keystroke is credited (combo +1, correct-letter stat) and the word-typing path is **skipped entirely**. No branch can reset combo while a parry is happening. Paired with the new letter-pool filter (below), a deflection can never collide with a wrong-word-letter path.
+- **Pause no longer cheeses the boss appearance.** The zone timer used `performance.now()` deltas which kept ticking through pauses, so hitting `ESC` would fast-forward toward the boss. The zone elapsed counter is now accumulated per active frame (`realDtSec`) and cannot advance while paused.
+- **Fireball knockback got a y-axis check.** Explosions no longer accidentally knock words from across the screen when a parry fireball lands near the top.
+
+### ⚔️ Boss redesign
+
+- **Intro cutscene** — entering a boss now spawns a 4.5 s reveal sequence:
+  - Boss silhouette fades in from below while scaling 0.7 → 1.0
+  - Boss name appears with letter-spacing widening 0.05 em → 0.27 em
+  - Boss title renders above in small tracked caps
+  - Italic lore text fades in at 1 s (new `introLore` field per boss)
+  - Thin sigil divider + glowing orbs extend outward as intro progresses
+  - HP bar is hidden, no attacks or phrases spawn during intro (`updateBoss` early-returns while `introStart > 0`)
+- **Boss can no longer be triggered early** by pausing — zone timer is pause-safe now.
+- **Projectile letter pool filters out phrase letters.** Every letter currently in the active boss phrase is excluded from the projectile-letter pool, so typing a phrase character can never accidentally deflect a projectile and typing a projectile character can never progress the phrase. Cleaner cause-and-effect.
+- **Fireball knockback** on boss fireballs tightened (y-proximity check) so parries don't ripple into distant words.
+
+### 🎨 Visual polish
+
+- **Projectile letter legibility** fixed while keeping the full VFX. Both boss and caster projectiles now render:
+  - A dark disc backing (`rgba(20, 6, 24, 0.85)` for caster, `rgba(20, 8, 4, 0.85)` for boss) centered on the char
+  - A thin theme-colored ring around the disc
+  - Bolder 22 px letter with a dark stroke outline (no shadow blur)
+  - Rune rings pushed out from radius 20/12 → 24/18 so they don't crowd the glyph
+- **Boss-phrase frame cleaned up.** The radial gradient fill (which created an opaque rectangular "box") is gone. The frame is now a thin pulsing outline with a theme-colored `shadowBlur`, four gothic corner brackets, and the `◈ BOSS PHRASE ◈` label above. The word and its frame now integrate into the scene without a visible color-gradient rectangle.
+
+### 🛠️ Data / internal
+
+- `BossDef` gained an `introLore: string` field per boss (shown during the intro overlay).
+- `BossRuntime` gained `introStart: number` and a new `BOSS_INTRO_MS = 4500` constant gating attacks, phrases, and HP bar during the intro.
+- `BossRenderState` carries `introStart` + `introDurationMs` so `drawBoss` can animate the silhouette's intro reveal alongside its existing death cutscene transforms.
+- `updateBoss` early-returns while `introStart > 0`; automatically clears `introStart` once the duration passes.
+- `spawnBossAttack` builds a filtered `pool` from `letters.split('')` minus every character of the active phrase, with fallback if the filter empties.
+
+### 📖 Docs
+
+- `README.md` fully rewritten with current controls, enemy behaviors, boss mechanics, HUD layout, dev console access, architecture, and accessibility notes.
+
+---
+
 ## [0.2.1] — Polish pass
 
 Targeted feedback response after live-testing the Abyss Overhaul. Bug fixes, boss-combat refinements, HUD de-cluttering, and new visual effects.

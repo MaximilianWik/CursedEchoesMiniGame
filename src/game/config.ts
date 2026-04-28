@@ -161,6 +161,7 @@ export type BossDef = {
   id: string;
   name: string;
   title: string;
+  introLore: string;         // shown during the intro cutscene
   maxHp: number;
   phases: BossPhase[];
   silhouette: 'taurus' | 'ornstein' | 'gwyn';
@@ -173,6 +174,7 @@ export const BOSSES: Record<string, BossDef> = {
     id: 'taurus',
     name: 'TAURUS DEMON',
     title: 'Beast of the Ramparts',
+    introLore: 'Long-stirred in the rubble. The stones yet remember its charge.',
     maxHp: 14,
     phases: [
       {hpPctThreshold: 1.0,  phraseBank: BOSS_PHRASES_EASY, phraseSpawnCooldown: 1.2, patterns: ['single'],              patternInterval: 3.2, projectileLetters: 'AEIOUNRST'},
@@ -187,6 +189,7 @@ export const BOSSES: Record<string, BossDef> = {
     id: 'ornstein',
     name: 'DRAGON SLAYER ORNSTEIN',
     title: 'Captain of the Four Knights',
+    introLore: 'Lightning clings to his spear. A captain undefeated.',
     maxHp: 22,
     phases: [
       {hpPctThreshold: 1.0,  phraseBank: BOSS_PHRASES_MID,  phraseSpawnCooldown: 1.1, patterns: ['single'],                   patternInterval: 2.8, projectileLetters: 'LIGHTNSPEAR'},
@@ -201,6 +204,7 @@ export const BOSSES: Record<string, BossDef> = {
     id: 'gwyn',
     name: 'GWYN, LORD OF CINDER',
     title: 'The First Flame',
+    introLore: 'He who first kindled the flame. His light wavers — do not falter.',
     maxHp: 32,
     phases: [
       {hpPctThreshold: 1.0,  phraseBank: BOSS_PHRASES_HARD, phraseSpawnCooldown: 1.0, patterns: ['single', 'volley'],          patternInterval: 2.6, projectileLetters: 'FIREASHCINDER'},

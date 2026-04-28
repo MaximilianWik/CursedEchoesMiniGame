@@ -1568,6 +1568,7 @@ export function drawProjectile(ctx: CanvasRenderingContext2D, p: Projectile, tim
 
 /** Boss projectile — a burning amber letter. Heavy but simple. */
 function drawBossProjectile(ctx: CanvasRenderingContext2D, p: Projectile): void {
+  // Outer halo.
   ctx.save();
   ctx.globalCompositeOperation = 'lighter';
   const halo = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, 32);
@@ -1577,13 +1578,25 @@ function drawBossProjectile(ctx: CanvasRenderingContext2D, p: Projectile): void 
   ctx.fillStyle = halo;
   ctx.fillRect(p.x - 32, p.y - 32, 64, 64);
   ctx.restore();
+
+  // Dark disc backing for letter legibility.
   ctx.save();
-  ctx.font = 'bold 20px "Cinzel", serif';
-  ctx.fillStyle = '#ffe4c0';
+  ctx.fillStyle = 'rgba(20, 8, 4, 0.85)';
+  ctx.beginPath(); ctx.arc(p.x, p.y, 13, 0, Math.PI * 2); ctx.fill();
+  ctx.strokeStyle = 'rgba(255, 140, 60, 0.9)';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+  ctx.restore();
+
+  // Letter — large, bold, high-contrast, no blur so it stays readable.
+  ctx.save();
+  ctx.font = 'bold 22px "Cinzel", serif';
+  ctx.fillStyle = '#fff4d6';
+  ctx.strokeStyle = '#1a0a04';
+  ctx.lineWidth = 3;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.shadowBlur = 14;
-  ctx.shadowColor = '#ff4010';
+  ctx.strokeText(p.char, p.x, p.y);
   ctx.fillText(p.char, p.x, p.y);
   ctx.restore();
 }
@@ -1620,47 +1633,57 @@ function drawCasterProjectile(ctx: CanvasRenderingContext2D, p: Projectile, time
   ctx.fillStyle = halo;
   ctx.fillRect(p.x - haloR, p.y - haloR, haloR * 2, haloR * 2);
 
-  // Rotating rune ring.
+  // Rotating rune ring — pushed out a bit so it doesn't crowd the letter.
   const ringAng = time * 0.004;
   for (let i = 0; i < 5; i++) {
     const ang = ringAng + (i / 5) * Math.PI * 2;
-    const rx = p.x + Math.cos(ang) * 20;
-    const ry = p.y + Math.sin(ang) * 20;
+    const rx = p.x + Math.cos(ang) * 24;
+    const ry = p.y + Math.sin(ang) * 24;
     ctx.fillStyle = 'rgba(255, 220, 255, 0.85)';
     ctx.beginPath();
     ctx.arc(rx, ry, 2, 0, Math.PI * 2);
     ctx.fill();
   }
 
-  // Counter-rotating inner ring.
+  // Counter-rotating inner ring — also pushed out.
   const ring2Ang = -time * 0.006;
   for (let i = 0; i < 3; i++) {
     const ang = ring2Ang + (i / 3) * Math.PI * 2;
-    const rx = p.x + Math.cos(ang) * 12;
-    const ry = p.y + Math.sin(ang) * 12;
+    const rx = p.x + Math.cos(ang) * 18;
+    const ry = p.y + Math.sin(ang) * 18;
     ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
     ctx.beginPath();
     ctx.arc(rx, ry, 1.5, 0, Math.PI * 2);
     ctx.fill();
   }
 
-  // Hot core.
-  const coreGrad = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, 14);
-  coreGrad.addColorStop(0, 'rgba(255, 255, 255, 1)');
-  coreGrad.addColorStop(0.4, 'rgba(255, 170, 255, 0.9)');
+  // Hot core — now used purely as ambient glow, clipped smaller than the disc.
+  const coreGrad = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, 22);
+  coreGrad.addColorStop(0, 'rgba(255, 200, 255, 0.8)');
+  coreGrad.addColorStop(0.5, 'rgba(255, 100, 255, 0.35)');
   coreGrad.addColorStop(1, 'rgba(255, 80, 255, 0)');
   ctx.fillStyle = coreGrad;
-  ctx.fillRect(p.x - 14, p.y - 14, 28, 28);
+  ctx.fillRect(p.x - 22, p.y - 22, 44, 44);
   ctx.restore();
 
-  // Letter on top.
+  // Dark disc backing behind the letter — this is what makes the glyph readable.
   ctx.save();
-  ctx.font = 'bold 18px "Cinzel", serif';
+  ctx.fillStyle = 'rgba(20, 6, 24, 0.85)';
+  ctx.beginPath(); ctx.arc(p.x, p.y, 13, 0, Math.PI * 2); ctx.fill();
+  ctx.strokeStyle = 'rgba(255, 170, 255, 0.9)';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+  ctx.restore();
+
+  // Letter on top — large bold, no blur, with dark stroke for definition.
+  ctx.save();
+  ctx.font = 'bold 22px "Cinzel", serif';
   ctx.fillStyle = '#ffffff';
+  ctx.strokeStyle = '#2a0818';
+  ctx.lineWidth = 3;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.shadowBlur = 16;
-  ctx.shadowColor = '#ff00ff';
+  ctx.strokeText(p.char, p.x, p.y);
   ctx.fillText(p.char, p.x, p.y);
   ctx.restore();
 }
@@ -1708,6 +1731,8 @@ export type BossRenderState = {
   attackWindupT: number;       // 0..1 while winding up an attack
   enraged: boolean;
   deathStart: number;          // 0 while alive; performance.now timestamp once defeated
+  introStart: number;          // 0 once intro is done; performance.now at start otherwise
+  introDurationMs: number;     // total intro length for progress math
 };
 
 export function drawBoss(
@@ -1748,9 +1773,27 @@ export function drawBoss(
     }
   }
 
+  // ── Intro cutscene transforms. Fade in, rise from below, scale from small.
+  //   0..500ms   — invisible / rising
+  //   500..3000  — fully visible, hanging ominously (lore overlay renders separately)
+  //   3000..4500 — settle to final pose
+  let introAlpha = 1;
+  let introOffsetY = 0;
+  let introScale = 1;
+  if (state.introStart > 0) {
+    const introElapsed = time - state.introStart;
+    if (introElapsed < state.introDurationMs) {
+      const t = Math.min(1, introElapsed / state.introDurationMs);
+      introAlpha = Math.min(1, t * 1.4);                  // fade in
+      introOffsetY = (1 - t) * 60;                        // rise from below
+      introScale = 0.7 + t * 0.3;                         // grow into place
+    }
+  }
+
   // Rim glow — stronger when enraged, boosted during death.
   ctx.save();
   ctx.globalCompositeOperation = 'lighter';
+  ctx.globalAlpha = Math.min(1, deathAlpha * introAlpha);
   const rimR = state.enraged ? 280 : 220;
   const rimA = Math.min(0.95, (state.enraged ? 0.55 : 0.32) + deathRimBoost * 0.4);
   const rim = ctx.createRadialGradient(cx, baseY - 40, 20, cx, baseY - 40, rimR + deathRimBoost * 60);
@@ -1761,8 +1804,9 @@ export function drawBoss(
   ctx.restore();
 
   ctx.save();
-  ctx.globalAlpha = deathAlpha;
-  ctx.translate(cx + deathJitterX, baseY + breath + deathOffsetY + deathJitterY);
+  ctx.globalAlpha = Math.min(1, deathAlpha * introAlpha);
+  ctx.translate(cx + deathJitterX, baseY + breath + deathOffsetY + deathJitterY + introOffsetY);
+  ctx.scale(introScale, introScale);
   if (state.silhouette === 'taurus') drawTaurus(ctx, state, time);
   else if (state.silhouette === 'ornstein') drawOrnstein(ctx, state, time);
   else drawGwyn(ctx, state, time);
@@ -1771,7 +1815,7 @@ export function drawBoss(
   // HP low OR death: cracks on the silhouette.
   if (hpT < 0.33 || state.deathStart > 0) {
     ctx.save();
-    ctx.globalAlpha = deathAlpha;
+    ctx.globalAlpha = Math.min(1, deathAlpha * introAlpha);
     ctx.strokeStyle = hexWithAlpha(state.themeColor, 0.6 + deathRimBoost * 0.4);
     ctx.lineWidth = 2 + deathRimBoost * 2;
     for (let i = 0; i < 3; i++) {
