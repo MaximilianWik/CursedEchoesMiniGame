@@ -4,6 +4,74 @@ All notable changes to Cursed Echoes. Format loosely follows [Keep a Changelog](
 
 ---
 
+## [0.2.1] — Polish pass
+
+Targeted feedback response after live-testing the Abyss Overhaul. Bug fixes, boss-combat refinements, HUD de-cluttering, and new visual effects.
+
+### 🐛 Bug fixes
+
+- **`MOUNTAINTOP` was unbeatable.** The word bank contained the literal string `"MOUNTaintop"` (mixed-case). Typing uppercase mismatched the lowercase letters in the stored word so completion was impossible. Fixed the entry + defensively `.map(w => w.toUpperCase())` the whole `GOTHIC_WORDS` array so stray casing can never break gameplay again.
+- **DODGE text didn't appear during boss fights.** The contact-check branch only pushed the `DODGE` toast in zone phase; projectile dodges during boss fights were silent. Moved the push into `updateProjectiles`'s i-frame branch too, so any successful dodge (word contact OR projectile) shows clear blue `DODGE` feedback.
+
+### 👹 Boss combat overhaul
+
+- **Bosses moved up the screen.** `BOSS_AIM.y` shifted from `470 → 380`, projectile spawn point from `y=440 → 360`, silhouette base from `520 → 440`. Projectiles now spawn a full ~90 px higher so they launch from the boss's body, not beside the player.
+- **Bosses tankier.** HP raised across the board: Taurus 8 → 14, Ornstein 12 → 22, Gwyn 18 → 32. Fights feel weighty without changing the phrase-damage formula.
+- **Boss phrase is centered AND framed.** Every phrase now spawns dead-center horizontally (`x = (DESIGN_W − widthEst) / 2`). A gothic frame in the boss's theme color is drawn around it: pulsing radial glow fill, thin outline, four corner brackets, and a `◈ BOSS PHRASE ◈` label above it. The phrase tied to the boss HP bar is unmistakable.
+- **Phrases vs word-projectiles separated cleanly.** New `isBossPhrase` and `isBossAttack` flags on `Word`. Boss-damage payload only attaches to completion-fireballs of phrases; word-projectiles never damage the boss but DO damage the player on contact.
+- **Wave attack is now a slow-spinning bullet-hell spiral.** Twelve projectiles spawn in a ring around the boss at radius 50, rotating CW or CCW (randomized per cast) while slowly expanding outward. They sweep through the entire play area instead of only the center. Projectile `spiralOrigin / spiralAng / spiralRadius / spiralAngVel / spiralRadVel` fields drive the pattern.
+- **New `word` attack pattern.** Bosses occasionally fire a FULL WORD as a projectile (`DEATH`, `DOOM`, `WITHER`, `RUIN`, `ASHES`, `CURSE`, `PYRE`, `DUSK`, `ABYSS`, `BLIGHT`). It descends at speed 0.45 with a `runner`-style streak and damages the player on contact (≈ 2-5 HP, scales with length). Typing it out destroys it without damaging the boss — a defensive type. Added to Taurus phase 3, Ornstein phase 2-3, Gwyn phase 2-3.
+- **Volley spread tightened.** Was ±220 px (letters at the edges never threatened the player). Now ±140 px — every volley letter actually passes through the player zone.
+- **Boss projectile spawn bounds expanded.** Projectiles are now cleaned up when they exit any screen edge (`x < -50 || x > DESIGN_W + 50 || y < -50 || y > DESIGN_H + 30`), not only when they fall off the bottom — needed for spiral patterns that can spin outward past the sides.
+
+### 🎭 Enemy clarity
+
+- **Caster projectiles got a dramatic magic-orb redesign.** Dedicated `drawCasterProjectile` function: six-point trail of fading magenta orbs, outer halo (`rgba(255,100,255)` gradient), 5-point rotating rune ring at radius 20, counter-rotating inner 3-point ring at radius 12, white-hot core, the letter rendered on top with magenta shadow. Clearly distinct from boss projectiles (which keep their simpler amber look).
+- **Caster muzzle flash.** When a caster fires, 12 magenta-pink spark particles burst from its position so you can trace the source.
+- **Ghost enemies harder.** Flicker formula rewritten: two detuned sines (frequencies `0.0055` and `0.013`) combine with an asymmetric curve — peaks hold at alpha 0.25-1.0, troughs drop to 0.03 for noticeably longer intervals. Irregular rhythm means you can't predict when a letter will be readable.
+
+### 🎨 HUD & visual effects
+
+- **HUD de-cluttered.** Estus row moved from the top-left block to its own bottom-left anchor at `bottom-8 left-8`. Flasks are now larger (`w-8 h-12`), with a proper bottle clip-path. The top-left keeps HP / stamina / souls / zone / accuracy / zone-progress / combo rank.
+- **Words now pass OVER the HUD, not under it.** Fixed the stacking-context bug where the shake-wrapper's `transform` created a new stacking context, so the inner text-canvas `z-40` only competed WITHIN that wrapper — while the outer HUD (`z-30` at the container level) sat above it unconditionally. Moved the HUD + BossBar inside the shake wrapper between the action canvas (`z-10`) and text canvas (`z-40`), so enemy words visually glide across any HUD element.
+- **Rank-up banner removed; rank IMAGES now animate dramatically on change.** Deleted `src/hud/RankUpBanner.tsx` entirely and removed all `rankUpEvent` plumbing from App.tsx. The rank-up SFX (`sfxRankUp`) still fires. The HUD rank image now has a new `rank-icon` class with two layered animations:
+  - `rankIconReveal` (900 ms): appears blurred + scaled-down 0.3× with intense over-saturated glow, blooms to 1.45× at 35 % with high brightness, settles to 1.00× with a subtle 75 %-keyframe overshoot.
+  - `rankIconIdle` (3.6 s infinite): continuous breathing — scale 1.00↔1.04, slight +1 px lift, glow oscillates 10 px ↔ 18 px.
+  - `rank-icon-sss` variant: cyan glow instead of amber, faster 1.8 s loop with slight rotation (−2° ↔ 3°) — gives SSS rank a distinct heartbeat.
+  - `key={rankChangeKey}` on the `<img>` re-mounts it on rank change, re-triggering the reveal animation.
+- **Estus drinking animation.** Multiple layered effects during the 1.15 s chug:
+  - Player sprite gets an `.is-drinking` class with a green+amber drop-shadow glow + brightness 1.15 + a `playerDrink` up-down bob keyframe.
+  - Canvas-drawn healing halo pulses at the player's feet (radial green gradient, sine-pulsed at 0.014 Hz).
+  - An amber flask glyph rises from the player's chest, with its fluid level draining from 100 % down to 0 % as progress advances.
+  - A circular progress ring sweeps around the player (clockwise, starting from 12 o'clock).
+  - Green + amber ember sparks ambient-spawn at ~40 % per frame.
+  - On completion: `+N` text + a 22-particle celebratory burst.
+  - Estus flask icons in the HUD get an `.estus-drain` keyframe (bright flash + darken) on the specific flask being used.
+
+### 🛠️ Dev panel access
+
+- **`◇ DEV CONSOLE` button on the Pause overlay.** Dedicated emerald-styled button alongside Resume / Settings / Abandon Run.
+- **`◇ DEV` button on the Game Over screen.** Small bottom-left button, fades in 200 ms after the Try Again button.
+- **`◇ DEV` button on the Victory screen.** Matching placement/style.
+- All three thread through a new `onOpenDev` prop wired to `setShowDevPanel(true)` in the App orchestrator.
+
+### 🔧 Internal refactors
+
+- **`Word` type** gained `isBossAttack?: boolean` and `isBossPhrase?: boolean`.
+- **`Projectile` type** gained `spiralOrigin / spiralAng / spiralRadius / spiralAngVel / spiralRadVel` (spiral pattern state) and `trail?: {x,y}[]` (dramatic caster streak).
+- **`spawnFireball`** now distinguishes phrase-completion fireballs (carry boss-damage payload) from attack-word fireballs (purely visual).
+- **`drawProjectile`** is now a dispatcher: `drawBossProjectile` (simple amber letter) vs `drawCasterProjectile` (elaborate magic orb + trail + rune rings + hot core).
+- **`drawEstusChug`** new function rendering the estus visuals on the action canvas. Called from the game loop after particles.
+- **`hexA(hex, alpha)`** small helper in App.tsx for building `rgba()` strings from `#rrggbb` boss theme colors — used by the gothic-frame render.
+
+### ✅ Verified
+
+- All brace / paren balance checks pass across every `.ts` / `.tsx` file.
+- Vercel build path: `vite build` with `installCommand: npm install --no-audit --no-fund` in `vercel.json`.
+- No residual `RankUpBanner` / `rankColor` / `rankUpEvent` references.
+
+---
+
 ## [0.2.0] — The Abyss Overhaul
 
 A complete reimagining of the game. What started as an endless typing trial is now a structured four-zone Soulslike with bosses, estus, dodge rolls, dramatic audio, atmospheric scenes, and a proper progression arc.

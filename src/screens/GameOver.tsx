@@ -23,11 +23,12 @@ export type GameOverScreenProps = {
   setPasswordError: (v: boolean) => void;
   onUnlock: () => void;
   onTryAgain: () => void;
+  onOpenDev: () => void;
 };
 
 export function GameOverScreen(props: GameOverScreenProps) {
   const {finalScore, maxCombo, topRank, stats, derived, zoneName, highscores,
-    secretPassword, passwordError, setSecretPassword, setPasswordError, onUnlock, onTryAgain} = props;
+    secretPassword, passwordError, setSecretPassword, setPasswordError, onUnlock, onTryAgain, onOpenDev} = props;
   const graphRef = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
@@ -116,6 +117,14 @@ export function GameOverScreen(props: GameOverScreenProps) {
         style={{animationDelay: '3200ms'}}
       >
         Try Again
+      </button>
+
+      <button
+        onClick={onOpenDev}
+        className="absolute bottom-6 left-6 z-[65] px-3 py-1.5 border border-emerald-700/70 bg-black/60 text-emerald-300 hover:text-emerald-100 hover:border-emerald-400 font-[Cinzel] text-[10px] tracking-[0.4em] uppercase opacity-0 fade-in"
+        style={{animationDelay: '3400ms'}}
+      >
+        ◇ DEV
       </button>
 
       <div className="absolute right-8 bottom-8 flex flex-col items-center z-[60] opacity-0 fade-in w-48" style={{animationDelay: '3000ms'}}>

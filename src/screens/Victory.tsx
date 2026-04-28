@@ -14,10 +14,11 @@ export type VictoryScreenProps = {
   stats: RunStats;
   derived: DerivedStats;
   onTryAgain: () => void;
+  onOpenDev: () => void;
 };
 
 export function VictoryScreen(props: VictoryScreenProps) {
-  const {finalScore, maxCombo, topRank, stats, derived, onTryAgain} = props;
+  const {finalScore, maxCombo, topRank, stats, derived, onTryAgain, onOpenDev} = props;
   return (
     <div className="absolute top-0 left-0 w-full h-full bg-black z-50 flex flex-col items-center justify-center fade-in ce-victory-bg">
       <div className="ce-victory-rays" aria-hidden />
@@ -46,6 +47,12 @@ export function VictoryScreen(props: VictoryScreenProps) {
         className="mt-12 px-12 py-3 border border-amber-500 text-amber-300 hover:bg-amber-900/30 hover:border-amber-200 transition-all uppercase tracking-[0.4em] font-[Cinzel] shadow-[0_0_25px_rgba(255,200,80,0.35)]"
       >
         Begin Anew
+      </button>
+      <button
+        onClick={onOpenDev}
+        className="absolute bottom-6 left-6 z-[65] px-3 py-1.5 border border-emerald-700/70 bg-black/60 text-emerald-300 hover:text-emerald-100 hover:border-emerald-400 font-[Cinzel] text-[10px] tracking-[0.4em] uppercase"
+      >
+        ◇ DEV
       </button>
     </div>
   );
