@@ -6,12 +6,23 @@
 export type MenuScreenProps = {
   onStart: () => void;
   onOpenSettings: () => void;
+  onOpenDev: () => void;
 };
 
-export function MenuScreen({onStart, onOpenSettings}: MenuScreenProps) {
+export function MenuScreen({onStart, onOpenSettings, onOpenDev}: MenuScreenProps) {
   return (
     <div className="absolute top-0 left-0 w-full h-full bg-black/70 flex flex-col items-center justify-center z-50 p-8 text-center ce-menu-bg">
       <div className="ce-menu-embers" aria-hidden />
+
+      {/* Dev console access — also reachable via the `` ` `` shortcut. */}
+      <button
+        onClick={onOpenDev}
+        className="absolute bottom-4 left-4 px-4 py-2 border border-emerald-700/70 bg-black/60 text-emerald-300 hover:text-emerald-100 hover:border-emerald-400 hover:bg-emerald-950/50 font-[Cinzel] text-xs tracking-[0.4em] uppercase shadow-[0_0_18px_rgba(0,180,100,0.2)] transition-all"
+        title="Dev console (password-gated) — shortcut: `"
+      >
+        ◇ Dev
+      </button>
+
       <h1 className="relative font-[Cinzel] text-5xl md:text-6xl text-amber-700 mb-2 tracking-[0.3em] drop-shadow-[0_0_25px_rgba(180,83,9,0.6)] ce-title">
         CURSED ECHOES
       </h1>

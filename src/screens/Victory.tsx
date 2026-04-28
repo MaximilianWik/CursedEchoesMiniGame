@@ -21,11 +21,10 @@ export function VictoryScreen(props: VictoryScreenProps) {
   return (
     <div className="absolute top-0 left-0 w-full h-full bg-black z-50 flex flex-col items-center justify-center fade-in ce-victory-bg">
       <div className="ce-victory-rays" aria-hidden />
-      <h1 className="font-[Cinzel] font-bold text-[84px] text-amber-300 tracking-[0.25em] ce-victory-title"
-          style={{textShadow: '0 0 40px rgba(255, 200, 80, 0.7), 0 0 10px rgba(0,0,0,0.9)'}}>
+      <h1 className="font-[Cinzel] font-bold text-5xl md:text-6xl text-amber-300 tracking-[0.2em] whitespace-nowrap ce-victory-title">
         VICTORY ACHIEVED
       </h1>
-      <p className="text-amber-200/70 font-serif italic tracking-wider mt-2 mb-8">
+      <p className="text-amber-200/70 font-serif italic tracking-wider mt-3 mb-10 ce-victory-sub">
         The First Flame is yours to kindle.
       </p>
 

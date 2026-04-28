@@ -173,7 +173,15 @@
     animation: raysSweep 12s linear infinite;
   }
   .ce-victory-title {
-    animation: victoryPulse 4s ease-in-out infinite;
+    opacity: 0;
+    text-shadow: 0 0 40px rgba(255, 200, 80, 0.7), 0 0 10px rgba(0, 0, 0, 0.9);
+    animation:
+      victoryReveal 1.8s cubic-bezier(0.2, 0.7, 0.2, 1) forwards,
+      victoryPulse 4s ease-in-out 2.0s infinite;
+  }
+  .ce-victory-sub {
+    opacity: 0;
+    animation: victorySubFade 1.2s ease-out 1.1s forwards;
   }
 
   /* ═══════════════════════════════════════════════════════════ */
@@ -425,6 +433,39 @@
   @keyframes raysSweep {
     from { background-position: 0% 0%, 0% 0%; }
     to   { background-position: 200% 0%, -200% 0%; }
+  }
+  @keyframes victoryReveal {
+    0% {
+      opacity: 0;
+      letter-spacing: 0;
+      transform: scale(0.6);
+      filter: blur(18px);
+      text-shadow: 0 0 10px rgba(255, 200, 80, 0.2);
+    }
+    40% {
+      opacity: 1;
+      letter-spacing: 0.12em;
+      transform: scale(1.08);
+      filter: blur(4px);
+      text-shadow: 0 0 50px rgba(255, 230, 140, 0.9);
+    }
+    70% {
+      opacity: 1;
+      letter-spacing: 0.2em;
+      transform: scale(1.02);
+      filter: blur(0);
+    }
+    100% {
+      opacity: 1;
+      letter-spacing: 0.2em;
+      transform: scale(1);
+      filter: blur(0);
+      text-shadow: 0 0 40px rgba(255, 200, 80, 0.7), 0 0 10px rgba(0, 0, 0, 0.9);
+    }
+  }
+  @keyframes victorySubFade {
+    0%   { opacity: 0; transform: translateY(8px); }
+    100% { opacity: 1; transform: translateY(0); }
   }
   @keyframes victoryPulse {
     0%, 100% { text-shadow: 0 0 40px rgba(255, 200, 80, 0.6), 0 0 10px rgba(0,0,0,0.9); }
