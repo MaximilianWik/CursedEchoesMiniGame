@@ -1675,7 +1675,6 @@ function completeWord(d: LoopDeps, w: Word, idx: number, now: number): void {
       });
     }
   }
-  }
 
   d.wordsRef.current.splice(idx, 1);
   d.activeWordRef.current = null;
