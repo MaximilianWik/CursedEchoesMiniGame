@@ -13,21 +13,19 @@
 }
 
 @layer utilities {
-  /* ── Animated utilities ─────────────────────────── */
-  .animate-shake {
-    animation: shake 0.1s cubic-bezier(0.36, 0.07, 0.19, 0.97) infinite;
-  }
-  .fade-in  { animation: fadeIn  1s   ease-out forwards; opacity: 0; }
-  .zoom-in  { animation: zoomIn  0.8s ease-out forwards; opacity: 0; }
-  .slide-in { animation: slideUp 0.8s ease-out forwards; opacity: 0; }
-  .animate-float-heart { animation: floatHeart 2s ease-out forwards; }
+  /* ═══════════════════════════════════════════════════════════ */
+  /* Animated utilities                                          */
+  /* ═══════════════════════════════════════════════════════════ */
+  .animate-shake         { animation: shake 0.1s cubic-bezier(0.36, 0.07, 0.19, 0.97) infinite; }
+  .fade-in               { animation: fadeIn  1s   ease-out forwards; opacity: 0; }
+  .zoom-in               { animation: zoomIn  0.8s ease-out forwards; opacity: 0; }
+  .slide-in              { animation: slideUp 0.8s ease-out forwards; opacity: 0; }
+  .animate-float-heart   { animation: floatHeart 2s ease-out forwards; }
 
-  /* ── HUD glow on numbers ────────────────────────── */
-  .hud-glow {
-    text-shadow: 0 0 12px rgba(255, 120, 50, 0.45), 0 0 2px rgba(0, 0, 0, 0.9);
-  }
-
-  /* ── Frame / vignette around the whole play area ── */
+  /* ═══════════════════════════════════════════════════════════ */
+  /* HUD glow + frame                                            */
+  /* ═══════════════════════════════════════════════════════════ */
+  .hud-glow   { text-shadow: 0 0 12px rgba(255, 120, 50, 0.45), 0 0 2px rgba(0, 0, 0, 0.9); }
   .ce-frame {
     box-shadow:
       inset 0 0 120px rgba(0, 0, 0, 0.9),
@@ -35,19 +33,30 @@
       0 0 80px rgba(0, 0, 0, 0.9);
   }
 
-  /* ── Player sprite: idle float ──────────────────── */
+  /* ═══════════════════════════════════════════════════════════ */
+  /* Player sprite — idle float + dodge slides                   */
+  /* ═══════════════════════════════════════════════════════════ */
   .player-sprite {
     animation: playerFloat 2.4s ease-in-out infinite;
     filter: drop-shadow(0 0 14px rgba(255, 120, 40, 0.35));
     will-change: transform, filter;
+    transition: filter 120ms ease-out;
+  }
+  .player-sprite.is-dodging-right {
+    animation: dodgeRight 360ms cubic-bezier(0.3, 0.7, 0.3, 1);
+  }
+  .player-sprite.is-dodging-left {
+    animation: dodgeLeft 360ms cubic-bezier(0.3, 0.7, 0.3, 1);
   }
 
-  /* ── Menu atmosphere ────────────────────────────── */
+  /* ═══════════════════════════════════════════════════════════ */
+  /* Menu atmosphere                                             */
+  /* ═══════════════════════════════════════════════════════════ */
   .ce-menu-bg {
     background:
       radial-gradient(ellipse at 50% 120%, rgba(140, 40, 10, 0.35) 0%, rgba(0, 0, 0, 0) 60%),
       radial-gradient(ellipse at 50% -20%, rgba(50, 20, 80, 0.3) 0%, rgba(0, 0, 0, 0) 60%),
-      #000;
+      rgba(0,0,0,0.55);
   }
   .ce-menu-embers {
     position: absolute;
@@ -70,23 +79,17 @@
     opacity: 0.7;
     mix-blend-mode: screen;
   }
-  .ce-title {
-    animation: titlePulse 4s ease-in-out infinite;
-  }
+  .ce-title { animation: titlePulse 4s ease-in-out infinite; }
   .ce-sigil {
-    width: 120px;
-    height: 14px;
+    width: 120px; height: 14px;
     background:
       linear-gradient(90deg, transparent 0, rgba(180, 83, 9, 0.6) 30%, rgba(220, 140, 50, 0.9) 50%, rgba(180, 83, 9, 0.6) 70%, transparent 100%);
     position: relative;
   }
   .ce-sigil::before, .ce-sigil::after {
-    content: '';
-    position: absolute;
-    top: 50%;
+    content: ''; position: absolute; top: 50%;
     width: 6px; height: 6px;
-    background: rgba(220, 140, 50, 1);
-    border-radius: 50%;
+    background: rgba(220, 140, 50, 1); border-radius: 50%;
     transform: translateY(-50%);
     box-shadow: 0 0 10px rgba(255, 140, 40, 0.8);
   }
@@ -96,12 +99,12 @@
     box-shadow: 0 0 35px rgba(180, 83, 9, 0.7), inset 0 0 20px rgba(180, 83, 9, 0.3);
   }
 
-  /* ── Death screen ember rain ────────────────────── */
+  /* ═══════════════════════════════════════════════════════════ */
+  /* YOU DIED reveal                                             */
+  /* ═══════════════════════════════════════════════════════════ */
   .ce-death-bg { position: relative; overflow: hidden; }
   .ce-death-embers {
-    position: absolute;
-    inset: 0;
-    pointer-events: none;
+    position: absolute; inset: 0; pointer-events: none;
     background-image:
       radial-gradient(2px 2px at 8% 100%, #ff2020 0, transparent 50%),
       radial-gradient(1.5px 1.5px at 22% 100%, #c00 0, transparent 50%),
@@ -115,10 +118,6 @@
     opacity: 0.5;
     mix-blend-mode: screen;
   }
-
-  /* ── The authentic Dark Souls "YOU DIED" reveal ─── */
-  /* Horizontal squash → widening letter-spacing → blur-in.
-     Settles into a slow pulse that lives forever. */
   .ce-died {
     position: relative;
     font-family: 'Cinzel', serif;
@@ -134,11 +133,8 @@
       youDiedPulse  3.2s ease-in-out 2.8s infinite;
   }
   .ce-died-smoke {
-    position: absolute;
-    left: 50%;
-    top: 50%;
-    width: 920px;
-    height: 220px;
+    position: absolute; left: 50%; top: 50%;
+    width: 920px; height: 220px;
     transform: translate(-50%, -50%) scale(0.3, 0.1);
     pointer-events: none;
     background:
@@ -147,25 +143,176 @@
         rgba(100, 0, 0, 0.35) 35%,
         rgba(40, 0, 0, 0.15) 60%,
         transparent 75%);
-    filter: blur(32px);
-    opacity: 0;
+    filter: blur(32px); opacity: 0;
     mix-blend-mode: screen;
     animation: youDiedSmoke 3.2s ease-out 150ms forwards;
   }
   .ce-died-vignette {
-    position: absolute;
-    inset: 0;
-    pointer-events: none;
+    position: absolute; inset: 0; pointer-events: none;
     background: radial-gradient(ellipse at 50% 42%,
-      transparent 0%,
-      transparent 30%,
-      rgba(100, 0, 0, 0.35) 80%,
-      rgba(40, 0, 0, 0.65) 100%);
+      transparent 0%, transparent 30%,
+      rgba(100, 0, 0, 0.35) 80%, rgba(40, 0, 0, 0.65) 100%);
     opacity: 0;
     animation: youDiedVignette 2.6s ease-out 150ms forwards;
   }
 
-  /* ── Keyframes ──────────────────────────────────── */
+  /* ═══════════════════════════════════════════════════════════ */
+  /* Victory screen                                              */
+  /* ═══════════════════════════════════════════════════════════ */
+  .ce-victory-bg {
+    background:
+      radial-gradient(ellipse at 50% 40%, rgba(255, 200, 80, 0.18) 0%, rgba(0,0,0,0) 55%),
+      radial-gradient(ellipse at 50% 100%, rgba(180, 120, 40, 0.12) 0%, rgba(0,0,0,0) 60%),
+      #000;
+  }
+  .ce-victory-rays {
+    position: absolute; inset: 0; pointer-events: none;
+    background:
+      linear-gradient(100deg, transparent 20%, rgba(255,220,140,0.06) 40%, transparent 60%),
+      linear-gradient(80deg, transparent 30%, rgba(255,220,140,0.05) 50%, transparent 70%);
+    animation: raysSweep 12s linear infinite;
+  }
+  .ce-victory-title {
+    animation: victoryPulse 4s ease-in-out infinite;
+  }
+
+  /* ═══════════════════════════════════════════════════════════ */
+  /* Bonfire interlude                                           */
+  /* ═══════════════════════════════════════════════════════════ */
+  .ce-bonfire-bg {
+    background:
+      radial-gradient(ellipse at 50% 65%, rgba(255, 120, 40, 0.22) 0%, rgba(120, 30, 10, 0.1) 30%, rgba(0,0,0,0) 60%),
+      radial-gradient(ellipse at 50% 10%, rgba(20, 8, 20, 0.6) 0%, rgba(0,0,0,0) 70%),
+      rgba(0, 0, 0, 0.92);
+  }
+  .ce-bonfire-title {
+    animation: bonfireTitleRise 1.2s ease-out forwards;
+    opacity: 0;
+    text-shadow: 0 0 35px rgba(255, 160, 60, 0.75);
+  }
+  .ce-bonfire-sprite {
+    position: relative;
+    width: 120px; height: 180px;
+    display: flex; align-items: flex-end; justify-content: center;
+  }
+  .ce-bonfire-sprite::before {
+    /* Base logs */
+    content: '';
+    position: absolute;
+    bottom: 0; left: 50%;
+    transform: translateX(-50%);
+    width: 80px; height: 18px;
+    background: linear-gradient(180deg, #2a1608 0%, #120804 100%);
+    border-radius: 4px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.9), 0 0 40px rgba(255, 100, 30, 0.4);
+  }
+  .ce-bonfire-flame {
+    position: absolute;
+    bottom: 12px; left: 50%;
+    width: 60px; height: 140px;
+    transform: translateX(-50%);
+    background: radial-gradient(ellipse at 50% 80%,
+      rgba(255, 230, 150, 0.9) 0%,
+      rgba(255, 140, 40, 0.7) 35%,
+      rgba(180, 50, 10, 0.3) 70%,
+      rgba(0,0,0,0) 100%);
+    filter: blur(8px);
+    mix-blend-mode: screen;
+    animation: bonfireFlame 1.6s ease-in-out infinite;
+    transform-origin: 50% 100%;
+  }
+
+  /* ═══════════════════════════════════════════════════════════ */
+  /* Rank-up toast                                               */
+  /* ═══════════════════════════════════════════════════════════ */
+  .rank-toast {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 14px 8px 10px;
+    background: linear-gradient(90deg, rgba(10,6,10,0.92) 0%, rgba(20,10,14,0.75) 100%);
+    border: 1px solid var(--rank-color, #ff7744);
+    box-shadow: 0 0 18px color-mix(in srgb, var(--rank-color, #ff7744) 55%, transparent), inset 0 0 18px rgba(0,0,0,0.6);
+    backdrop-filter: blur(2px);
+  }
+  .rank-toast-bar {
+    display: inline-block;
+    width: 3px;
+    height: 28px;
+    background: var(--rank-color, #ff7744);
+    box-shadow: 0 0 10px var(--rank-color, #ff7744);
+  }
+  .rank-toast-sub {
+    font-family: 'Cinzel', serif;
+    font-size: 9px;
+    letter-spacing: 0.4em;
+    text-transform: uppercase;
+    color: color-mix(in srgb, var(--rank-color, #ff7744) 80%, white 0%);
+    opacity: 0.7;
+  }
+  .rank-toast-label {
+    font-family: 'Cinzel', serif;
+    font-weight: 700;
+    font-size: 18px;
+    letter-spacing: 0.12em;
+    color: var(--rank-color, #ff7744);
+    text-shadow: 0 0 12px color-mix(in srgb, var(--rank-color, #ff7744) 60%, transparent);
+  }
+  .rank-toast-slide {
+    animation: rankToastSlide 1.5s cubic-bezier(0.2, 0.7, 0.3, 1) forwards;
+    opacity: 0;
+    transform: translateX(-20px);
+  }
+  .rank-toast-static {
+    animation: rankToastStatic 1.4s ease-out forwards;
+    opacity: 0;
+  }
+
+  /* ═══════════════════════════════════════════════════════════ */
+  /* Settings panel frame                                        */
+  /* ═══════════════════════════════════════════════════════════ */
+  .ce-settings-panel {
+    box-shadow: 0 0 60px rgba(0,0,0,0.95), inset 0 0 40px rgba(180, 83, 9, 0.08);
+    background-image:
+      linear-gradient(180deg, rgba(255,255,255,0.02) 0%, rgba(0,0,0,0) 30%);
+  }
+
+  /* ═══════════════════════════════════════════════════════════ */
+  /* Accessibility — global tweaks via body classes              */
+  /* ═══════════════════════════════════════════════════════════ */
+  .reduce-motion .animate-shake,
+  .reduce-motion .animate-pulse,
+  .reduce-motion .ce-title,
+  .reduce-motion .player-sprite {
+    animation: none !important;
+  }
+  .reduce-motion .ce-menu-embers,
+  .reduce-motion .ce-death-embers,
+  .reduce-motion .ce-victory-rays {
+    animation-duration: 40s !important;
+  }
+  .reduce-motion .ce-died {
+    animation: none !important;
+    opacity: 1;
+    letter-spacing: 0.15em;
+    filter: none;
+    color: #8b0000;
+    text-shadow: 0 0 30px rgba(139, 0, 0, 0.75);
+  }
+  .high-contrast {
+    backdrop-filter: none !important;
+  }
+  .high-contrast .ce-frame {
+    box-shadow: 0 0 40px rgba(0,0,0,0.9);
+  }
+  .colorblind .ce-died,
+  .colorblind [class*="bg-[#8b0000]"] {
+    color: #4a70c0 !important;
+  }
+
+  /* ═══════════════════════════════════════════════════════════ */
+  /* Keyframes                                                    */
+  /* ═══════════════════════════════════════════════════════════ */
   @keyframes shake {
     0%, 100% { transform: translateX(0); }
     25% { transform: translateX(-4px); }
@@ -176,12 +323,24 @@
   @keyframes zoomIn { from { transform: scale(0.9); } to { transform: scale(1); opacity: 1; } }
   @keyframes slideUp { from { transform: translateY(20px); } to { transform: translateY(0); opacity: 1; } }
   @keyframes floatHeart {
-    0% { transform: scale(var(--scale)) translateY(0); opacity: 1; filter: drop-shadow(0 0 10px #ff80cc); }
+    0%   { transform: scale(var(--scale)) translateY(0); opacity: 1; filter: drop-shadow(0 0 10px #ff80cc); }
     100% { transform: scale(calc(var(--scale) * 1.5)) translateY(-150px); opacity: 0; filter: drop-shadow(0 0 20px #ff80cc); }
   }
   @keyframes playerFloat {
     0%, 100% { transform: translate(-50%, 0) scale(1); }
     50%      { transform: translate(-50%, -6px) scale(1.01); }
+  }
+  @keyframes dodgeRight {
+    0%   { transform: translate(-50%, 0) scale(1); }
+    30%  { transform: translate(calc(-50% + 60px), -12px) scale(1.05); filter: drop-shadow(0 0 30px rgba(130, 200, 255, 0.9)); }
+    60%  { transform: translate(calc(-50% + 40px), -4px) scale(1.02); }
+    100% { transform: translate(-50%, 0) scale(1); }
+  }
+  @keyframes dodgeLeft {
+    0%   { transform: translate(-50%, 0) scale(1); }
+    30%  { transform: translate(calc(-50% - 60px), -12px) scale(1.05); filter: drop-shadow(0 0 30px rgba(130, 200, 255, 0.9)); }
+    60%  { transform: translate(calc(-50% - 40px), -4px) scale(1.02); }
+    100% { transform: translate(-50%, 0) scale(1); }
   }
   @keyframes emberRise {
     from { background-position-y: 0%; }
@@ -193,32 +352,28 @@
   }
   @keyframes youDiedReveal {
     0% {
-      opacity: 0;
-      letter-spacing: 0;
+      opacity: 0; letter-spacing: 0;
       transform: scale(1.7, 0.35);
       filter: blur(24px);
       color: #2a0000;
       text-shadow: 0 0 10px rgba(60, 0, 0, 0.3);
     }
     30% {
-      opacity: 0.75;
-      letter-spacing: 0.03em;
+      opacity: 0.75; letter-spacing: 0.03em;
       transform: scale(1.4, 0.55);
       filter: blur(14px);
       color: #4a0000;
       text-shadow: 0 0 28px rgba(120, 10, 10, 0.6);
     }
     65% {
-      opacity: 1;
-      letter-spacing: 0.11em;
+      opacity: 1; letter-spacing: 0.11em;
       transform: scale(1.06, 0.94);
       filter: blur(2px);
       color: #6b0000;
       text-shadow: 0 0 48px rgba(200, 15, 15, 0.85);
     }
     100% {
-      opacity: 1;
-      letter-spacing: 0.15em;
+      opacity: 1; letter-spacing: 0.15em;
       transform: scale(1, 1);
       filter: blur(0);
       color: #8b0000;
@@ -240,5 +395,39 @@
     30%  { opacity: 0; }
     70%  { opacity: 0.9; }
     100% { opacity: 0.65; }
+  }
+  @keyframes bonfireTitleRise {
+    from { transform: translateY(20px); opacity: 0; }
+    to   { transform: translateY(0);    opacity: 1; }
+  }
+  @keyframes bonfireFlame {
+    0%, 100% {
+      transform: translateX(-50%) scale(1.0, 1.0) skew(-2deg);
+      opacity: 0.9;
+    }
+    50% {
+      transform: translateX(-50%) scale(0.95, 1.08) skew(2deg);
+      opacity: 1;
+    }
+  }
+  @keyframes rankToastSlide {
+    0%   { opacity: 0; transform: translateX(-26px); filter: blur(6px); }
+    15%  { opacity: 1; transform: translateX(0);     filter: blur(0); }
+    75%  { opacity: 1; transform: translateX(0);     filter: blur(0); }
+    100% { opacity: 0; transform: translateX(8px);   filter: blur(2px); }
+  }
+  @keyframes rankToastStatic {
+    0%   { opacity: 0; }
+    20%  { opacity: 1; }
+    80%  { opacity: 1; }
+    100% { opacity: 0; }
+  }
+  @keyframes raysSweep {
+    from { background-position: 0% 0%, 0% 0%; }
+    to   { background-position: 200% 0%, -200% 0%; }
+  }
+  @keyframes victoryPulse {
+    0%, 100% { text-shadow: 0 0 40px rgba(255, 200, 80, 0.6), 0 0 10px rgba(0,0,0,0.9); }
+    50%      { text-shadow: 0 0 60px rgba(255, 220, 120, 0.9), 0 0 10px rgba(0,0,0,0.9); }
   }
 }

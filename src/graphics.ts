@@ -1,12 +1,14 @@
 /**
  * Cursed Echoes — low-level canvas rendering + atmosphere layer.
- * Pure functions + a small bg-particle pool. No React here.
+ * Pure functions + small particle pools. No React, no audio, no DOM.
  */
+
+import type {EnemyKind} from './game/config';
 
 export const DESIGN_W = 1024;
 export const DESIGN_H = 768;
 export const PARTICLE_CAP = 600;
-export const BG_EMBER_CAP = 140;
+const BG_EMBER_CAP = 140;
 
 export const COMBO_RANKS = [
   {count: 0,   label: 'Dismal',               id: 'D'},
@@ -19,6 +21,7 @@ export const COMBO_RANKS = [
 ] as const;
 
 export type Rank = (typeof COMBO_RANKS)[number];
+export type RankId = Rank['id'];
 
 export function rankForCombo(combo: number): Rank {
   for (let i = COMBO_RANKS.length - 1; i >= 0; i--) {
@@ -27,13 +30,24 @@ export function rankForCombo(combo: number): Rank {
   return COMBO_RANKS[0];
 }
 
+// ─────────────────────────────────────────────────────────────
+// Entity types
+// ─────────────────────────────────────────────────────────────
+
 export type Word = {
   text: string;
   x: number;
   y: number;
   speed: number;
   typed: string;
-  isSpecial: boolean;
+  kind: EnemyKind;
+  isSpecial: boolean;                 // JESSYKA heart word
+  hp: number;                         // tank armor ticks (cosmetic)
+  fireCooldown: number;               // caster: seconds until next projectile
+  ghostPhase: number;                 // 0..1 — alpha flicker state
+  scrambled: boolean;                 // mimic: has it scrambled yet?
+  stationaryX: number;                // chanter: fixed x; words keep their own
+  spawnTime: number;
 };
 
 export type Fireball = {
@@ -41,6 +55,7 @@ export type Fireball = {
   tx: number; ty: number;
   progress: number;
   isSpecial: boolean;
+  targetBoss: boolean;                // aim at boss instead of word
 };
 
 export type Particle = {
@@ -70,14 +85,47 @@ export type Ember = {
   flicker: number;
 };
 
+/** Single-letter projectile fired by caster words OR by bosses. Homes downward. */
+export type Projectile = {
+  x: number; y: number;
+  vx: number; vy: number;
+  char: string;
+  fromBoss: boolean;
+  life: number;                      // seconds
+};
+
+export type ImpactDecal = {
+  x: number; y: number;
+  radius: number;
+  life: number;
+  maxLife: number;
+  color: string;
+};
+
+export type Crow = {
+  x: number; y: number;
+  vx: number;
+  wingPhase: number;
+  life: number;
+};
+
+export type EyePair = {
+  x: number; y: number;
+  life: number;
+  maxLife: number;
+};
+
 // ─────────────────────────────────────────────────────────────
-// Background scene state — seeded once, mutated in-place each frame.
+// Background scene state
 // ─────────────────────────────────────────────────────────────
 
 export type Star = {x: number; y: number; size: number; twinkle: number};
 export type Torch = {x: number; y: number; seed: number};
 export type Chain = {x: number; yTop: number; yBot: number; swaySeed: number};
 export type BonfireEmber = {x: number; y: number; vx: number; vy: number; life: number; maxLife: number};
+export type RainDrop = {x: number; y: number; vy: number};
+export type AshFlake = {x: number; y: number; vx: number; vy: number; life: number; rotation: number; rotSpeed: number};
+export type EmberFall = {x: number; y: number; vx: number; vy: number; life: number; maxLife: number; size: number; hue: number};
 
 export type BgState = {
   embers: Ember[];
@@ -85,8 +133,17 @@ export type BgState = {
   torches: Torch[];
   chains: Chain[];
   bonfireEmbers: BonfireEmber[];
-  lightningStart: number;      // time the current flash began (0 = none active)
-  nextLightningAt: number;     // time we should trigger the next flash
+  rainDrops: RainDrop[];
+  ashFlakes: AshFlake[];
+  emberFall: EmberFall[];
+  crows: Crow[];
+  eyes: EyePair[];
+  decals: ImpactDecal[];
+  lightningStart: number;
+  nextLightningAt: number;
+  weather: 'none' | 'rain' | 'ash' | 'godrays' | 'emberstorm';
+  tintColor: string;                 // rgba overlay applied after bg render
+  zoomScale: number;                 // dynamic camera zoom (1 = no zoom)
 };
 
 export function createBgState(): BgState {
@@ -99,14 +156,10 @@ export function createBgState(): BgState {
       twinkle: Math.random() * Math.PI * 2,
     });
   }
-  // Torches placed on spire peaks — positions hand-picked to match the spire row.
   const torches: Torch[] = [
-    {x: 150, y: 395, seed: 0.17},
-    {x: 300, y: 360, seed: 0.53},
-    {x: 395, y: 395, seed: 0.29},
-    {x: 620, y: 405, seed: 0.71},
-    {x: 790, y: 395, seed: 0.42},
-    {x: 930, y: 395, seed: 0.88},
+    {x: 150, y: 395, seed: 0.17}, {x: 300, y: 360, seed: 0.53},
+    {x: 395, y: 395, seed: 0.29}, {x: 620, y: 405, seed: 0.71},
+    {x: 790, y: 395, seed: 0.42}, {x: 930, y: 395, seed: 0.88},
   ];
   const chains: Chain[] = [
     {x: 90,  yTop: 0, yBot: 180, swaySeed: 0.21},
@@ -115,20 +168,30 @@ export function createBgState(): BgState {
   ];
   return {
     embers: seedEmbers(BG_EMBER_CAP),
-    stars,
-    torches,
-    chains,
+    stars, torches, chains,
     bonfireEmbers: [],
+    rainDrops: [],
+    ashFlakes: [],
+    emberFall: [],
+    crows: [],
+    eyes: [],
+    decals: [],
     lightningStart: 0,
     nextLightningAt: 6000 + Math.random() * 12000,
+    weather: 'none',
+    tintColor: 'rgba(0,0,0,0)',
+    zoomScale: 1,
   };
+}
+
+export function setZoneStyling(bg: BgState, weather: BgState['weather'], tint: string): void {
+  bg.weather = weather;
+  bg.tintColor = tint;
 }
 
 function seedEmbers(count: number): Ember[] {
   const out: Ember[] = [];
-  for (let i = 0; i < count; i++) {
-    out.push(makeEmber(Math.random() * DESIGN_H));
-  }
+  for (let i = 0; i < count; i++) out.push(makeEmber(Math.random() * DESIGN_H));
   return out;
 }
 
@@ -139,8 +202,7 @@ function makeEmber(yOverride?: number): Ember {
     y: yOverride ?? DESIGN_H + 20,
     vx: (Math.random() - 0.5) * 0.2,
     vy: -0.3 - Math.random() * 0.9,
-    life: maxLife,
-    maxLife,
+    life: maxLife, maxLife,
     size: 0.8 + Math.random() * 1.8,
     hue: 18 + Math.random() * 22,
     flicker: Math.random() * Math.PI * 2,
@@ -151,11 +213,7 @@ function makeEmber(yOverride?: number): Ember {
 // Canvas setup + typography
 // ─────────────────────────────────────────────────────────────
 
-export function setupHiDPICanvas(
-  canvas: HTMLCanvasElement,
-  cssW: number,
-  cssH: number,
-): CanvasRenderingContext2D {
+export function setupHiDPICanvas(canvas: HTMLCanvasElement, cssW: number, cssH: number): CanvasRenderingContext2D {
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
   canvas.width = Math.round(cssW * dpr);
   canvas.height = Math.round(cssH * dpr);
@@ -166,23 +224,19 @@ export function setupHiDPICanvas(
   return ctx;
 }
 
-export function buildCharWidthCache(
-  ctx: CanvasRenderingContext2D,
-): Record<string, number> {
+export function buildCharWidthCache(ctx: CanvasRenderingContext2D): Record<string, number> {
   ctx.font = '24px "Cinzel", serif';
   const cache: Record<string, number> = {};
   for (let c = 65; c <= 90; c++) {
     const ch = String.fromCharCode(c);
     cache[ch] = ctx.measureText(ch).width;
   }
+  cache[' '] = ctx.measureText(' ').width;
   return cache;
 }
 
 // ─────────────────────────────────────────────────────────────
 // Background scene — Dark-Souls-inspired.
-// Layers from back to front: sky → stars → moon → mountains →
-// cathedral → mid spires → torches → chains → fog → fg pillars →
-// bonfire → embers → lightning → vignette.
 // ─────────────────────────────────────────────────────────────
 
 export function drawBackground(
@@ -191,6 +245,7 @@ export function drawBackground(
   time: number,
   dt: number,
   lowHp: boolean,
+  dof: boolean,
 ): void {
   drawSky(ctx);
   drawStars(ctx, bg.stars, time);
@@ -201,39 +256,51 @@ export function drawBackground(
   drawMidSpires(ctx);
   drawTorches(ctx, bg.torches, time);
   drawChains(ctx, bg.chains, time);
+  if (bg.weather === 'godrays') drawGodRays(ctx, time);
   drawFog(ctx, time);
+  drawEyes(ctx, bg, dt);
+  drawCrows(ctx, bg, dt);
   drawForegroundPillars(ctx);
   drawBonfire(ctx, bg, time, dt);
   drawEmbers(ctx, bg.embers, dt);
+  drawWeather(ctx, bg, dt);
   updateLightning(bg, time);
   drawLightningFlash(ctx, bg, time);
   drawVignette(ctx, time, lowHp);
+  if (bg.tintColor !== 'rgba(0,0,0,0)') {
+    ctx.fillStyle = bg.tintColor;
+    ctx.fillRect(0, 0, DESIGN_W, DESIGN_H);
+  }
+  if (dof) {
+    // Subtle DOF — a very slight top-gradient blur fake (cheap).
+    ctx.save();
+    const g = ctx.createLinearGradient(0, 0, 0, DESIGN_H * 0.5);
+    g.addColorStop(0, 'rgba(10,8,12,0.18)');
+    g.addColorStop(1, 'rgba(10,8,12,0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, DESIGN_W, DESIGN_H * 0.5);
+    ctx.restore();
+  }
 }
 
-// ── Sky ───────────────────────────────────────────────────────
+// ── Sky + fixtures (unchanged structure, kept concise) ─────────
 function drawSky(ctx: CanvasRenderingContext2D): void {
   const g = ctx.createLinearGradient(0, 0, 0, DESIGN_H);
-  g.addColorStop(0.00, '#0a0614');   // deep indigo
-  g.addColorStop(0.35, '#140817');   // smoky purple-black
-  g.addColorStop(0.60, '#1a0808');   // dying burgundy (horizon)
-  g.addColorStop(0.80, '#0c0404');   // blood-black
-  g.addColorStop(1.00, '#030202');   // near-black floor
+  g.addColorStop(0.00, '#0a0614');
+  g.addColorStop(0.35, '#140817');
+  g.addColorStop(0.60, '#1a0808');
+  g.addColorStop(0.80, '#0c0404');
+  g.addColorStop(1.00, '#030202');
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, DESIGN_W, DESIGN_H);
-
-  // Horizon glow — suggests a dying sun behind the cathedral.
-  const h = ctx.createRadialGradient(
-    DESIGN_W / 2, DESIGN_H * 0.55, 60,
-    DESIGN_W / 2, DESIGN_H * 0.55, 520,
-  );
-  h.addColorStop(0,   'rgba(160, 50, 15, 0.45)');
+  const h = ctx.createRadialGradient(DESIGN_W/2, DESIGN_H*0.55, 60, DESIGN_W/2, DESIGN_H*0.55, 520);
+  h.addColorStop(0, 'rgba(160, 50, 15, 0.45)');
   h.addColorStop(0.4, 'rgba(90, 25, 10, 0.22)');
-  h.addColorStop(1,   'rgba(0, 0, 0, 0)');
+  h.addColorStop(1, 'rgba(0, 0, 0, 0)');
   ctx.fillStyle = h;
   ctx.fillRect(0, 0, DESIGN_W, DESIGN_H);
 }
 
-// ── Stars ─────────────────────────────────────────────────────
 function drawStars(ctx: CanvasRenderingContext2D, stars: Star[], time: number): void {
   ctx.save();
   ctx.globalCompositeOperation = 'lighter';
@@ -245,45 +312,27 @@ function drawStars(ctx: CanvasRenderingContext2D, stars: Star[], time: number): 
   ctx.restore();
 }
 
-// ── Moon ──────────────────────────────────────────────────────
 function drawMoon(ctx: CanvasRenderingContext2D, time: number): void {
   const cx = 820, cy = 130, r = 38;
   const pulse = 0.85 + Math.sin(time * 0.0006) * 0.15;
-
-  // Outer halo.
   ctx.save();
   ctx.globalCompositeOperation = 'lighter';
   const halo = ctx.createRadialGradient(cx, cy, 0, cx, cy, 180);
-  halo.addColorStop(0,   'rgba(230, 210, 170, ' + (0.35 * pulse).toFixed(3) + ')');
+  halo.addColorStop(0, 'rgba(230, 210, 170, ' + (0.35 * pulse).toFixed(3) + ')');
   halo.addColorStop(0.3, 'rgba(200, 150, 110, ' + (0.15 * pulse).toFixed(3) + ')');
-  halo.addColorStop(1,   'rgba(0, 0, 0, 0)');
+  halo.addColorStop(1, 'rgba(0, 0, 0, 0)');
   ctx.fillStyle = halo;
   ctx.fillRect(cx - 180, cy - 180, 360, 360);
   ctx.restore();
-
-  // Disc.
   ctx.fillStyle = '#ddcba0';
-  ctx.beginPath();
-  ctx.arc(cx, cy, r, 0, Math.PI * 2);
-  ctx.fill();
-
-  // Subtle cratering — darker overlay on the right edge.
+  ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill();
   ctx.fillStyle = 'rgba(60, 40, 20, 0.25)';
-  ctx.beginPath();
-  ctx.arc(cx + 6, cy + 4, r * 0.9, 0, Math.PI * 2);
-  ctx.fill();
-
-  // Thin horizontal cloud crossing the moon.
-  ctx.save();
+  ctx.beginPath(); ctx.arc(cx + 6, cy + 4, r * 0.9, 0, Math.PI * 2); ctx.fill();
   const cloudX = ((time * 0.005) % (DESIGN_W + 300)) - 150;
   ctx.fillStyle = 'rgba(10, 5, 15, 0.55)';
-  ctx.beginPath();
-  ctx.ellipse(cx - 20 + cloudX * 0.02, cy + 2, 60, 4, 0, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.restore();
+  ctx.beginPath(); ctx.ellipse(cx - 20 + cloudX * 0.02, cy + 2, 60, 4, 0, 0, Math.PI * 2); ctx.fill();
 }
 
-// ── Drifting cloud band near horizon ──────────────────────────
 function drawCloudBand(ctx: CanvasRenderingContext2D, time: number): void {
   ctx.save();
   ctx.globalCompositeOperation = 'screen';
@@ -302,222 +351,135 @@ function drawCloudBand(ctx: CanvasRenderingContext2D, time: number): void {
   ctx.restore();
 }
 
-// ── Distant mountains ─────────────────────────────────────────
 function drawMountains(ctx: CanvasRenderingContext2D): void {
   ctx.save();
   ctx.fillStyle = '#0e0a14';
   ctx.beginPath();
   const baseY = DESIGN_H * 0.55;
-  ctx.moveTo(0, DESIGN_H);
-  ctx.lineTo(0, baseY);
-  // Jagged silhouette.
-  const peaks = [
-    [60, 40], [130, 75], [200, 30], [280, 95], [360, 50],
-    [430, 90], [510, 25], [590, 80], [670, 45], [750, 95],
-    [830, 40], [910, 85], [990, 55],
+  ctx.moveTo(0, DESIGN_H); ctx.lineTo(0, baseY);
+  const peaks: [number, number][] = [
+    [60,40],[130,75],[200,30],[280,95],[360,50],[430,90],[510,25],[590,80],
+    [670,45],[750,95],[830,40],[910,85],[990,55],
   ];
   for (const [px, ph] of peaks) {
-    ctx.lineTo(px - 30, baseY);
-    ctx.lineTo(px, baseY - ph);
-    ctx.lineTo(px + 30, baseY);
+    ctx.lineTo(px - 30, baseY); ctx.lineTo(px, baseY - ph); ctx.lineTo(px + 30, baseY);
   }
-  ctx.lineTo(DESIGN_W, baseY);
-  ctx.lineTo(DESIGN_W, DESIGN_H);
-  ctx.closePath();
-  ctx.fill();
-
-  // Thin rim light on peaks — backlit by horizon glow.
+  ctx.lineTo(DESIGN_W, baseY); ctx.lineTo(DESIGN_W, DESIGN_H);
+  ctx.closePath(); ctx.fill();
   ctx.strokeStyle = 'rgba(140, 60, 30, 0.35)';
   ctx.lineWidth = 1;
-  ctx.beginPath();
-  ctx.moveTo(0, baseY);
-  for (const [px, ph] of peaks) {
-    ctx.lineTo(px - 30, baseY);
-    ctx.lineTo(px, baseY - ph);
-    ctx.lineTo(px + 30, baseY);
-  }
-  ctx.lineTo(DESIGN_W, baseY);
-  ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(0, baseY);
+  for (const [px, ph] of peaks) { ctx.lineTo(px - 30, baseY); ctx.lineTo(px, baseY - ph); ctx.lineTo(px + 30, baseY); }
+  ctx.lineTo(DESIGN_W, baseY); ctx.stroke();
   ctx.restore();
 }
 
-// ── Main cathedral with rose window ───────────────────────────
 function drawCathedral(ctx: CanvasRenderingContext2D, time: number): void {
   const baseY = DESIGN_H * 0.68;
   const cx = DESIGN_W / 2;
-
-  // Backlight glow behind the cathedral (so the silhouette pops).
   const glow = ctx.createRadialGradient(cx, baseY - 80, 20, cx, baseY - 80, 300);
-  glow.addColorStop(0,   'rgba(180, 80, 30, 0.25)');
+  glow.addColorStop(0, 'rgba(180, 80, 30, 0.25)');
   glow.addColorStop(0.5, 'rgba(120, 40, 15, 0.12)');
-  glow.addColorStop(1,   'rgba(0, 0, 0, 0)');
-  ctx.fillStyle = glow;
-  ctx.fillRect(cx - 300, baseY - 380, 600, 460);
-
+  glow.addColorStop(1, 'rgba(0, 0, 0, 0)');
+  ctx.fillStyle = glow; ctx.fillRect(cx - 300, baseY - 380, 600, 460);
   ctx.save();
   ctx.fillStyle = '#050308';
-
-  // Main cathedral body — central nave + two massive bell towers.
   ctx.beginPath();
-
-  // Left bell tower.
-  const towerL = {x: 420, w: 70, h: 360};
-  ctx.moveTo(towerL.x, baseY);
-  ctx.lineTo(towerL.x, baseY - towerL.h);
-  // Tower steeple — pointed arch roof.
-  ctx.lineTo(towerL.x - 4, baseY - towerL.h - 8);
-  ctx.lineTo(towerL.x + towerL.w / 2, baseY - towerL.h - 48);
-  ctx.lineTo(towerL.x + towerL.w + 4, baseY - towerL.h - 8);
-  ctx.lineTo(towerL.x + towerL.w, baseY - towerL.h);
-  ctx.lineTo(towerL.x + towerL.w, baseY - 240); // drop down to nave roof
-  // Central nave — pointed arch.
-  ctx.lineTo(430, baseY - 240);
-  ctx.lineTo(430, baseY - 260);
+  const tL = {x: 420, w: 70, h: 360};
+  ctx.moveTo(tL.x, baseY);
+  ctx.lineTo(tL.x, baseY - tL.h);
+  ctx.lineTo(tL.x - 4, baseY - tL.h - 8);
+  ctx.lineTo(tL.x + tL.w / 2, baseY - tL.h - 48);
+  ctx.lineTo(tL.x + tL.w + 4, baseY - tL.h - 8);
+  ctx.lineTo(tL.x + tL.w, baseY - tL.h);
+  ctx.lineTo(tL.x + tL.w, baseY - 240);
+  ctx.lineTo(430, baseY - 240); ctx.lineTo(430, baseY - 260);
   ctx.quadraticCurveTo(cx, baseY - 320, 594, baseY - 260);
   ctx.lineTo(594, baseY - 240);
-  ctx.lineTo(594, baseY - 240);
-  // Right bell tower.
-  const towerR = {x: 534, w: 70, h: 360};
-  ctx.lineTo(towerR.x, baseY - 240);
-  ctx.lineTo(towerR.x, baseY - towerR.h);
-  ctx.lineTo(towerR.x - 4, baseY - towerR.h - 8);
-  ctx.lineTo(towerR.x + towerR.w / 2, baseY - towerR.h - 48);
-  ctx.lineTo(towerR.x + towerR.w + 4, baseY - towerR.h - 8);
-  ctx.lineTo(towerR.x + towerR.w, baseY - towerR.h);
-  ctx.lineTo(towerR.x + towerR.w, baseY);
-  ctx.closePath();
-  ctx.fill();
-
-  // Flying buttresses (simple angled silhouettes on each side).
+  const tR = {x: 534, w: 70, h: 360};
+  ctx.lineTo(tR.x, baseY - 240);
+  ctx.lineTo(tR.x, baseY - tR.h);
+  ctx.lineTo(tR.x - 4, baseY - tR.h - 8);
+  ctx.lineTo(tR.x + tR.w / 2, baseY - tR.h - 48);
+  ctx.lineTo(tR.x + tR.w + 4, baseY - tR.h - 8);
+  ctx.lineTo(tR.x + tR.w, baseY - tR.h);
+  ctx.lineTo(tR.x + tR.w, baseY);
+  ctx.closePath(); ctx.fill();
   ctx.beginPath();
-  ctx.moveTo(340, baseY);
-  ctx.lineTo(340, baseY - 80);
-  ctx.lineTo(420, baseY - 160);
-  ctx.lineTo(420, baseY - 140);
-  ctx.lineTo(360, baseY - 70);
-  ctx.lineTo(360, baseY);
-  ctx.closePath();
-  ctx.fill();
+  ctx.moveTo(340, baseY); ctx.lineTo(340, baseY - 80); ctx.lineTo(420, baseY - 160);
+  ctx.lineTo(420, baseY - 140); ctx.lineTo(360, baseY - 70); ctx.lineTo(360, baseY);
+  ctx.closePath(); ctx.fill();
   ctx.beginPath();
-  ctx.moveTo(684, baseY);
-  ctx.lineTo(684, baseY - 80);
-  ctx.lineTo(604, baseY - 160);
-  ctx.lineTo(604, baseY - 140);
-  ctx.lineTo(664, baseY - 70);
-  ctx.lineTo(664, baseY);
-  ctx.closePath();
-  ctx.fill();
-
-  // Rose window — glowing circle on the nave.
-  const roseX = cx;
-  const roseY = baseY - 185;
-  const roseR = 34;
-  const rosePulse = 0.7 + Math.sin(time * 0.002) * 0.3;
-
-  // Outer halo.
+  ctx.moveTo(684, baseY); ctx.lineTo(684, baseY - 80); ctx.lineTo(604, baseY - 160);
+  ctx.lineTo(604, baseY - 140); ctx.lineTo(664, baseY - 70); ctx.lineTo(664, baseY);
+  ctx.closePath(); ctx.fill();
+  const roseX = cx, roseY = baseY - 185, roseR = 34;
+  const rp = 0.7 + Math.sin(time * 0.002) * 0.3;
   ctx.save();
   ctx.globalCompositeOperation = 'lighter';
-  const rhalo = ctx.createRadialGradient(roseX, roseY, 0, roseX, roseY, 120);
-  rhalo.addColorStop(0,   'rgba(255, 120, 40, ' + (0.5 * rosePulse).toFixed(3) + ')');
-  rhalo.addColorStop(0.4, 'rgba(200, 60, 20, ' + (0.25 * rosePulse).toFixed(3) + ')');
-  rhalo.addColorStop(1,   'rgba(0, 0, 0, 0)');
-  ctx.fillStyle = rhalo;
-  ctx.fillRect(roseX - 120, roseY - 120, 240, 240);
+  const rh = ctx.createRadialGradient(roseX, roseY, 0, roseX, roseY, 120);
+  rh.addColorStop(0, 'rgba(255, 120, 40, ' + (0.5 * rp).toFixed(3) + ')');
+  rh.addColorStop(0.4, 'rgba(200, 60, 20, ' + (0.25 * rp).toFixed(3) + ')');
+  rh.addColorStop(1, 'rgba(0, 0, 0, 0)');
+  ctx.fillStyle = rh; ctx.fillRect(roseX - 120, roseY - 120, 240, 240);
   ctx.restore();
-
-  // Rose window disc.
   ctx.fillStyle = '#ff6a20';
-  ctx.beginPath();
-  ctx.arc(roseX, roseY, roseR, 0, Math.PI * 2);
-  ctx.fill();
-
-  // Tracery — 6 radial spokes + inner circle (stained glass).
-  ctx.strokeStyle = '#05030899';
-  ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.arc(roseX, roseY, roseR, 0, Math.PI * 2); ctx.fill();
+  ctx.strokeStyle = '#05030899'; ctx.lineWidth = 2;
   for (let i = 0; i < 6; i++) {
     const ang = (i / 6) * Math.PI * 2;
-    ctx.beginPath();
-    ctx.moveTo(roseX, roseY);
-    ctx.lineTo(roseX + Math.cos(ang) * roseR, roseY + Math.sin(ang) * roseR);
-    ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(roseX, roseY);
+    ctx.lineTo(roseX + Math.cos(ang) * roseR, roseY + Math.sin(ang) * roseR); ctx.stroke();
   }
-  ctx.beginPath();
-  ctx.arc(roseX, roseY, roseR * 0.45, 0, Math.PI * 2);
-  ctx.stroke();
-
-  // Small arched windows on the towers — dim gold flickers.
-  const winPulse = 0.6 + Math.sin(time * 0.003) * 0.3;
-  ctx.fillStyle = 'rgba(210, 120, 50, ' + (0.55 * winPulse).toFixed(3) + ')';
-  for (const tx of [towerL.x + 20, towerL.x + 44, towerR.x + 20, towerR.x + 44]) {
-    ctx.fillRect(tx - 3, baseY - 280, 6, 14);
-    ctx.fillRect(tx - 3, baseY - 200, 6, 14);
+  ctx.beginPath(); ctx.arc(roseX, roseY, roseR * 0.45, 0, Math.PI * 2); ctx.stroke();
+  const wp = 0.6 + Math.sin(time * 0.003) * 0.3;
+  ctx.fillStyle = 'rgba(210, 120, 50, ' + (0.55 * wp).toFixed(3) + ')';
+  for (const x of [tL.x + 20, tL.x + 44, tR.x + 20, tR.x + 44]) {
+    ctx.fillRect(x - 3, baseY - 280, 6, 14);
+    ctx.fillRect(x - 3, baseY - 200, 6, 14);
   }
-
   ctx.restore();
 }
 
-// ── Mid-ground spires (old cathedral silhouette, pushed lower) ─
 function drawMidSpires(ctx: CanvasRenderingContext2D): void {
   const baseY = DESIGN_H * 0.72;
   ctx.save();
   ctx.fillStyle = '#030206';
   const spires = [
-    {x: 60,  h: 130, w: 40},
-    {x: 150, h: 180, w: 52},
-    {x: 230, h: 140, w: 42},
-    {x: 300, h: 190, w: 56},
-    {x: 395, h: 170, w: 48},
-    // center gap for cathedral
-    {x: 620, h: 175, w: 50},
-    {x: 710, h: 210, w: 58},
-    {x: 790, h: 170, w: 46},
-    {x: 870, h: 145, w: 40},
-    {x: 960, h: 175, w: 48},
+    {x:60,h:130,w:40},{x:150,h:180,w:52},{x:230,h:140,w:42},{x:300,h:190,w:56},
+    {x:395,h:170,w:48},{x:620,h:175,w:50},{x:710,h:210,w:58},{x:790,h:170,w:46},
+    {x:870,h:145,w:40},{x:960,h:175,w:48},
   ];
   ctx.beginPath();
-  ctx.moveTo(0, DESIGN_H);
-  ctx.lineTo(0, baseY);
+  ctx.moveTo(0, DESIGN_H); ctx.lineTo(0, baseY);
   for (const s of spires) {
-    const left = s.x - s.w / 2;
-    const right = s.x + s.w / 2;
-    ctx.lineTo(left, baseY);
-    ctx.lineTo(left, baseY - s.h * 0.6);
+    const left = s.x - s.w / 2, right = s.x + s.w / 2;
+    ctx.lineTo(left, baseY); ctx.lineTo(left, baseY - s.h * 0.6);
     ctx.quadraticCurveTo(s.x, baseY - s.h - 25, right, baseY - s.h * 0.6);
     ctx.lineTo(right, baseY);
   }
-  ctx.lineTo(DESIGN_W, baseY);
-  ctx.lineTo(DESIGN_W, DESIGN_H);
-  ctx.closePath();
-  ctx.fill();
+  ctx.lineTo(DESIGN_W, baseY); ctx.lineTo(DESIGN_W, DESIGN_H);
+  ctx.closePath(); ctx.fill();
   ctx.restore();
 }
 
-// ── Torches ───────────────────────────────────────────────────
 function drawTorches(ctx: CanvasRenderingContext2D, torches: Torch[], time: number): void {
   ctx.save();
   ctx.globalCompositeOperation = 'lighter';
   for (const t of torches) {
-    // Flicker via layered sines.
-    const flick = 0.65 + Math.sin(time * 0.012 + t.seed * 20) * 0.2
-                       + Math.sin(time * 0.031 + t.seed * 13) * 0.15;
+    const flick = 0.65 + Math.sin(time * 0.012 + t.seed * 20) * 0.2 + Math.sin(time * 0.031 + t.seed * 13) * 0.15;
     const r = 28 + flick * 6;
     const halo = ctx.createRadialGradient(t.x, t.y, 0, t.x, t.y, r);
-    halo.addColorStop(0,   'rgba(255, 170, 70, ' + (0.9 * flick).toFixed(3) + ')');
+    halo.addColorStop(0, 'rgba(255, 170, 70, ' + (0.9 * flick).toFixed(3) + ')');
     halo.addColorStop(0.4, 'rgba(220, 90, 30, ' + (0.4 * flick).toFixed(3) + ')');
-    halo.addColorStop(1,   'rgba(0, 0, 0, 0)');
-    ctx.fillStyle = halo;
-    ctx.fillRect(t.x - r, t.y - r, r * 2, r * 2);
-
-    // Hot core.
+    halo.addColorStop(1, 'rgba(0, 0, 0, 0)');
+    ctx.fillStyle = halo; ctx.fillRect(t.x - r, t.y - r, r * 2, r * 2);
     ctx.fillStyle = 'rgba(255, 220, 150, ' + (0.9 * flick).toFixed(3) + ')';
-    ctx.beginPath();
-    ctx.arc(t.x, t.y, 2 + flick * 1.5, 0, Math.PI * 2);
-    ctx.fill();
+    ctx.beginPath(); ctx.arc(t.x, t.y, 2 + flick * 1.5, 0, Math.PI * 2); ctx.fill();
   }
   ctx.restore();
 }
 
-// ── Hanging chains ────────────────────────────────────────────
 function drawChains(ctx: CanvasRenderingContext2D, chains: Chain[], time: number): void {
   ctx.save();
   ctx.strokeStyle = 'rgba(15, 10, 12, 0.9)';
@@ -530,15 +492,11 @@ function drawChains(ctx: CanvasRenderingContext2D, chains: Chain[], time: number
     ctx.moveTo(c.x, c.yTop);
     ctx.quadraticCurveTo((c.x + bottomX) / 2, (c.yTop + c.yBot) / 2 + 8, bottomX, c.yBot);
     ctx.stroke();
-    // Orb at the bottom.
-    ctx.beginPath();
-    ctx.arc(bottomX, c.yBot, 4, 0, Math.PI * 2);
-    ctx.fill();
+    ctx.beginPath(); ctx.arc(bottomX, c.yBot, 4, 0, Math.PI * 2); ctx.fill();
   }
   ctx.restore();
 }
 
-// ── Volumetric fog ────────────────────────────────────────────
 function drawFog(ctx: CanvasRenderingContext2D, time: number): void {
   ctx.save();
   ctx.globalCompositeOperation = 'screen';
@@ -549,157 +507,104 @@ function drawFog(ctx: CanvasRenderingContext2D, time: number): void {
     fog.addColorStop(0, 'rgba(40, 30, 60, 0)');
     fog.addColorStop(0.5, 'rgba(70, 50, 85, ' + alpha + ')');
     fog.addColorStop(1, 'rgba(40, 30, 60, 0)');
-    ctx.fillStyle = fog;
-    ctx.fillRect(0, yBand - 90, DESIGN_W, 180);
+    ctx.fillStyle = fog; ctx.fillRect(0, yBand - 90, DESIGN_W, 180);
   }
-  // Low mist near the ground.
   const lowFog = ctx.createLinearGradient(0, DESIGN_H - 180, 0, DESIGN_H);
   lowFog.addColorStop(0, 'rgba(80, 60, 90, 0)');
   lowFog.addColorStop(1, 'rgba(80, 60, 90, 0.15)');
-  ctx.fillStyle = lowFog;
-  ctx.fillRect(0, DESIGN_H - 180, DESIGN_W, 180);
+  ctx.fillStyle = lowFog; ctx.fillRect(0, DESIGN_H - 180, DESIGN_W, 180);
   ctx.restore();
 }
 
-// ── Foreground broken pillars framing the scene ───────────────
 function drawForegroundPillars(ctx: CanvasRenderingContext2D): void {
   ctx.save();
   ctx.fillStyle = '#020104';
-
-  // Left pillar (tall, broken top).
   ctx.beginPath();
-  ctx.moveTo(0, DESIGN_H);
-  ctx.lineTo(0, 180);
-  ctx.lineTo(22, 160);
-  ctx.lineTo(18, 200);
-  ctx.lineTo(30, 240);
-  ctx.lineTo(40, 300);
-  ctx.lineTo(36, 380);
-  ctx.lineTo(44, 460);
-  ctx.lineTo(38, DESIGN_H);
-  ctx.closePath();
-  ctx.fill();
-
-  // Right pillar.
+  ctx.moveTo(0, DESIGN_H); ctx.lineTo(0, 180); ctx.lineTo(22, 160);
+  ctx.lineTo(18, 200); ctx.lineTo(30, 240); ctx.lineTo(40, 300);
+  ctx.lineTo(36, 380); ctx.lineTo(44, 460); ctx.lineTo(38, DESIGN_H);
+  ctx.closePath(); ctx.fill();
   ctx.beginPath();
-  ctx.moveTo(DESIGN_W, DESIGN_H);
-  ctx.lineTo(DESIGN_W, 200);
-  ctx.lineTo(DESIGN_W - 28, 170);
-  ctx.lineTo(DESIGN_W - 20, 220);
-  ctx.lineTo(DESIGN_W - 36, 280);
-  ctx.lineTo(DESIGN_W - 26, 360);
-  ctx.lineTo(DESIGN_W - 44, 440);
-  ctx.lineTo(DESIGN_W - 34, DESIGN_H);
-  ctx.closePath();
-  ctx.fill();
-
-  // Rim-light highlights — backlit from the horizon glow.
-  ctx.strokeStyle = 'rgba(120, 50, 20, 0.35)';
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  ctx.moveTo(38, 420); ctx.lineTo(44, 460); ctx.lineTo(38, 540);
-  ctx.stroke();
-  ctx.beginPath();
-  ctx.moveTo(DESIGN_W - 38, 420); ctx.lineTo(DESIGN_W - 44, 460); ctx.lineTo(DESIGN_W - 38, 540);
-  ctx.stroke();
+  ctx.moveTo(DESIGN_W, DESIGN_H); ctx.lineTo(DESIGN_W, 200); ctx.lineTo(DESIGN_W - 28, 170);
+  ctx.lineTo(DESIGN_W - 20, 220); ctx.lineTo(DESIGN_W - 36, 280); ctx.lineTo(DESIGN_W - 26, 360);
+  ctx.lineTo(DESIGN_W - 44, 440); ctx.lineTo(DESIGN_W - 34, DESIGN_H);
+  ctx.closePath(); ctx.fill();
+  ctx.strokeStyle = 'rgba(120, 50, 20, 0.35)'; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(38, 420); ctx.lineTo(44, 460); ctx.lineTo(38, 540); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(DESIGN_W - 38, 420); ctx.lineTo(DESIGN_W - 44, 460); ctx.lineTo(DESIGN_W - 38, 540); ctx.stroke();
   ctx.restore();
 }
 
-// ── Bonfire at the player's feet ──────────────────────────────
 function drawBonfire(ctx: CanvasRenderingContext2D, bg: BgState, time: number, dt: number): void {
   const cx = 512, cy = 730;
   const flick = 0.75 + Math.sin(time * 0.015) * 0.15 + Math.sin(time * 0.037) * 0.1;
-
-  // Warm floor glow — the one point of light in the scene.
   ctx.save();
   ctx.globalCompositeOperation = 'lighter';
   const r = 180 * flick;
   const glow = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
-  glow.addColorStop(0,   'rgba(255, 160, 70, ' + (0.55 * flick).toFixed(3) + ')');
+  glow.addColorStop(0, 'rgba(255, 160, 70, ' + (0.55 * flick).toFixed(3) + ')');
   glow.addColorStop(0.3, 'rgba(220, 90, 30, ' + (0.3 * flick).toFixed(3) + ')');
   glow.addColorStop(0.7, 'rgba(120, 30, 10, 0.1)');
-  glow.addColorStop(1,   'rgba(0, 0, 0, 0)');
-  ctx.fillStyle = glow;
-  ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
+  glow.addColorStop(1, 'rgba(0, 0, 0, 0)');
+  ctx.fillStyle = glow; ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
   ctx.restore();
-
-  // Spawn bonfire embers (rising).
   if (bg.bonfireEmbers.length < 30 && Math.random() < 0.4 * dt) {
     const maxLife = 40 + Math.random() * 30;
     bg.bonfireEmbers.push({
-      x: cx + (Math.random() - 0.5) * 30,
-      y: cy - 4,
-      vx: (Math.random() - 0.5) * 0.5,
-      vy: -1 - Math.random() * 1.2,
-      life: maxLife,
-      maxLife,
+      x: cx + (Math.random() - 0.5) * 30, y: cy - 4,
+      vx: (Math.random() - 0.5) * 0.5, vy: -1 - Math.random() * 1.2,
+      life: maxLife, maxLife,
     });
   }
   ctx.save();
   ctx.globalCompositeOperation = 'lighter';
   for (let i = bg.bonfireEmbers.length - 1; i >= 0; i--) {
     const e = bg.bonfireEmbers[i];
-    e.x += e.vx * dt;
-    e.y += e.vy * dt;
-    e.life -= dt;
-    if (e.life <= 0) {
-      bg.bonfireEmbers.splice(i, 1);
-      continue;
-    }
+    e.x += e.vx * dt; e.y += e.vy * dt; e.life -= dt;
+    if (e.life <= 0) { bg.bonfireEmbers.splice(i, 1); continue; }
     const t = e.life / e.maxLife;
     ctx.fillStyle = 'rgba(255, 180, 80, ' + (t * 0.9).toFixed(3) + ')';
-    ctx.beginPath();
-    ctx.arc(e.x, e.y, 1.5, 0, Math.PI * 2);
-    ctx.fill();
+    ctx.beginPath(); ctx.arc(e.x, e.y, 1.5, 0, Math.PI * 2); ctx.fill();
   }
   ctx.restore();
 }
 
-// ── Rising embers (keep existing behavior) ────────────────────
 function drawEmbers(ctx: CanvasRenderingContext2D, embers: Ember[], dt: number): void {
   ctx.save();
   ctx.globalCompositeOperation = 'lighter';
   for (let i = embers.length - 1; i >= 0; i--) {
     const e = embers[i];
-    e.x += e.vx * dt;
-    e.y += e.vy * dt;
-    e.life -= dt;
-    e.flicker += 0.08 * dt;
-    if (e.life <= 0 || e.y < -10) {
-      embers[i] = makeEmber();
-      continue;
-    }
+    e.x += e.vx * dt; e.y += e.vy * dt; e.life -= dt; e.flicker += 0.08 * dt;
+    if (e.life <= 0 || e.y < -10) { embers[i] = makeEmber(); continue; }
     const lifeT = e.life / e.maxLife;
     const pulse = 0.55 + Math.sin(e.flicker) * 0.35;
     const alpha = Math.min(1, lifeT * 1.4) * pulse;
     ctx.fillStyle = 'hsla(' + e.hue + ', 95%, 55%, ' + alpha.toFixed(3) + ')';
-    ctx.beginPath();
-    ctx.arc(e.x, e.y, e.size, 0, Math.PI * 2);
-    ctx.fill();
+    ctx.beginPath(); ctx.arc(e.x, e.y, e.size, 0, Math.PI * 2); ctx.fill();
   }
   ctx.restore();
 }
 
-// ── Lightning ─────────────────────────────────────────────────
 function updateLightning(bg: BgState, time: number): void {
   if (bg.lightningStart === 0 && time >= bg.nextLightningAt) {
     bg.lightningStart = time;
     bg.nextLightningAt = time + 15000 + Math.random() * 20000;
   }
-  if (bg.lightningStart > 0 && time - bg.lightningStart > 420) {
-    bg.lightningStart = 0;
-  }
+  if (bg.lightningStart > 0 && time - bg.lightningStart > 420) bg.lightningStart = 0;
+}
+
+export function triggerLightning(bg: BgState, time: number): void {
+  bg.lightningStart = time;
 }
 
 function drawLightningFlash(ctx: CanvasRenderingContext2D, bg: BgState, time: number): void {
   if (bg.lightningStart === 0) return;
   const t = time - bg.lightningStart;
-  // Double-flash pattern: peak → dim → peak → out.
   let intensity = 0;
-  if (t < 80)       intensity = t / 80;
+  if (t < 80) intensity = t / 80;
   else if (t < 160) intensity = 1 - (t - 80) / 80 * 0.6;
   else if (t < 240) intensity = 0.4 + (t - 160) / 80 * 0.5;
-  else              intensity = Math.max(0, 0.9 - (t - 240) / 180);
+  else intensity = Math.max(0, 0.9 - (t - 240) / 180);
   ctx.save();
   ctx.globalCompositeOperation = 'screen';
   ctx.fillStyle = 'rgba(160, 180, 220, ' + (intensity * 0.55).toFixed(3) + ')';
@@ -707,32 +612,191 @@ function drawLightningFlash(ctx: CanvasRenderingContext2D, bg: BgState, time: nu
   ctx.restore();
 }
 
-// ── Vignette ──────────────────────────────────────────────────
 function drawVignette(ctx: CanvasRenderingContext2D, time: number, lowHp: boolean): void {
   if (lowHp) {
     const pulse = 0.45 + Math.sin(time * 0.008) * 0.2;
-    const vg = ctx.createRadialGradient(
-      DESIGN_W / 2, DESIGN_H / 2, 240,
-      DESIGN_W / 2, DESIGN_H / 2, 620,
-    );
+    const vg = ctx.createRadialGradient(DESIGN_W/2, DESIGN_H/2, 240, DESIGN_W/2, DESIGN_H/2, 620);
     vg.addColorStop(0, 'rgba(0, 0, 0, 0)');
     vg.addColorStop(1, 'rgba(140, 0, 0, ' + pulse.toFixed(3) + ')');
-    ctx.fillStyle = vg;
-    ctx.fillRect(0, 0, DESIGN_W, DESIGN_H);
+    ctx.fillStyle = vg; ctx.fillRect(0, 0, DESIGN_W, DESIGN_H);
   } else {
-    const vg = ctx.createRadialGradient(
-      DESIGN_W / 2, DESIGN_H / 2, 300,
-      DESIGN_W / 2, DESIGN_H / 2, 680,
-    );
+    const vg = ctx.createRadialGradient(DESIGN_W/2, DESIGN_H/2, 300, DESIGN_W/2, DESIGN_H/2, 680);
     vg.addColorStop(0, 'rgba(0, 0, 0, 0)');
     vg.addColorStop(1, 'rgba(0, 0, 0, 0.8)');
-    ctx.fillStyle = vg;
-    ctx.fillRect(0, 0, DESIGN_W, DESIGN_H);
+    ctx.fillStyle = vg; ctx.fillRect(0, 0, DESIGN_W, DESIGN_H);
   }
 }
 
 // ─────────────────────────────────────────────────────────────
-// In-game entity rendering — words, fireballs, shockwaves, particles.
+// Weather: rain, ash, godrays, emberstorm
+// ─────────────────────────────────────────────────────────────
+
+function drawWeather(ctx: CanvasRenderingContext2D, bg: BgState, dt: number): void {
+  if (bg.weather === 'rain') drawRain(ctx, bg, dt);
+  else if (bg.weather === 'ash') drawAsh(ctx, bg, dt);
+  else if (bg.weather === 'emberstorm') drawEmberStorm(ctx, bg, dt);
+  // godrays are drawn before fog in the main scene order
+}
+
+function drawRain(ctx: CanvasRenderingContext2D, bg: BgState, dt: number): void {
+  // Top up drops.
+  while (bg.rainDrops.length < 120) {
+    bg.rainDrops.push({
+      x: Math.random() * DESIGN_W,
+      y: Math.random() * DESIGN_H * 0.8,
+      vy: 10 + Math.random() * 6,
+    });
+  }
+  ctx.save();
+  ctx.strokeStyle = 'rgba(130, 160, 200, 0.45)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  for (const r of bg.rainDrops) {
+    r.y += r.vy * dt;
+    if (r.y > DESIGN_H) { r.y = -10; r.x = Math.random() * DESIGN_W; }
+    ctx.moveTo(r.x, r.y);
+    ctx.lineTo(r.x - 2, r.y + 12);
+  }
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawAsh(ctx: CanvasRenderingContext2D, bg: BgState, dt: number): void {
+  while (bg.ashFlakes.length < 80) {
+    bg.ashFlakes.push({
+      x: Math.random() * DESIGN_W,
+      y: Math.random() * DESIGN_H,
+      vx: (Math.random() - 0.5) * 0.6,
+      vy: 0.3 + Math.random() * 0.7,
+      life: 600,
+      rotation: Math.random() * Math.PI * 2,
+      rotSpeed: (Math.random() - 0.5) * 0.02,
+    });
+  }
+  ctx.save();
+  ctx.fillStyle = 'rgba(180, 180, 170, 0.65)';
+  for (const a of bg.ashFlakes) {
+    a.x += a.vx * dt; a.y += a.vy * dt; a.rotation += a.rotSpeed * dt; a.life -= dt;
+    if (a.y > DESIGN_H || a.life <= 0) {
+      a.x = Math.random() * DESIGN_W; a.y = -10;
+      a.life = 600;
+    }
+    ctx.save();
+    ctx.translate(a.x, a.y); ctx.rotate(a.rotation);
+    ctx.fillRect(-1.5, -1.5, 3, 3);
+    ctx.restore();
+  }
+  ctx.restore();
+}
+
+function drawEmberStorm(ctx: CanvasRenderingContext2D, bg: BgState, dt: number): void {
+  while (bg.emberFall.length < 120) {
+    const maxLife = 120 + Math.random() * 80;
+    bg.emberFall.push({
+      x: Math.random() * DESIGN_W,
+      y: Math.random() * DESIGN_H,
+      vx: (Math.random() - 0.5) * 1.2,
+      vy: 1.2 + Math.random() * 2.0,
+      life: maxLife, maxLife,
+      size: 1 + Math.random() * 2,
+      hue: 15 + Math.random() * 20,
+    });
+  }
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  for (let i = bg.emberFall.length - 1; i >= 0; i--) {
+    const e = bg.emberFall[i];
+    e.x += e.vx * dt; e.y += e.vy * dt; e.life -= dt;
+    if (e.life <= 0 || e.y > DESIGN_H) { bg.emberFall.splice(i, 1); continue; }
+    const t = e.life / e.maxLife;
+    ctx.fillStyle = 'hsla(' + e.hue + ', 95%, 55%, ' + (t * 0.9).toFixed(3) + ')';
+    ctx.beginPath(); ctx.arc(e.x, e.y, e.size, 0, Math.PI * 2); ctx.fill();
+  }
+  ctx.restore();
+}
+
+function drawGodRays(ctx: CanvasRenderingContext2D, time: number): void {
+  ctx.save();
+  ctx.globalCompositeOperation = 'screen';
+  for (let i = 0; i < 4; i++) {
+    const x = 200 + i * 180 + Math.sin(time * 0.0003 + i) * 20;
+    const g = ctx.createLinearGradient(x, 0, x + 50, DESIGN_H);
+    g.addColorStop(0, 'rgba(255, 220, 150, 0.18)');
+    g.addColorStop(0.5, 'rgba(255, 200, 120, 0.10)');
+    g.addColorStop(1, 'rgba(255, 200, 120, 0)');
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.moveTo(x - 10, 0);
+    ctx.lineTo(x + 10, 0);
+    ctx.lineTo(x + 80, DESIGN_H);
+    ctx.lineTo(x + 40, DESIGN_H);
+    ctx.closePath(); ctx.fill();
+  }
+  ctx.restore();
+}
+
+// ─────────────────────────────────────────────────────────────
+// Eyes in darkness + crows (atmospheric fauna)
+// ─────────────────────────────────────────────────────────────
+
+function drawEyes(ctx: CanvasRenderingContext2D, bg: BgState, dt: number): void {
+  // Occasional pair of red eyes fades in + out in the fog band.
+  if (bg.eyes.length === 0 && Math.random() < 0.002 * dt) {
+    bg.eyes.push({
+      x: 80 + Math.random() * (DESIGN_W - 160),
+      y: 440 + Math.random() * 120,
+      life: 120, maxLife: 120,
+    });
+  }
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  for (let i = bg.eyes.length - 1; i >= 0; i--) {
+    const e = bg.eyes[i];
+    e.life -= dt;
+    if (e.life <= 0) { bg.eyes.splice(i, 1); continue; }
+    const t = e.life / e.maxLife;
+    // fade in first 20%, hold, fade out last 40%
+    let alpha = 1;
+    if (1 - t < 0.2) alpha = (1 - t) / 0.2;
+    else if (t < 0.4) alpha = t / 0.4;
+    ctx.fillStyle = 'rgba(220, 30, 30, ' + (alpha * 0.75).toFixed(3) + ')';
+    ctx.beginPath(); ctx.arc(e.x - 6, e.y, 2, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(e.x + 6, e.y, 2, 0, Math.PI * 2); ctx.fill();
+  }
+  ctx.restore();
+}
+
+function drawCrows(ctx: CanvasRenderingContext2D, bg: BgState, dt: number): void {
+  if (bg.crows.length === 0 && Math.random() < 0.0006 * dt) {
+    const fromLeft = Math.random() > 0.5;
+    bg.crows.push({
+      x: fromLeft ? -40 : DESIGN_W + 40,
+      y: 100 + Math.random() * 180,
+      vx: (fromLeft ? 1 : -1) * (1.2 + Math.random() * 0.8),
+      wingPhase: 0,
+      life: 1000,
+    });
+  }
+  ctx.save();
+  ctx.fillStyle = '#000';
+  for (let i = bg.crows.length - 1; i >= 0; i--) {
+    const c = bg.crows[i];
+    c.x += c.vx * dt; c.wingPhase += 0.25 * dt; c.life -= dt;
+    if (c.life <= 0 || c.x < -60 || c.x > DESIGN_W + 60) { bg.crows.splice(i, 1); continue; }
+    const wing = Math.sin(c.wingPhase) * 6;
+    ctx.beginPath();
+    ctx.moveTo(c.x, c.y);
+    ctx.quadraticCurveTo(c.x - 8, c.y - wing, c.x - 16, c.y);
+    ctx.quadraticCurveTo(c.x - 8, c.y + 2, c.x, c.y);
+    ctx.quadraticCurveTo(c.x + 8, c.y - wing, c.x + 16, c.y);
+    ctx.quadraticCurveTo(c.x + 8, c.y + 2, c.x, c.y);
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+// ─────────────────────────────────────────────────────────────
+// Entity rendering: words with kind variants, fireballs, particles, etc.
 // ─────────────────────────────────────────────────────────────
 
 export function drawWordAura(
@@ -740,6 +804,7 @@ export function drawWordAura(
   word: Word,
   wordWidth: number,
   time: number,
+  auraColor: string,
 ): void {
   const pulse = 0.8 + Math.sin(time * 0.004 + word.x * 0.01) * 0.2;
   const cx = word.x + wordWidth / 2;
@@ -751,15 +816,139 @@ export function drawWordAura(
     g.addColorStop(0.5, 'rgba(220, 60, 160, 0.12)');
     g.addColorStop(1, 'rgba(220, 60, 160, 0)');
   } else {
-    g.addColorStop(0, 'rgba(80, 30, 90, 0.32)');
-    g.addColorStop(0.5, 'rgba(40, 10, 50, 0.14)');
-    g.addColorStop(1, 'rgba(40, 10, 50, 0)');
+    g.addColorStop(0, auraColor);
+    g.addColorStop(1, 'rgba(0,0,0,0)');
   }
   ctx.save();
   ctx.globalCompositeOperation = 'lighter';
   ctx.fillStyle = g;
   ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
   ctx.restore();
+}
+
+/**
+ * Render a word's letters. Handles per-kind visual effects:
+ * - ghost: flickering alpha
+ * - tank: armored stroke outline
+ * - runner: motion blur trails
+ * - mimic: subtle teeth scribble until scrambled
+ * - chanter: glowing runic outline
+ * - caster: pulsing pink core
+ */
+export function drawWordText(
+  ctx: CanvasRenderingContext2D,
+  word: Word,
+  charWidths: Record<string, number>,
+  time: number,
+  fontScale: number,
+): void {
+  ctx.save();
+  const fontSize = Math.round(24 * fontScale);
+  ctx.font = fontSize + 'px "Cinzel", serif';
+  ctx.textBaseline = 'alphabetic';
+
+  // Base alpha (ghost flickers).
+  let baseAlpha = 1.0;
+  if (word.kind === 'ghost') {
+    const phase = (time * 0.005 + word.ghostPhase * 10);
+    baseAlpha = 0.4 + Math.sin(phase) * 0.35 + 0.25;
+    baseAlpha = Math.max(0.15, Math.min(1, baseAlpha));
+  }
+
+  // Runner: streak trailing AWAY from the player (behind motion direction).
+  if (word.kind === 'runner') {
+    const dxp = 512 - word.x, dyp = 700 - word.y;
+    const dmag = Math.max(1, Math.sqrt(dxp * dxp + dyp * dyp));
+    const nx = dxp / dmag, ny = dyp / dmag;
+    // Gradient from word position going backwards.
+    const tailX = word.x - nx * 60, tailY = word.y - ny * 60;
+    const streak = ctx.createLinearGradient(word.x, word.y, tailX, tailY);
+    streak.addColorStop(0, 'rgba(255, 110, 90, 0.28)');
+    streak.addColorStop(0.4, 'rgba(220, 60, 40, 0.14)');
+    streak.addColorStop(1, 'rgba(220, 60, 40, 0)');
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.fillStyle = streak;
+    ctx.beginPath();
+    const perpX = -ny * 10, perpY = nx * 10;
+    ctx.moveTo(word.x + perpX, word.y + perpY);
+    ctx.lineTo(word.x - perpX, word.y - perpY);
+    ctx.lineTo(tailX - perpX * 0.6, tailY - perpY * 0.6);
+    ctx.lineTo(tailX + perpX * 0.6, tailY + perpY * 0.6);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  }
+
+  // Chanter rune aura.
+  if (word.kind === 'chanter') {
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    const pulse = 0.6 + Math.sin(time * 0.006) * 0.3;
+    const auraR = 80 * pulse;
+    const aur = ctx.createRadialGradient(word.x + 60, word.y - 8, 0, word.x + 60, word.y - 8, auraR);
+    aur.addColorStop(0, 'rgba(100, 200, 255, 0.4)');
+    aur.addColorStop(1, 'rgba(100, 200, 255, 0)');
+    ctx.fillStyle = aur;
+    ctx.fillRect(word.x - 20, word.y - 80, 220, 160);
+    ctx.restore();
+  }
+
+  let cx = word.x;
+  for (let k = 0; k < word.text.length; k++) {
+    const ch = word.text[k];
+    if (ch === ' ') { cx += (charWidths[' '] ?? 6) * fontScale; continue; }
+    const typed = k < word.typed.length;
+
+    // Tank armor: stroke outline on untyped letters.
+    if (word.kind === 'tank' && !typed) {
+      ctx.strokeStyle = 'rgba(180, 120, 60, 0.5)';
+      ctx.lineWidth = 3;
+      ctx.strokeText(ch, cx, word.y);
+    }
+
+    // Mimic: before scramble, add a thin tooth-like line under letters.
+    if (word.kind === 'mimic' && !word.scrambled && !typed) {
+      ctx.strokeStyle = 'rgba(240, 200, 100, 0.45)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(cx, word.y + 4);
+      ctx.lineTo(cx + (charWidths[ch] ?? 14) * fontScale, word.y + 4);
+      ctx.stroke();
+    }
+
+    ctx.globalAlpha = typed ? 1 : baseAlpha;
+    ctx.fillStyle = typed
+      ? (word.isSpecial ? '#ff80cc' : '#ff6a20')
+      : wordColor(word.kind, word.isSpecial);
+
+    if (typed) {
+      ctx.shadowBlur = 12;
+      ctx.shadowColor = word.isSpecial ? '#ff80cc' : '#ff4500';
+    } else {
+      ctx.shadowBlur = 4;
+      ctx.shadowColor = 'rgba(0,0,0,0.9)';
+    }
+    ctx.fillText(ch, cx, word.y);
+    cx += (charWidths[ch] ?? 14) * fontScale;
+  }
+  ctx.globalAlpha = 1;
+  ctx.shadowBlur = 0;
+  ctx.restore();
+}
+
+function wordColor(kind: EnemyKind, isSpecial: boolean): string {
+  if (isSpecial) return '#ff80cc';
+  switch (kind) {
+    case 'ghost':   return '#cfd8e0';
+    case 'tank':    return '#f0d4a8';
+    case 'runner':  return '#ffb0a0';
+    case 'lich':    return '#d0aaff';
+    case 'mimic':   return '#f0e0c0';
+    case 'chanter': return '#a0e0ff';
+    case 'caster':  return '#ffaaff';
+    default:        return '#e6dcc5';
+  }
 }
 
 export function drawFireball(
@@ -774,35 +963,20 @@ export function drawFireball(
   const baseSize = isSpear ? 10 * spearMul : 5;
   const scale = 1 + combo / 150;
   const size = baseSize * scale;
-
-  const color = fb.isSpecial
-    ? '#ff80cc'
-    : isSpear
-      ? isSSS ? '#00ddff' : '#55bbff'
-      : 'hsl(' + (20 + combo) + ', 100%, 55%)';
-
-  // Outer halo.
+  const color = fb.isSpecial ? '#ff80cc' : isSpear ? (isSSS ? '#00ddff' : '#55bbff') : 'hsl(' + (20 + combo) + ', 100%, 55%)';
   ctx.save();
   ctx.globalCompositeOperation = 'lighter';
   const haloR = size * (isSpear ? 4 : 3);
   const halo = ctx.createRadialGradient(fb.x, fb.y, 0, fb.x, fb.y, haloR);
-  halo.addColorStop(0, fb.isSpecial
-    ? 'rgba(255, 128, 204, 0.6)'
-    : isSpear
-      ? isSSS ? 'rgba(0, 221, 255, 0.65)' : 'rgba(85, 187, 255, 0.55)'
-      : 'rgba(255, 90, 20, 0.6)');
+  halo.addColorStop(0, fb.isSpecial ? 'rgba(255, 128, 204, 0.6)' : isSpear ? (isSSS ? 'rgba(0, 221, 255, 0.65)' : 'rgba(85, 187, 255, 0.55)') : 'rgba(255, 90, 20, 0.6)');
   halo.addColorStop(1, 'rgba(0,0,0,0)');
-  ctx.fillStyle = halo;
-  ctx.fillRect(fb.x - haloR, fb.y - haloR, haloR * 2, haloR * 2);
+  ctx.fillStyle = halo; ctx.fillRect(fb.x - haloR, fb.y - haloR, haloR * 2, haloR * 2);
   ctx.restore();
-
-  // Inner shape.
   ctx.save();
   ctx.shadowBlur = isSpear ? 32 : 14 + combo / 6;
   ctx.shadowColor = fb.isSpecial ? '#ff0099' : isSpear ? (isSSS ? '#00ffff' : '#0055ff') : '#ff4500';
   ctx.fillStyle = color;
   ctx.beginPath();
-
   if (fb.isSpecial) {
     const s = size * 6;
     ctx.moveTo(fb.x, fb.y + s / 4);
@@ -822,37 +996,26 @@ export function drawFireball(
     ctx.arc(fb.x, fb.y, size, 0, Math.PI * 2);
   }
   ctx.fill();
-
   if (isSSS && !fb.isSpecial) {
     ctx.fillStyle = '#ffffff';
-    ctx.beginPath();
-    ctx.arc(fb.x, fb.y, size * 0.7, 0, Math.PI * 2);
-    ctx.fill();
+    ctx.beginPath(); ctx.arc(fb.x, fb.y, size * 0.7, 0, Math.PI * 2); ctx.fill();
   }
   ctx.restore();
   return color;
 }
 
-export function drawShockwave(
-  ctx: CanvasRenderingContext2D,
-  sw: Shockwave,
-): void {
+export function drawShockwave(ctx: CanvasRenderingContext2D, sw: Shockwave): void {
   const t = sw.radius / sw.maxRadius;
   const alpha = Math.max(0, 1 - t);
   ctx.save();
   ctx.globalCompositeOperation = 'lighter';
   ctx.strokeStyle = sw.color.replace('ALPHA', alpha.toFixed(3));
   ctx.lineWidth = Math.max(1, 3 * (1 - t));
-  ctx.beginPath();
-  ctx.arc(sw.x, sw.y, sw.radius, 0, Math.PI * 2);
-  ctx.stroke();
+  ctx.beginPath(); ctx.arc(sw.x, sw.y, sw.radius, 0, Math.PI * 2); ctx.stroke();
   ctx.restore();
 }
 
-export function drawParticle(
-  ctx: CanvasRenderingContext2D,
-  p: Particle,
-): void {
+export function drawParticle(ctx: CanvasRenderingContext2D, p: Particle): void {
   const lifeT = Math.max(0, p.life / p.maxLife);
   ctx.globalAlpha = lifeT;
   ctx.fillStyle = p.color;
@@ -869,4 +1032,239 @@ export function drawParticle(
     ctx.fillRect(p.x - p.size / 2, p.y - p.size / 2, p.size, p.size);
   }
   ctx.globalAlpha = 1;
+}
+
+// ─────────────────────────────────────────────────────────────
+// Projectile rendering (caster & boss)
+// ─────────────────────────────────────────────────────────────
+
+export function drawProjectile(ctx: CanvasRenderingContext2D, p: Projectile): void {
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  const color = p.fromBoss ? '#ff4a28' : '#ff80ff';
+  const halo = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, 28);
+  halo.addColorStop(0, p.fromBoss ? 'rgba(255, 80, 30, 0.75)' : 'rgba(255, 130, 255, 0.7)');
+  halo.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = halo;
+  ctx.fillRect(p.x - 28, p.y - 28, 56, 56);
+  ctx.restore();
+  ctx.save();
+  ctx.font = 'bold 20px "Cinzel", serif';
+  ctx.fillStyle = '#fff';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.shadowBlur = 10;
+  ctx.shadowColor = color;
+  ctx.fillText(p.char, p.x, p.y);
+  ctx.restore();
+}
+
+// ─────────────────────────────────────────────────────────────
+// Impact decals — lingering scorch marks at impact points.
+// ─────────────────────────────────────────────────────────────
+
+export function drawDecals(ctx: CanvasRenderingContext2D, bg: BgState, dt: number): void {
+  for (let i = bg.decals.length - 1; i >= 0; i--) {
+    const d = bg.decals[i];
+    d.life -= dt;
+    if (d.life <= 0) { bg.decals.splice(i, 1); continue; }
+    const t = d.life / d.maxLife;
+    ctx.save();
+    const g = ctx.createRadialGradient(d.x, d.y, 0, d.x, d.y, d.radius);
+    g.addColorStop(0, d.color.replace('ALPHA', (t * 0.6).toFixed(3)));
+    g.addColorStop(1, d.color.replace('ALPHA', '0'));
+    ctx.fillStyle = g;
+    ctx.fillRect(d.x - d.radius, d.y - d.radius, d.radius * 2, d.radius * 2);
+    ctx.restore();
+  }
+}
+
+export function addImpactDecal(bg: BgState, x: number, y: number, bigImpact: boolean): void {
+  bg.decals.push({
+    x, y,
+    radius: bigImpact ? 60 : 36,
+    life: bigImpact ? 60 : 40,
+    maxLife: bigImpact ? 60 : 40,
+    color: 'rgba(40, 10, 5, ALPHA)',
+  });
+}
+
+// ─────────────────────────────────────────────────────────────
+// Boss silhouette renderers
+// ─────────────────────────────────────────────────────────────
+
+export type BossRenderState = {
+  silhouette: 'taurus' | 'ornstein' | 'gwyn';
+  themeColor: string;
+  currentHp: number;
+  maxHp: number;
+  phaseIdx: number;
+  attackWindupT: number;       // 0..1 while winding up an attack
+  enraged: boolean;
+};
+
+export function drawBoss(
+  ctx: CanvasRenderingContext2D,
+  state: BossRenderState,
+  time: number,
+): void {
+  const cx = 512, baseY = 520;
+  const breath = Math.sin(time * 0.002) * 6;
+  const hpT = state.currentHp / state.maxHp;
+  // Rim glow — stronger when enraged.
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  const rimR = state.enraged ? 280 : 220;
+  const rimA = state.enraged ? 0.55 : 0.32;
+  const rim = ctx.createRadialGradient(cx, baseY - 40, 20, cx, baseY - 40, rimR);
+  rim.addColorStop(0, hexWithAlpha(state.themeColor, rimA));
+  rim.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = rim;
+  ctx.fillRect(cx - rimR, baseY - rimR, rimR * 2, rimR * 2);
+  ctx.restore();
+  ctx.save();
+  ctx.translate(cx, baseY + breath);
+  if (state.silhouette === 'taurus') drawTaurus(ctx, state, time);
+  else if (state.silhouette === 'ornstein') drawOrnstein(ctx, state, time);
+  else drawGwyn(ctx, state, time);
+  ctx.restore();
+  // HP low: cracks on the silhouette (cheap: draw jagged lines).
+  if (hpT < 0.33) {
+    ctx.save();
+    ctx.strokeStyle = hexWithAlpha(state.themeColor, 0.6);
+    ctx.lineWidth = 2;
+    for (let i = 0; i < 3; i++) {
+      const x = cx + (Math.sin(i * 13 + time * 0.003) * 60);
+      ctx.beginPath();
+      ctx.moveTo(x, baseY - 40);
+      ctx.lineTo(x + 10, baseY - 90);
+      ctx.lineTo(x - 8, baseY - 150);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+}
+
+function drawTaurus(ctx: CanvasRenderingContext2D, state: BossRenderState, time: number): void {
+  // Massive hulking silhouette, horned.
+  const sway = Math.sin(time * 0.003) * 4;
+  ctx.fillStyle = '#030104';
+  ctx.beginPath();
+  // Body (trapezoid with rounded top)
+  ctx.moveTo(-100 + sway, 0);
+  ctx.lineTo(-120 + sway, -140);
+  ctx.quadraticCurveTo(-90 + sway, -220, -40 + sway, -235);
+  // Left horn
+  ctx.lineTo(-70 + sway, -290);
+  ctx.lineTo(-30 + sway, -260);
+  ctx.lineTo(-10 + sway, -245);
+  // Head top
+  ctx.quadraticCurveTo(0 + sway, -260, 10 + sway, -245);
+  // Right horn
+  ctx.lineTo(30 + sway, -260);
+  ctx.lineTo(70 + sway, -290);
+  ctx.lineTo(40 + sway, -235);
+  ctx.quadraticCurveTo(90 + sway, -220, 120 + sway, -140);
+  ctx.lineTo(100 + sway, 0);
+  ctx.closePath();
+  ctx.fill();
+  // Glowing eyes
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  const eyeA = state.enraged ? 0.9 : 0.55;
+  ctx.fillStyle = 'rgba(255, 60, 20, ' + eyeA + ')';
+  ctx.beginPath(); ctx.arc(-22 + sway, -220, 4, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.arc(22 + sway, -220, 4, 0, Math.PI * 2); ctx.fill();
+  ctx.restore();
+}
+
+function drawOrnstein(ctx: CanvasRenderingContext2D, state: BossRenderState, time: number): void {
+  const sway = Math.sin(time * 0.004) * 3;
+  ctx.fillStyle = '#050308';
+  // Slim knight silhouette with spear
+  ctx.beginPath();
+  ctx.moveTo(-30 + sway, 0);
+  ctx.lineTo(-45 + sway, -100);
+  ctx.lineTo(-55 + sway, -170);
+  ctx.lineTo(-45 + sway, -200);
+  ctx.lineTo(-25 + sway, -225);
+  // Helmet (plume)
+  ctx.lineTo(-20 + sway, -260);
+  ctx.lineTo(-5 + sway, -280);
+  ctx.lineTo(15 + sway, -270);
+  ctx.lineTo(5 + sway, -250);
+  ctx.lineTo(20 + sway, -225);
+  ctx.lineTo(45 + sway, -200);
+  ctx.lineTo(55 + sway, -170);
+  ctx.lineTo(45 + sway, -100);
+  ctx.lineTo(30 + sway, 0);
+  ctx.closePath();
+  ctx.fill();
+  // Spear (shaft)
+  ctx.save();
+  ctx.strokeStyle = '#1a1208'; ctx.lineWidth = 4;
+  ctx.beginPath();
+  ctx.moveTo(60 + sway, -240);
+  ctx.lineTo(80 + sway, 20);
+  ctx.stroke();
+  ctx.restore();
+  // Spear tip glows (lightning)
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  const t = Math.abs(Math.sin(time * 0.01));
+  ctx.fillStyle = 'rgba(255, 230, 130, ' + (0.5 + t * 0.5).toFixed(3) + ')';
+  ctx.beginPath();
+  ctx.arc(60 + sway, -250, 7, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
+function drawGwyn(ctx: CanvasRenderingContext2D, state: BossRenderState, time: number): void {
+  const sway = Math.sin(time * 0.0025) * 3;
+  ctx.fillStyle = '#050308';
+  // Tall, thin, crown-topped
+  ctx.beginPath();
+  ctx.moveTo(-25 + sway, 0);
+  ctx.lineTo(-40 + sway, -120);
+  ctx.lineTo(-50 + sway, -210);
+  ctx.lineTo(-40 + sway, -240);
+  ctx.lineTo(-20 + sway, -260);
+  // Crown
+  ctx.lineTo(-30 + sway, -280);
+  ctx.lineTo(-20 + sway, -290);
+  ctx.lineTo(-10 + sway, -275);
+  ctx.lineTo(0 + sway,   -295);
+  ctx.lineTo(10 + sway,  -275);
+  ctx.lineTo(20 + sway,  -290);
+  ctx.lineTo(30 + sway,  -280);
+  ctx.lineTo(20 + sway, -260);
+  ctx.lineTo(40 + sway, -240);
+  ctx.lineTo(50 + sway, -210);
+  ctx.lineTo(40 + sway, -120);
+  ctx.lineTo(25 + sway, 0);
+  ctx.closePath();
+  ctx.fill();
+  // Flame aura around Gwyn — stronger in later phases
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  const amp = state.phaseIdx >= 2 ? 1.6 : 1.0;
+  for (let i = 0; i < 8; i++) {
+    const flameY = -220 + Math.sin(time * 0.01 + i) * 6;
+    const fx = -50 + i * 14 + Math.sin(time * 0.008 + i * 3) * 3;
+    const alpha = 0.35 * amp;
+    ctx.fillStyle = 'rgba(255, 110, 30, ' + alpha.toFixed(3) + ')';
+    ctx.beginPath();
+    ctx.arc(fx + sway, flameY, 3 + (i % 3), 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+function hexWithAlpha(hex: string, alpha: number): string {
+  // #rgb or #rrggbb → rgba(...)
+  const h = hex.replace('#', '');
+  const r = parseInt(h.length === 3 ? h[0] + h[0] : h.slice(0, 2), 16);
+  const g = parseInt(h.length === 3 ? h[1] + h[1] : h.slice(2, 4), 16);
+  const b = parseInt(h.length === 3 ? h[2] + h[2] : h.slice(4, 6), 16);
+  return 'rgba(' + r + ', ' + g + ', ' + b + ', ' + alpha.toFixed(3) + ')';
 }
