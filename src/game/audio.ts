@@ -352,6 +352,66 @@ export function sfxDeath(): void {
   noise(1.5, 'lowpass', 280, 1, 0.22);
 }
 
+/** Boss scream — guttural descending wail with two detuned voices + heavy reverb.
+ * Played at the moment a boss HP hits 0. ~2.5s long. */
+export function sfxBossScream(): void {
+  if (!ctx || !sfxGain) return;
+  const start = ctx.currentTime;
+  // Two detuned sawtooth voices gliding from mid-high down to sub-bass.
+  const v1 = ctx.createOscillator();
+  const v2 = ctx.createOscillator();
+  v1.type = 'sawtooth'; v2.type = 'sawtooth';
+  v1.frequency.setValueAtTime(420, start);
+  v1.frequency.exponentialRampToValueAtTime(60, start + 2.0);
+  // Detuned voice — creates a beating, anguished dissonance.
+  v2.frequency.setValueAtTime(420 * 0.946, start);         // minor-2nd below
+  v2.frequency.exponentialRampToValueAtTime(60 * 0.946, start + 2.0);
+  const filter = ctx.createBiquadFilter();
+  filter.type = 'lowpass';
+  filter.frequency.setValueAtTime(1800, start);
+  filter.frequency.exponentialRampToValueAtTime(320, start + 2.0);
+  filter.Q.value = 4;
+  const g = ctx.createGain();
+  g.gain.setValueAtTime(0, start);
+  g.gain.linearRampToValueAtTime(0.6, start + 0.15);
+  g.gain.linearRampToValueAtTime(0.55, start + 1.8);
+  g.gain.exponentialRampToValueAtTime(0.0001, start + 2.5);
+  v1.connect(filter); v2.connect(filter);
+  filter.connect(g).connect(sfxGain);
+  v1.start(); v2.start();
+  v1.stop(start + 2.6); v2.stop(start + 2.6);
+  // Breathy noise layered on top for grit.
+  noise(1.5, 'bandpass', 900, 1.5, 0.3);
+}
+
+/** Boss collapse — deep rumble + crumbling debris. Played mid-cutscene. */
+export function sfxBossCollapse(): void {
+  if (!ctx) return;
+  // Deep sub-bass rumble.
+  subThud(38, 1.2, 0.85);
+  // Layered crumble noise.
+  noise(1.2, 'lowpass', 240, 0.8, 0.38);
+  noise(0.6, 'bandpass', 1600, 0.6, 0.18);
+  // Secondary thud after 300ms.
+  window.setTimeout(() => { subThud(30, 0.9, 0.7); noise(0.8, 'lowpass', 180, 1, 0.25); }, 320);
+}
+
+/** Final cutscene boom — the last exhale when the boss vanishes. */
+export function sfxBossFinale(): void {
+  if (!ctx || !sfxGain) return;
+  subThud(28, 1.4, 0.9);
+  noise(1.6, 'lowpass', 320, 1, 0.4);
+  // Brief rising chord — the light returning.
+  [82, 110, 164].forEach((f, i) => {
+    const osc = ctx!.createOscillator();
+    osc.type = 'triangle';
+    osc.frequency.value = f;
+    const g = expDecay(2.0, 0.18);
+    osc.connect(g).connect(sfxGain!);
+    osc.start(); osc.stop(ctx!.currentTime + 2.2);
+  });
+}
+
 /** Heartbeat — double sub-thump; self-throttled. Call each frame. */
 export function sfxHeartbeat(now: number): void {
   if (!ctx) return;

@@ -5,6 +5,7 @@
  */
 
 import {memo} from 'react';
+import type {CSSProperties} from 'react';
 
 export type RankUpEvent = {
   id: number;
@@ -28,7 +29,7 @@ export const RankUpBanner = memo(function RankUpBanner({event, reduceMotion}: {e
     <div
       key={event.id}
       className={`absolute left-8 top-[320px] z-[55] pointer-events-none ${animClass}`}
-      style={{ ['--rank-color' as string]: event.color } as React.CSSProperties}
+      style={{'--rank-color': event.color} as unknown as CSSProperties}
     >
       <div className="rank-toast">
         <span className="rank-toast-bar" aria-hidden />

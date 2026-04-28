@@ -45,7 +45,7 @@ export type Word = {
   hp: number;                         // tank armor ticks (cosmetic)
   fireCooldown: number;               // caster: seconds until next projectile
   ghostPhase: number;                 // 0..1 — alpha flicker state
-  scrambled: boolean;                 // mimic: has it scrambled yet?
+  scrambled: boolean;                 // reserved (unused — kept for schema stability)
   stationaryX: number;                // chanter: fixed x; words keep their own
   spawnTime: number;
 };
@@ -55,7 +55,8 @@ export type Fireball = {
   tx: number; ty: number;
   progress: number;
   isSpecial: boolean;
-  targetBoss: boolean;                // aim at boss instead of word
+  targetBoss: boolean;
+  bossDamage?: number;                // amount to deduct from boss HP on impact
 };
 
 export type Particle = {
@@ -142,8 +143,9 @@ export type BgState = {
   lightningStart: number;
   nextLightningAt: number;
   weather: 'none' | 'rain' | 'ash' | 'godrays' | 'emberstorm';
-  tintColor: string;                 // rgba overlay applied after bg render
-  zoomScale: number;                 // dynamic camera zoom (1 = no zoom)
+  tintColor: string;
+  zoomScale: number;
+  zoneId: 'firelink' | 'burg' | 'anorlondo' | 'kiln';
 };
 
 export function createBgState(): BgState {
@@ -181,12 +183,14 @@ export function createBgState(): BgState {
     weather: 'none',
     tintColor: 'rgba(0,0,0,0)',
     zoomScale: 1,
+    zoneId: 'firelink',
   };
 }
 
-export function setZoneStyling(bg: BgState, weather: BgState['weather'], tint: string): void {
+export function setZoneStyling(bg: BgState, weather: BgState['weather'], tint: string, zoneId: BgState['zoneId']): void {
   bg.weather = weather;
   bg.tintColor = tint;
+  bg.zoneId = zoneId;
 }
 
 function seedEmbers(count: number): Ember[] {
@@ -247,20 +251,18 @@ export function drawBackground(
   lowHp: boolean,
   dof: boolean,
 ): void {
-  drawSky(ctx);
-  drawStars(ctx, bg.stars, time);
-  drawMoon(ctx, time);
-  drawCloudBand(ctx, time);
-  drawMountains(ctx);
-  drawCathedral(ctx, time);
-  drawMidSpires(ctx);
-  drawTorches(ctx, bg.torches, time);
-  drawChains(ctx, bg.chains, time);
+  // 1. Zone-specific scene: sky + distant + mid-ground silhouettes + torches/chains.
+  switch (bg.zoneId) {
+    case 'firelink':  drawSceneFirelink(ctx, bg, time);  break;
+    case 'burg':      drawSceneBurg(ctx, bg, time);      break;
+    case 'anorlondo': drawSceneAnorLondo(ctx, bg, time); break;
+    case 'kiln':      drawSceneKiln(ctx, bg, time);      break;
+  }
+  // 2. Universal atmosphere (weather, fauna, bonfire glow, embers).
   if (bg.weather === 'godrays') drawGodRays(ctx, time);
   drawFog(ctx, time);
   drawEyes(ctx, bg, dt);
   drawCrows(ctx, bg, dt);
-  drawForegroundPillars(ctx);
   drawBonfire(ctx, bg, time, dt);
   drawEmbers(ctx, bg.embers, dt);
   drawWeather(ctx, bg, dt);
@@ -272,7 +274,6 @@ export function drawBackground(
     ctx.fillRect(0, 0, DESIGN_W, DESIGN_H);
   }
   if (dof) {
-    // Subtle DOF — a very slight top-gradient blur fake (cheap).
     ctx.save();
     const g = ctx.createLinearGradient(0, 0, 0, DESIGN_H * 0.5);
     g.addColorStop(0, 'rgba(10,8,12,0.18)');
@@ -282,6 +283,509 @@ export function drawBackground(
     ctx.restore();
   }
 }
+
+// ─────────────────────────────────────────────────────────────
+// Scene 1 — Firelink Shrine: calm amber sunset, small stone shrine,
+// the iconic sword-in-bonfire in the distance, a single crow on a post.
+// ─────────────────────────────────────────────────────────────
+
+function drawSceneFirelink(ctx: CanvasRenderingContext2D, bg: BgState, time: number): void {
+  // Warm sunset sky.
+  const sky = ctx.createLinearGradient(0, 0, 0, DESIGN_H);
+  sky.addColorStop(0.00, '#1a0e1c');
+  sky.addColorStop(0.35, '#3a1410');
+  sky.addColorStop(0.62, '#8a3614');
+  sky.addColorStop(0.78, '#4a170a');
+  sky.addColorStop(0.92, '#1a0806');
+  sky.addColorStop(1.00, '#050202');
+  ctx.fillStyle = sky;
+  ctx.fillRect(0, 0, DESIGN_W, DESIGN_H);
+
+  // Setting sun — half-sunk below the horizon. The horizon line (y=540) cuts it.
+  const sunX = 540, sunY = 520, sunR = 68;
+  const sunPulse = 0.9 + Math.sin(time * 0.0008) * 0.1;
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  const halo = ctx.createRadialGradient(sunX, sunY, 0, sunX, sunY, 420);
+  halo.addColorStop(0,   'rgba(255, 180, 90, ' + (0.55 * sunPulse).toFixed(3) + ')');
+  halo.addColorStop(0.3, 'rgba(255, 120, 40, ' + (0.3 * sunPulse).toFixed(3) + ')');
+  halo.addColorStop(0.7, 'rgba(150, 50, 20, ' + (0.12 * sunPulse).toFixed(3) + ')');
+  halo.addColorStop(1,   'rgba(0, 0, 0, 0)');
+  ctx.fillStyle = halo;
+  ctx.fillRect(sunX - 420, sunY - 420, 840, 840);
+  ctx.restore();
+  // Disc — clipped so only the portion above the horizon shows.
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(0, 0, DESIGN_W, 540);       // horizon clip
+  ctx.clip();
+  ctx.fillStyle = '#ffd48a';
+  ctx.beginPath(); ctx.arc(sunX, sunY, sunR, 0, Math.PI * 2); ctx.fill();
+  // Subtle warmer core.
+  const core = ctx.createRadialGradient(sunX, sunY, 0, sunX, sunY, sunR);
+  core.addColorStop(0, 'rgba(255, 230, 180, 0.9)');
+  core.addColorStop(0.6, 'rgba(255, 180, 90, 0.5)');
+  core.addColorStop(1, 'rgba(255, 180, 90, 0)');
+  ctx.fillStyle = core;
+  ctx.fillRect(sunX - sunR, sunY - sunR, sunR * 2, sunR * 2);
+  ctx.restore();
+
+  // Horizon mist — soft yellow-orange blend that fades the sun's bottom into land.
+  ctx.save();
+  ctx.globalCompositeOperation = 'screen';
+  const mist = ctx.createLinearGradient(0, 510, 0, 570);
+  mist.addColorStop(0, 'rgba(255, 150, 70, 0)');
+  mist.addColorStop(0.5, 'rgba(255, 130, 60, 0.28)');
+  mist.addColorStop(1, 'rgba(120, 40, 20, 0)');
+  ctx.fillStyle = mist;
+  ctx.fillRect(0, 500, DESIGN_W, 80);
+  ctx.restore();
+
+  // Distant rolling hills — continuous, no awkward gaps.
+  ctx.save();
+  ctx.fillStyle = '#0c0508';
+  ctx.beginPath();
+  ctx.moveTo(0, DESIGN_H);
+  ctx.lineTo(0, 555);
+  ctx.bezierCurveTo(120, 540, 220, 560, 340, 548);
+  ctx.bezierCurveTo(440, 540, 500, 552, 560, 545);
+  ctx.bezierCurveTo(640, 538, 720, 560, 820, 552);
+  ctx.bezierCurveTo(900, 546, 970, 562, DESIGN_W, 555);
+  ctx.lineTo(DESIGN_W, DESIGN_H);
+  ctx.closePath(); ctx.fill();
+  // Nearer hills — one layer on top, slightly lighter for depth.
+  ctx.fillStyle = '#050203';
+  ctx.beginPath();
+  ctx.moveTo(0, DESIGN_H);
+  ctx.lineTo(0, 610);
+  ctx.bezierCurveTo(150, 585, 280, 620, 420, 608);
+  ctx.bezierCurveTo(560, 596, 700, 625, 820, 615);
+  ctx.bezierCurveTo(900, 608, 970, 620, DESIGN_W, 612);
+  ctx.lineTo(DESIGN_W, DESIGN_H);
+  ctx.closePath(); ctx.fill();
+  ctx.restore();
+
+  // The shrine — moved to the left, scaled down, perched on the nearer hill.
+  drawFirelinkShrine(ctx, 220, 610, time);
+
+  // Sword in the bonfire — iconic, right of center, on the nearer hill.
+  drawSwordInBonfire(ctx, 720, 612, time);
+
+  // A single broken archway silhouette deep in the background (behind the sun).
+  ctx.save();
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.fillStyle = 'rgba(10, 5, 8, 0.85)';
+  ctx.beginPath();
+  ctx.moveTo(860, 555);
+  ctx.lineTo(860, 420);
+  ctx.lineTo(880, 400);
+  ctx.lineTo(890, 430);
+  // chunk missing
+  ctx.lineTo(905, 420);
+  ctx.lineTo(920, 435);
+  ctx.lineTo(930, 420);
+  ctx.lineTo(930, 555);
+  ctx.closePath(); ctx.fill();
+  ctx.restore();
+
+  // Foreground rocks / broken stones framing.
+  ctx.save();
+  ctx.fillStyle = '#040103';
+  ctx.beginPath();
+  ctx.moveTo(0, DESIGN_H);
+  ctx.lineTo(0, 680);
+  ctx.lineTo(50, 672);
+  ctx.lineTo(90, 690);
+  ctx.lineTo(130, 700);
+  ctx.lineTo(140, DESIGN_H);
+  ctx.closePath(); ctx.fill();
+  ctx.beginPath();
+  ctx.moveTo(DESIGN_W, DESIGN_H);
+  ctx.lineTo(DESIGN_W, 680);
+  ctx.lineTo(DESIGN_W - 70, 690);
+  ctx.lineTo(DESIGN_W - 130, 705);
+  ctx.lineTo(DESIGN_W - 170, 715);
+  ctx.lineTo(DESIGN_W - 170, DESIGN_H);
+  ctx.closePath(); ctx.fill();
+  ctx.restore();
+}
+
+function drawFirelinkShrine(ctx: CanvasRenderingContext2D, cx: number, baseY: number, time: number): void {
+  // Stone body.
+  ctx.fillStyle = '#060405';
+  ctx.beginPath();
+  ctx.moveTo(cx - 70, baseY);
+  ctx.lineTo(cx - 70, baseY - 100);
+  ctx.lineTo(cx - 40, baseY - 140);
+  ctx.lineTo(cx - 30, baseY - 160);       // roof peak left
+  ctx.lineTo(cx,       baseY - 175);
+  ctx.lineTo(cx + 30, baseY - 160);
+  ctx.lineTo(cx + 40, baseY - 140);
+  ctx.lineTo(cx + 70, baseY - 100);
+  ctx.lineTo(cx + 70, baseY);
+  ctx.closePath(); ctx.fill();
+  // Arched doorway with warm inner glow.
+  const doorGlow = 0.6 + Math.sin(time * 0.003) * 0.25;
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  const ga = ctx.createRadialGradient(cx, baseY - 30, 0, cx, baseY - 30, 80);
+  ga.addColorStop(0, 'rgba(255, 170, 80, ' + (0.7 * doorGlow).toFixed(3) + ')');
+  ga.addColorStop(0.5, 'rgba(220, 90, 30, ' + (0.35 * doorGlow).toFixed(3) + ')');
+  ga.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = ga;
+  ctx.fillRect(cx - 80, baseY - 110, 160, 130);
+  ctx.restore();
+  // Arched opening.
+  ctx.fillStyle = '#1a0804';
+  ctx.beginPath();
+  ctx.moveTo(cx - 20, baseY);
+  ctx.lineTo(cx - 20, baseY - 40);
+  ctx.quadraticCurveTo(cx, baseY - 70, cx + 20, baseY - 40);
+  ctx.lineTo(cx + 20, baseY);
+  ctx.closePath(); ctx.fill();
+  // Small side window glowing faintly.
+  const winPulse = 0.5 + Math.sin(time * 0.004) * 0.3;
+  ctx.fillStyle = 'rgba(230, 140, 60, ' + (0.55 * winPulse).toFixed(3) + ')';
+  ctx.fillRect(cx - 55, baseY - 70, 6, 14);
+  ctx.fillRect(cx + 49, baseY - 70, 6, 14);
+}
+
+function drawSwordInBonfire(ctx: CanvasRenderingContext2D, cx: number, baseY: number, time: number): void {
+  // Ember glow under the sword.
+  const flick = 0.75 + Math.sin(time * 0.018) * 0.15 + Math.sin(time * 0.043) * 0.1;
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  const g = ctx.createRadialGradient(cx, baseY, 0, cx, baseY, 90 * flick);
+  g.addColorStop(0, 'rgba(255, 170, 80, ' + (0.7 * flick).toFixed(3) + ')');
+  g.addColorStop(0.4, 'rgba(220, 90, 30, ' + (0.35 * flick).toFixed(3) + ')');
+  g.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(cx - 100, baseY - 100, 200, 140);
+  ctx.restore();
+  // The sword silhouette stabbed into the ground.
+  ctx.save();
+  ctx.strokeStyle = '#1e1014';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(cx, baseY + 8);
+  ctx.lineTo(cx, baseY - 60);
+  ctx.stroke();
+  // Crossguard.
+  ctx.beginPath();
+  ctx.moveTo(cx - 10, baseY - 56);
+  ctx.lineTo(cx + 10, baseY - 56);
+  ctx.stroke();
+  // Pommel.
+  ctx.fillStyle = '#1e1014';
+  ctx.beginPath();
+  ctx.arc(cx, baseY - 64, 3, 0, Math.PI * 2); ctx.fill();
+  ctx.restore();
+}
+
+// ─────────────────────────────────────────────────────────────
+// Scene 2 — Undead Burg: overcast ruined city, rain, crumbling towers.
+// ─────────────────────────────────────────────────────────────
+
+function drawSceneBurg(ctx: CanvasRenderingContext2D, bg: BgState, time: number): void {
+  // Stormy overcast sky.
+  const sky = ctx.createLinearGradient(0, 0, 0, DESIGN_H);
+  sky.addColorStop(0.00, '#0a0812');
+  sky.addColorStop(0.45, '#161524');
+  sky.addColorStop(0.75, '#1c1820');
+  sky.addColorStop(1.00, '#050406');
+  ctx.fillStyle = sky;
+  ctx.fillRect(0, 0, DESIGN_W, DESIGN_H);
+
+  // Distant dim orange spot — a single faraway fire.
+  const fireX = 780, fireY = 440;
+  const fFlick = 0.8 + Math.sin(time * 0.014) * 0.12;
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  const fh = ctx.createRadialGradient(fireX, fireY, 0, fireX, fireY, 180);
+  fh.addColorStop(0, 'rgba(220, 100, 40, ' + (0.35 * fFlick).toFixed(3) + ')');
+  fh.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = fh;
+  ctx.fillRect(fireX - 180, fireY - 180, 360, 360);
+  ctx.restore();
+
+  // Distant jagged silhouette — broken city skyline.
+  ctx.save();
+  ctx.fillStyle = '#080610';
+  ctx.beginPath();
+  ctx.moveTo(0, DESIGN_H);
+  ctx.lineTo(0, 480);
+  // Ragged rooftops.
+  const roofs: Array<[number, number]> = [
+    [70, 450], [130, 475], [190, 440], [240, 475],
+    [310, 420], [360, 460], [420, 430], [470, 470],
+    [540, 435], [600, 480], [660, 445], [720, 470],
+    [790, 425], [860, 470], [930, 450], [990, 480],
+  ];
+  for (const [rx, ry] of roofs) {
+    ctx.lineTo(rx - 10, ry);
+    ctx.lineTo(rx, ry - 10);
+    ctx.lineTo(rx + 10, ry);
+  }
+  ctx.lineTo(DESIGN_W, 480);
+  ctx.lineTo(DESIGN_W, DESIGN_H);
+  ctx.closePath(); ctx.fill();
+  ctx.restore();
+
+  // Mid-ground: broken tower, left of center.
+  drawBurgTower(ctx, 230, 620, time, true);
+  // Smaller intact tower, right.
+  drawBurgTower(ctx, 760, 620, time, false);
+  // Crumbling archway foreground, center.
+  drawBurgArchway(ctx, 512, 660, time);
+
+  // Foreground rubble / debris.
+  ctx.save();
+  ctx.fillStyle = '#020104';
+  ctx.beginPath();
+  ctx.moveTo(0, DESIGN_H); ctx.lineTo(0, 680);
+  ctx.lineTo(90, 700); ctx.lineTo(60, 720); ctx.lineTo(140, 710);
+  ctx.lineTo(200, 730); ctx.lineTo(170, DESIGN_H);
+  ctx.closePath(); ctx.fill();
+  ctx.beginPath();
+  ctx.moveTo(DESIGN_W, DESIGN_H); ctx.lineTo(DESIGN_W, 690);
+  ctx.lineTo(DESIGN_W - 100, 705); ctx.lineTo(DESIGN_W - 60, 720);
+  ctx.lineTo(DESIGN_W - 160, 735); ctx.lineTo(DESIGN_W - 190, DESIGN_H);
+  ctx.closePath(); ctx.fill();
+  ctx.restore();
+
+  // Flickering torches on the surviving walls.
+  drawZoneTorches(ctx, [
+    {x: 200, y: 550, seed: 0.23},
+    {x: 760, y: 540, seed: 0.61},
+    {x: 512, y: 590, seed: 0.37},
+  ], time);
+}
+
+function drawBurgTower(ctx: CanvasRenderingContext2D, cx: number, baseY: number, time: number, broken: boolean): void {
+  ctx.save();
+  ctx.fillStyle = '#060508';
+  ctx.beginPath();
+  const h = broken ? 230 : 290;
+  const w = 60;
+  ctx.moveTo(cx - w, baseY);
+  ctx.lineTo(cx - w, baseY - h);
+  if (broken) {
+    // Jagged broken top.
+    ctx.lineTo(cx - w + 6,  baseY - h - 12);
+    ctx.lineTo(cx - 8, baseY - h + 6);
+    ctx.lineTo(cx + 4, baseY - h - 20);
+    ctx.lineTo(cx + 20, baseY - h + 14);
+    ctx.lineTo(cx + w - 6, baseY - h - 6);
+  } else {
+    // Crenellated top.
+    for (let k = 0; k <= 6; k++) {
+      const x = cx - w + (k * w * 2 / 6);
+      ctx.lineTo(x, baseY - h - (k % 2 === 0 ? 12 : 0));
+      ctx.lineTo(x + w / 3, baseY - h - (k % 2 === 0 ? 12 : 0));
+    }
+  }
+  ctx.lineTo(cx + w, baseY - h);
+  ctx.lineTo(cx + w, baseY);
+  ctx.closePath(); ctx.fill();
+  // Arrowslit glow.
+  const slitGlow = 0.5 + Math.sin(time * 0.004 + cx) * 0.3;
+  ctx.fillStyle = 'rgba(220, 130, 50, ' + (0.6 * slitGlow).toFixed(3) + ')';
+  ctx.fillRect(cx - 2, baseY - h * 0.55, 4, 14);
+  if (!broken) ctx.fillRect(cx - 2, baseY - h * 0.3, 4, 14);
+  ctx.restore();
+}
+
+function drawBurgArchway(ctx: CanvasRenderingContext2D, cx: number, baseY: number, time: number): void {
+  ctx.save();
+  ctx.fillStyle = '#040308';
+  // Left pillar of archway.
+  ctx.fillRect(cx - 90, baseY - 180, 28, 180);
+  // Right pillar.
+  ctx.fillRect(cx + 62, baseY - 180, 28, 180);
+  // Arch top — partially crumbled.
+  ctx.beginPath();
+  ctx.moveTo(cx - 90, baseY - 180);
+  ctx.quadraticCurveTo(cx - 60, baseY - 220, cx - 20, baseY - 215);
+  ctx.lineTo(cx - 10, baseY - 205);  // broken chunk missing
+  ctx.lineTo(cx + 30, baseY - 218);
+  ctx.quadraticCurveTo(cx + 70, baseY - 212, cx + 90, baseY - 180);
+  ctx.lineTo(cx + 62, baseY - 180);
+  ctx.quadraticCurveTo(cx, baseY - 198, cx - 62, baseY - 180);
+  ctx.closePath(); ctx.fill();
+  // Hanging chain from archway.
+  const sway = Math.sin(time * 0.001) * 3;
+  ctx.strokeStyle = 'rgba(15, 10, 12, 0.9)';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(cx, baseY - 205);
+  ctx.quadraticCurveTo(cx + sway * 0.5, baseY - 160, cx + sway, baseY - 110);
+  ctx.stroke();
+  ctx.fillStyle = 'rgba(15, 10, 12, 0.95)';
+  ctx.beginPath(); ctx.arc(cx + sway, baseY - 108, 5, 0, Math.PI * 2); ctx.fill();
+  ctx.restore();
+}
+
+function drawZoneTorches(ctx: CanvasRenderingContext2D, torches: Torch[], time: number): void {
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  for (const t of torches) {
+    const flick = 0.65 + Math.sin(time * 0.012 + t.seed * 20) * 0.2 + Math.sin(time * 0.031 + t.seed * 13) * 0.15;
+    const r = 28 + flick * 6;
+    const halo = ctx.createRadialGradient(t.x, t.y, 0, t.x, t.y, r);
+    halo.addColorStop(0, 'rgba(255, 170, 70, ' + (0.9 * flick).toFixed(3) + ')');
+    halo.addColorStop(0.4, 'rgba(220, 90, 30, ' + (0.4 * flick).toFixed(3) + ')');
+    halo.addColorStop(1, 'rgba(0, 0, 0, 0)');
+    ctx.fillStyle = halo;
+    ctx.fillRect(t.x - r, t.y - r, r * 2, r * 2);
+    ctx.fillStyle = 'rgba(255, 220, 150, ' + (0.9 * flick).toFixed(3) + ')';
+    ctx.beginPath(); ctx.arc(t.x, t.y, 2 + flick * 1.5, 0, Math.PI * 2); ctx.fill();
+  }
+  ctx.restore();
+}
+
+// ─────────────────────────────────────────────────────────────
+// Scene 3 — Anor Londo: majestic golden cathedral with rose window.
+// This is the existing scene, kept + polished.
+// ─────────────────────────────────────────────────────────────
+
+function drawSceneAnorLondo(ctx: CanvasRenderingContext2D, bg: BgState, time: number): void {
+  drawSky(ctx);
+  drawStars(ctx, bg.stars, time);
+  drawMoon(ctx, time);
+  drawCloudBand(ctx, time);
+  drawMountains(ctx);
+  drawCathedral(ctx, time);
+  drawMidSpires(ctx);
+  drawZoneTorches(ctx, bg.torches, time);
+  drawChains(ctx, bg.chains, time);
+  drawForegroundPillars(ctx);
+}
+
+// ─────────────────────────────────────────────────────────────
+// Scene 4 — Kiln of the First Flame: ancient ash, circle of pillars,
+// the First Flame itself throbbing at the center-back.
+// ─────────────────────────────────────────────────────────────
+
+function drawSceneKiln(ctx: CanvasRenderingContext2D, bg: BgState, time: number): void {
+  // Bleached-ash sky — smoky greys + hot orange horizon.
+  const sky = ctx.createLinearGradient(0, 0, 0, DESIGN_H);
+  sky.addColorStop(0.00, '#2a1612');
+  sky.addColorStop(0.35, '#4a2014');
+  sky.addColorStop(0.60, '#7a2e10');
+  sky.addColorStop(0.80, '#3a1808');
+  sky.addColorStop(1.00, '#180806');
+  ctx.fillStyle = sky;
+  ctx.fillRect(0, 0, DESIGN_W, DESIGN_H);
+
+  // The First Flame — massive throbbing orange sphere behind the pillars.
+  const fx = 512, fy = 480;
+  const pulse = 0.85 + Math.sin(time * 0.0018) * 0.15 + Math.sin(time * 0.0051) * 0.05;
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  const halo = ctx.createRadialGradient(fx, fy, 0, fx, fy, 440);
+  halo.addColorStop(0, 'rgba(255, 200, 100, ' + (0.7 * pulse).toFixed(3) + ')');
+  halo.addColorStop(0.25, 'rgba(255, 120, 40, ' + (0.45 * pulse).toFixed(3) + ')');
+  halo.addColorStop(0.6, 'rgba(180, 40, 10, ' + (0.2 * pulse).toFixed(3) + ')');
+  halo.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = halo;
+  ctx.fillRect(fx - 440, fy - 440, 880, 880);
+  // Hot core.
+  const core = ctx.createRadialGradient(fx, fy, 0, fx, fy, 90);
+  core.addColorStop(0, 'rgba(255, 250, 220, ' + (0.9 * pulse).toFixed(3) + ')');
+  core.addColorStop(0.5, 'rgba(255, 180, 80, ' + (0.6 * pulse).toFixed(3) + ')');
+  core.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = core;
+  ctx.fillRect(fx - 90, fy - 90, 180, 180);
+  ctx.restore();
+
+  // Distant bleached rubble line (a ring of ancient ruins).
+  ctx.save();
+  ctx.fillStyle = '#1a1210';
+  ctx.beginPath();
+  ctx.moveTo(0, DESIGN_H); ctx.lineTo(0, 550);
+  ctx.lineTo(120, 540); ctx.lineTo(220, 555); ctx.lineTo(320, 545);
+  ctx.lineTo(440, 560); ctx.lineTo(580, 550); ctx.lineTo(700, 558);
+  ctx.lineTo(820, 548); ctx.lineTo(920, 560); ctx.lineTo(DESIGN_W, 552);
+  ctx.lineTo(DESIGN_W, DESIGN_H); ctx.closePath(); ctx.fill();
+  ctx.restore();
+
+  // Ring of tilted pillars.
+  drawKilnPillars(ctx, time);
+
+  // Heat shimmer over the horizon — subtle undulation.
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  for (let i = 0; i < 3; i++) {
+    const yBand = 500 + i * 40 + Math.sin(time * 0.002 + i) * 6;
+    const g = ctx.createLinearGradient(0, yBand - 20, 0, yBand + 20);
+    g.addColorStop(0, 'rgba(255, 140, 60, 0)');
+    g.addColorStop(0.5, 'rgba(255, 140, 60, ' + (0.08 - i * 0.02).toFixed(3) + ')');
+    g.addColorStop(1, 'rgba(255, 140, 60, 0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, yBand - 20, DESIGN_W, 40);
+  }
+  ctx.restore();
+
+  // Foreground shattered stones.
+  ctx.save();
+  ctx.fillStyle = '#0c0604';
+  ctx.beginPath();
+  ctx.moveTo(0, DESIGN_H); ctx.lineTo(0, 660);
+  ctx.lineTo(70, 650); ctx.lineTo(110, 680); ctx.lineTo(160, 695);
+  ctx.lineTo(200, DESIGN_H); ctx.closePath(); ctx.fill();
+  ctx.beginPath();
+  ctx.moveTo(DESIGN_W, DESIGN_H); ctx.lineTo(DESIGN_W, 660);
+  ctx.lineTo(DESIGN_W - 80, 675); ctx.lineTo(DESIGN_W - 140, 695);
+  ctx.lineTo(DESIGN_W - 210, DESIGN_H); ctx.closePath(); ctx.fill();
+  ctx.restore();
+}
+
+function drawKilnPillars(ctx: CanvasRenderingContext2D, time: number): void {
+  ctx.save();
+  ctx.fillStyle = '#0a0608';
+  // Pillars tilted slightly outward, arranged as if circling the flame.
+  const pillars = [
+    {x: 180,  h: 380, tilt:  0.08, w: 44},
+    {x: 290,  h: 420, tilt:  0.05, w: 46},
+    {x: 400,  h: 460, tilt:  0.03, w: 48},
+    {x: 620,  h: 470, tilt: -0.03, w: 48},
+    {x: 730,  h: 420, tilt: -0.05, w: 46},
+    {x: 840,  h: 380, tilt: -0.08, w: 44},
+  ];
+  for (const p of pillars) {
+    const baseY = 700;
+    const topY = baseY - p.h;
+    const topOffset = p.h * p.tilt;
+    ctx.beginPath();
+    ctx.moveTo(p.x - p.w / 2, baseY);
+    ctx.lineTo(p.x - p.w / 2 + topOffset, topY);
+    // Broken jagged top.
+    ctx.lineTo(p.x - p.w / 4 + topOffset, topY - 10);
+    ctx.lineTo(p.x + topOffset, topY + 4);
+    ctx.lineTo(p.x + p.w / 4 + topOffset, topY - 8);
+    ctx.lineTo(p.x + p.w / 2 + topOffset, topY);
+    ctx.lineTo(p.x + p.w / 2, baseY);
+    ctx.closePath(); ctx.fill();
+    // Rim light facing the flame.
+    ctx.strokeStyle = 'rgba(255, 120, 40, 0.35)';
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    const rimSide = p.x < 512 ? 1 : -1;
+    ctx.moveTo(p.x + rimSide * p.w / 2 * 0.9, baseY);
+    ctx.lineTo(p.x + topOffset + rimSide * p.w / 2 * 0.9, topY);
+    ctx.stroke();
+    // Slight ember flicker along the top.
+    const flick = 0.4 + Math.sin(time * 0.01 + p.x) * 0.2;
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.fillStyle = 'rgba(255, 150, 60, ' + (0.25 * flick).toFixed(3) + ')';
+    ctx.beginPath(); ctx.arc(p.x + topOffset, topY - 2, 4, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+  }
+  ctx.restore();
+}
+
+
 
 // ── Sky + fixtures (unchanged structure, kept concise) ─────────
 function drawSky(ctx: CanvasRenderingContext2D): void {
@@ -831,7 +1335,7 @@ export function drawWordAura(
  * - ghost: flickering alpha
  * - tank: armored stroke outline
  * - runner: motion blur trails
- * - mimic: subtle teeth scribble until scrambled
+ * - mimic: phantom double-image visual (signals bonus on completion)
  * - chanter: glowing runic outline
  * - caster: pulsing pink core
  */
@@ -907,19 +1411,20 @@ export function drawWordText(
       ctx.strokeText(ch, cx, word.y);
     }
 
-    // Mimic: before scramble, add a thin tooth-like line under letters.
-    if (word.kind === 'mimic' && !word.scrambled && !typed) {
-      ctx.strokeStyle = 'rgba(240, 200, 100, 0.45)';
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(cx, word.y + 4);
-      ctx.lineTo(cx + (charWidths[ch] ?? 14) * fontScale, word.y + 4);
-      ctx.stroke();
+    // Phantom (mimic kind): ghostly double-image offset behind each letter —
+    // purely visual, no gameplay impact. Signals "bonus echo" at a glance.
+    if (word.kind === 'mimic' && !typed) {
+      ctx.save();
+      ctx.globalAlpha = 0.35;
+      ctx.fillStyle = '#ffcaa0';
+      ctx.fillText(ch, cx + 3, word.y + 1);
+      ctx.fillText(ch, cx - 3, word.y - 1);
+      ctx.restore();
     }
 
     ctx.globalAlpha = typed ? 1 : baseAlpha;
     ctx.fillStyle = typed
-      ? (word.isSpecial ? '#ff80cc' : '#ff6a20')
+      ? (word.isSpecial ? '#ffe4f1' : '#ff6a20')
       : wordColor(word.kind, word.isSpecial);
 
     if (typed) {
@@ -938,7 +1443,7 @@ export function drawWordText(
 }
 
 function wordColor(kind: EnemyKind, isSpecial: boolean): string {
-  if (isSpecial) return '#ff80cc';
+  if (isSpecial) return '#c85098';   // dim magenta when untyped — claimed letters become pearl-pink
   switch (kind) {
     case 'ghost':   return '#cfd8e0';
     case 'tank':    return '#f0d4a8';
@@ -1101,6 +1606,7 @@ export type BossRenderState = {
   phaseIdx: number;
   attackWindupT: number;       // 0..1 while winding up an attack
   enraged: boolean;
+  deathStart: number;          // 0 while alive; performance.now timestamp once defeated
 };
 
 export function drawBoss(
@@ -1111,34 +1617,68 @@ export function drawBoss(
   const cx = 512, baseY = 520;
   const breath = Math.sin(time * 0.002) * 6;
   const hpT = state.currentHp / state.maxHp;
-  // Rim glow — stronger when enraged.
+
+  // ── Death cutscene transforms. Three progressive phases:
+  //   0..800ms   — violent jitter
+  //   800..1800  — collapse/sink
+  //   1800..3000 — fade to nothing
+  let deathElapsed = 0;
+  let deathJitterX = 0, deathJitterY = 0;
+  let deathOffsetY = 0;
+  let deathAlpha = 1;
+  let deathRimBoost = 0;
+  if (state.deathStart > 0) {
+    deathElapsed = time - state.deathStart;
+    if (deathElapsed < 800) {
+      const intensity = 1 - (deathElapsed / 800) * 0.3;
+      deathJitterX = (Math.random() - 0.5) * 14 * intensity;
+      deathJitterY = (Math.random() - 0.5) * 10 * intensity;
+      deathRimBoost = Math.min(1, deathElapsed / 400);
+    } else if (deathElapsed < 1800) {
+      const t = (deathElapsed - 800) / 1000;    // 0..1
+      deathOffsetY = t * 40;
+      deathJitterX = (Math.random() - 0.5) * 3;
+      deathRimBoost = 1 - t * 0.4;
+    } else {
+      const t = Math.min(1, (deathElapsed - 1800) / 1200);  // 0..1
+      deathOffsetY = 40 + t * 80;
+      deathAlpha = 1 - t;
+      deathRimBoost = Math.max(0, 0.6 - t);
+    }
+  }
+
+  // Rim glow — stronger when enraged, boosted during death.
   ctx.save();
   ctx.globalCompositeOperation = 'lighter';
   const rimR = state.enraged ? 280 : 220;
-  const rimA = state.enraged ? 0.55 : 0.32;
-  const rim = ctx.createRadialGradient(cx, baseY - 40, 20, cx, baseY - 40, rimR);
+  const rimA = Math.min(0.95, (state.enraged ? 0.55 : 0.32) + deathRimBoost * 0.4);
+  const rim = ctx.createRadialGradient(cx, baseY - 40, 20, cx, baseY - 40, rimR + deathRimBoost * 60);
   rim.addColorStop(0, hexWithAlpha(state.themeColor, rimA));
   rim.addColorStop(1, 'rgba(0,0,0,0)');
   ctx.fillStyle = rim;
   ctx.fillRect(cx - rimR, baseY - rimR, rimR * 2, rimR * 2);
   ctx.restore();
+
   ctx.save();
-  ctx.translate(cx, baseY + breath);
+  ctx.globalAlpha = deathAlpha;
+  ctx.translate(cx + deathJitterX, baseY + breath + deathOffsetY + deathJitterY);
   if (state.silhouette === 'taurus') drawTaurus(ctx, state, time);
   else if (state.silhouette === 'ornstein') drawOrnstein(ctx, state, time);
   else drawGwyn(ctx, state, time);
   ctx.restore();
-  // HP low: cracks on the silhouette (cheap: draw jagged lines).
-  if (hpT < 0.33) {
+
+  // HP low OR death: cracks on the silhouette.
+  if (hpT < 0.33 || state.deathStart > 0) {
     ctx.save();
-    ctx.strokeStyle = hexWithAlpha(state.themeColor, 0.6);
-    ctx.lineWidth = 2;
+    ctx.globalAlpha = deathAlpha;
+    ctx.strokeStyle = hexWithAlpha(state.themeColor, 0.6 + deathRimBoost * 0.4);
+    ctx.lineWidth = 2 + deathRimBoost * 2;
     for (let i = 0; i < 3; i++) {
       const x = cx + (Math.sin(i * 13 + time * 0.003) * 60);
       ctx.beginPath();
-      ctx.moveTo(x, baseY - 40);
-      ctx.lineTo(x + 10, baseY - 90);
-      ctx.lineTo(x - 8, baseY - 150);
+      ctx.moveTo(x + deathJitterX, baseY - 40 + deathOffsetY);
+      ctx.lineTo(x + 10 + deathJitterX, baseY - 90 + deathOffsetY);
+      ctx.lineTo(x - 8 + deathJitterX, baseY - 150 + deathOffsetY);
       ctx.stroke();
     }
     ctx.restore();
