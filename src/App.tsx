@@ -6,10 +6,10 @@
 import React, {useEffect, useRef, useState, useCallback, memo} from 'react';
 import {GOTHIC_WORDS} from './constants';
 import {
-  DESIGN_W, DESIGN_H, PARTICLE_CAP, BG_EMBER_CAP, COMBO_RANKS,
-  rankForCombo, setupHiDPICanvas, buildCharWidthCache, seedEmbers,
+  DESIGN_W, DESIGN_H, PARTICLE_CAP, COMBO_RANKS,
+  rankForCombo, setupHiDPICanvas, buildCharWidthCache, createBgState,
   drawBackground, drawWordAura, drawFireball, drawShockwave, drawParticle,
-  type Word, type Fireball, type Particle, type Shockwave, type Ember, type Rank,
+  type Word, type Fireball, type Particle, type Shockwave, type BgState, type Rank,
 } from './graphics';
 
 type HighScore = {souls: number; maxCombo: number};
@@ -126,7 +126,7 @@ export default function App() {
   const fireballsRef = useRef<Fireball[]>([]);
   const particlesRef = useRef<Particle[]>([]);
   const shockwavesRef = useRef<Shockwave[]>([]);
-  const embersRef = useRef<Ember[]>(seedEmbers(BG_EMBER_CAP));
+  const bgStateRef = useRef<BgState>(createBgState());
   const activeWordRef = useRef<number | null>(null);
   const lastWordsRef = useRef<string[]>([]);
   const totalWordsSpawnedRef = useRef(0);
@@ -344,7 +344,7 @@ export default function App() {
 
       // Background layer.
       const lowHp = healthRef.current <= 3;
-      drawBackground(bgCtx, embersRef.current, time, dt, lowHp);
+      drawBackground(bgCtx, bgStateRef.current, time, dt, lowHp);
 
       // Camera shake (applied to the game + text canvases via CSS transform on the wrapper).
       let shakeX = 0, shakeY = 0;
@@ -529,18 +529,23 @@ export default function App() {
         }
         textCtx.shadowBlur = 0;
 
-        // Contact damage.
+        // Contact damage — scales with difficulty (0→5) and word length.
+        // Base 2 + up to +3 from difficulty + ~+0.15 per letter. Capped at current health.
         if (dist < 50) {
           wordsRef.current.splice(i, 1);
           if (activeWordRef.current !== null) {
             if (activeWordRef.current === i) activeWordRef.current = null;
             else if (activeWordRef.current > i) activeWordRef.current -= 1;
           }
-          healthRef.current = Math.max(0, healthRef.current - 4);
-          shakeMagRef.current = Math.max(shakeMagRef.current, 10);
+          const dmg = Math.ceil(1.5 + diff * 0.4 + w.text.length * 0.1);
+          healthRef.current = Math.max(0, healthRef.current - dmg);
+          // Stronger shake for bigger hits.
+          const shake = 6 + Math.min(dmg, 10);
+          shakeMagRef.current = Math.max(shakeMagRef.current, shake);
           shakeUntilRef.current = Math.max(shakeUntilRef.current, time + 220);
-          // Red blood burst.
-          for (let j = 0; j < 28; j++) {
+          // Red blood burst — scale burst with damage.
+          const burstCount = 20 + dmg * 4;
+          for (let j = 0; j < burstCount; j++) {
             if (particlesRef.current.length >= PARTICLE_CAP) break;
             const ang = Math.random() * Math.PI * 2;
             const spd = 2 + Math.random() * 5;
@@ -760,17 +765,21 @@ function GameOverScreen({
   onUnlock: () => void;
 }) {
   return (
-    <div className="absolute top-0 left-0 w-full h-full bg-black/95 z-50 flex flex-col items-center justify-center fade-in backdrop-blur-sm ce-death-bg">
+    <div className="absolute top-0 left-0 w-full h-full bg-black z-50 flex flex-col items-center justify-center fade-in ce-death-bg">
       <div className="ce-death-embers" aria-hidden />
-      <div className="font-[Cinzel] text-[100px] text-[#8b0000] font-bold tracking-[0.15em] drop-shadow-[0_0_25px_rgba(139,0,0,0.7)] zoom-in ce-died">YOU DIED</div>
-      <div className="mt-8 text-2xl opacity-60 font-[Cinzel] slide-in" style={{animationDelay: '300ms'}}>Souls Harvested: {finalStats.score}</div>
-      <div className="mt-2 text-2xl opacity-60 font-[Cinzel] slide-in flex items-center" style={{animationDelay: '500ms'}}>
+      <div className="ce-died-vignette" aria-hidden />
+      <div className="relative flex items-center justify-center">
+        <div className="ce-died-smoke" aria-hidden />
+        <div className="ce-died">YOU DIED</div>
+      </div>
+      <div className="mt-8 text-2xl opacity-0 font-[Cinzel] slide-in" style={{animationDelay: '2200ms'}}>Souls Harvested: {finalStats.score}</div>
+      <div className="mt-2 text-2xl opacity-0 font-[Cinzel] slide-in flex items-center" style={{animationDelay: '2400ms'}}>
         Max Combo: {finalStats.maxCombo}
         <img src={`/${finalStats.topRank.id}-removebg-preview.png`} alt={finalStats.topRank.label} className="h-10 object-contain mx-2" />
       </div>
-      <div className="mt-2 text-2xl opacity-60 font-[Cinzel] slide-in" style={{animationDelay: '700ms'}}>Accuracy: {finalStats.accuracy}%</div>
+      <div className="mt-2 text-2xl opacity-0 font-[Cinzel] slide-in" style={{animationDelay: '2600ms'}}>Accuracy: {finalStats.accuracy}%</div>
 
-      <div className="mt-12 flex flex-col items-center fade-in" style={{animationDelay: '1000ms'}}>
+      <div className="mt-12 flex flex-col items-center opacity-0 fade-in" style={{animationDelay: '2900ms'}}>
         <p className="text-lg text-[#ff4444] font-bold mb-4 font-[Cinzel] tracking-[0.5em] uppercase drop-shadow-[0_0_15px_rgba(255,0,0,0.8)] animate-pulse">Secret Password</p>
         <form onSubmit={(e) => {
           e.preventDefault();
@@ -792,9 +801,9 @@ function GameOverScreen({
         </form>
       </div>
 
-      <button onClick={() => location.reload()} className="mt-12 px-8 py-2 border border-amber-900/40 hover:bg-amber-900/10 transition-colors uppercase text-lg tracking-widest font-[Cinzel] fade-in" style={{animationDelay: '1500ms'}}>Try Again</button>
+      <button onClick={() => location.reload()} className="mt-12 px-8 py-2 border border-amber-900/40 hover:bg-amber-900/10 transition-colors uppercase text-lg tracking-widest font-[Cinzel] opacity-0 fade-in" style={{animationDelay: '3200ms'}}>Try Again</button>
 
-      <div className="absolute right-8 bottom-8 flex flex-col items-center z-[60] fade-in w-48" style={{animationDelay: '1200ms'}}>
+      <div className="absolute right-8 bottom-8 flex flex-col items-center z-[60] opacity-0 fade-in w-48" style={{animationDelay: '3000ms'}}>
         <h2 className="text-[#8b0000] font-[Cinzel] tracking-widest text-[1rem] leading-none mb-3 border-b border-[#8b0000]/50 pb-1 drop-shadow-[0_0_10px_rgba(139,0,0,0.8)] uppercase">Hall of Records</h2>
         {highscores.length === 0 ? (
           <div className="text-amber-700/50 font-[Cinzel] italic text-xs">No legendary souls yet...</div>
