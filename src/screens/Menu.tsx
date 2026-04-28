@@ -6,12 +6,24 @@
 export type MenuScreenProps = {
   onStart: () => void;
   onOpenSettings: () => void;
+  onOpenDev: () => void;
 };
 
-export function MenuScreen({onStart, onOpenSettings}: MenuScreenProps) {
+export function MenuScreen({onStart, onOpenSettings, onOpenDev}: MenuScreenProps) {
   return (
     <div className="absolute top-0 left-0 w-full h-full bg-black/70 flex flex-col items-center justify-center z-50 p-8 text-center ce-menu-bg">
       <div className="ce-menu-embers" aria-hidden />
+
+      {/* Near-invisible dev sigil in the bottom-left — or backtick shortcut. */}
+      <button
+        onClick={onOpenDev}
+        aria-label="Dev console"
+        title="Dev (shortcut: `)"
+        className="absolute bottom-3 left-3 text-[10px] text-emerald-900/40 hover:text-emerald-300 font-mono tracking-widest"
+      >
+        ◇
+      </button>
+
       <h1 className="relative font-[Cinzel] text-5xl md:text-6xl text-amber-700 mb-2 tracking-[0.3em] drop-shadow-[0_0_25px_rgba(180,83,9,0.6)] ce-title">
         CURSED ECHOES
       </h1>

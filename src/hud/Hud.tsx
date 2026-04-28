@@ -18,17 +18,25 @@ export type HudStats = {
   currentRank: Rank;
   estusCharges: number;
   estusMax: number;
-  estusActive: boolean;       // chugging animation
-  stamina: number;            // 0..100
+  estusActive: boolean;
+  stamina: number;
   maxStamina: number;
   zoneName: string;
   zoneSubtitle: string;
+  zoneTimeLeft: number;       // seconds until zone ends (0 during boss/no-timer)
+  zoneDuration: number;       // total zone duration in seconds
+  bossActive: boolean;
 };
 
 export const Hud = memo(function Hud({stats}: {stats: HudStats}) {
   const hpPct = (stats.health / stats.maxHealth) * 100;
   const stamPct = (stats.stamina / stats.maxStamina) * 100;
   const lowHp = stats.health <= 3;
+  const zonePct = stats.zoneDuration > 0
+    ? Math.max(0, Math.min(100, ((stats.zoneDuration - stats.zoneTimeLeft) / stats.zoneDuration) * 100))
+    : 0;
+  const flameCalls = !stats.bossActive && stats.zoneTimeLeft > 0 && stats.zoneTimeLeft <= 10;
+  const showZoneProgress = !stats.bossActive && stats.zoneDuration > 0;
 
   return (
     <div className="absolute top-8 left-8 flex flex-col gap-2 z-30 pointer-events-none select-none max-w-[360px]">
@@ -92,6 +100,26 @@ export const Hud = memo(function Hud({stats}: {stats: HudStats}) {
         {stats.zoneName} · Difficulty {stats.difficulty}
       </div>
       <div className="text-sm opacity-60 font-[Cinzel]">Accuracy: {stats.accuracy}%</div>
+
+      {/* Zone-progress bar (hidden during boss) */}
+      {showZoneProgress && (
+        <div className="flex items-center gap-2 mt-1">
+          <div className="relative h-1.5 w-[240px] border border-amber-900/50 bg-amber-950/40">
+            <div
+              className="h-full bg-gradient-to-r from-amber-800 to-amber-400 transition-all"
+              style={{width: `${zonePct}%`}}
+            />
+          </div>
+          <span className="text-[10px] text-amber-700/80 font-mono tracking-widest">
+            {Math.ceil(stats.zoneTimeLeft)}s
+          </span>
+        </div>
+      )}
+      {flameCalls && (
+        <div className="text-xs text-amber-400 font-[Cinzel] tracking-[0.4em] uppercase animate-pulse drop-shadow-[0_0_10px_rgba(255,170,60,0.6)]">
+          ◈ The flame calls ◈
+        </div>
+      )}
 
       {/* Combo */}
       <div className="flex flex-col items-start gap-1 mt-2">
