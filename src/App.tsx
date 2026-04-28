@@ -14,7 +14,17 @@ import {
 
 type HighScore = {souls: number; maxCombo: number};
 
+// Where words target and fireballs launch from — the player's collision center.
+// This should visually coincide with the character body inside the sprite PNG.
 const PLAYER = {x: 512, y: 700};
+
+// Sprite box sits centered at PLAYER.x + this nudge. Positive values push the
+// sprite RIGHT to compensate for asymmetry in the PNG artwork (the character
+// inside idle1/casting2 is drawn slightly left of the PNG's center).
+const SPRITE_X_NUDGE = 14;
+
+// Vertical contact radius around PLAYER where a word deals damage.
+const HIT_RADIUS = 55;
 
 // ─────────────────────────────────────────────────────────────
 // HUD — a memoized subcomponent driven by a low-frequency tick,
@@ -134,6 +144,9 @@ export default function App() {
   const shakeUntilRef = useRef(0);
   const shakeMagRef = useRef(0);
   const castingUntilRef = useRef(0);
+  const hitFlashUntilRef = useRef(0);
+  const damageTextsRef = useRef<{x: number; y: number; value: string; life: number; maxLife: number}[]>([]);
+  const screenFlashRef = useRef<HTMLDivElement>(null);
   const blessedTimeoutRef = useRef<number | null>(null);
 
   const startTimeRef = useRef(0);
@@ -488,6 +501,40 @@ export default function App() {
         particlesRef.current.splice(0, particlesRef.current.length - PARTICLE_CAP);
       }
 
+      // ── Damage numbers — float up and fade.
+      if (damageTextsRef.current.length > 0) {
+        textCtx.font = 'bold 28px "Cinzel", serif';
+        textCtx.textAlign = 'center';
+        for (let i = damageTextsRef.current.length - 1; i >= 0; i--) {
+          const d = damageTextsRef.current[i];
+          d.y -= 1.2 * dt;
+          d.life -= dt;
+          if (d.life <= 0) {
+            damageTextsRef.current.splice(i, 1);
+            continue;
+          }
+          const alpha = Math.min(1, d.life / 30);
+          textCtx.fillStyle = 'rgba(255, 60, 60, ' + alpha.toFixed(3) + ')';
+          textCtx.shadowBlur = 14;
+          textCtx.shadowColor = 'rgba(255, 0, 0, ' + (alpha * 0.9).toFixed(3) + ')';
+          textCtx.fillText(d.value, d.x, d.y);
+        }
+        textCtx.textAlign = 'start';
+        textCtx.shadowBlur = 0;
+      }
+
+      // ── Hit flash — drive the overlay's opacity imperatively.
+      if (screenFlashRef.current) {
+        if (time < hitFlashUntilRef.current) {
+          const remaining = hitFlashUntilRef.current - time;
+          // Fast spike, slow fall: ease-out cube.
+          const t = Math.min(1, remaining / 320);
+          screenFlashRef.current.style.opacity = (t * t * 0.85).toFixed(3);
+        } else if (screenFlashRef.current.style.opacity !== '0') {
+          screenFlashRef.current.style.opacity = '0';
+        }
+      }
+
       // ── Words: homing movement + aura + text rendering.
       const widths = charWidthsRef.current;
       textCtx.font = '24px "Cinzel", serif';
@@ -530,8 +577,7 @@ export default function App() {
         textCtx.shadowBlur = 0;
 
         // Contact damage — scales with difficulty (0→5) and word length.
-        // Base 2 + up to +3 from difficulty + ~+0.15 per letter. Capped at current health.
-        if (dist < 50) {
+        if (dist < HIT_RADIUS) {
           wordsRef.current.splice(i, 1);
           if (activeWordRef.current !== null) {
             if (activeWordRef.current === i) activeWordRef.current = null;
@@ -539,21 +585,51 @@ export default function App() {
           }
           const dmg = Math.ceil(1.5 + diff * 0.4 + w.text.length * 0.1);
           healthRef.current = Math.max(0, healthRef.current - dmg);
-          // Stronger shake for bigger hits.
-          const shake = 6 + Math.min(dmg, 10);
+
+          // 1. Screen shake — magnitude scales with hit.
+          const shake = 8 + Math.min(dmg, 10);
           shakeMagRef.current = Math.max(shakeMagRef.current, shake);
-          shakeUntilRef.current = Math.max(shakeUntilRef.current, time + 220);
-          // Red blood burst — scale burst with damage.
-          const burstCount = 20 + dmg * 4;
+          shakeUntilRef.current = Math.max(shakeUntilRef.current, time + 260);
+
+          // 2. Full-screen red flash overlay.
+          hitFlashUntilRef.current = time + 320;
+
+          // 3. Sprite hit flash (inline filter for an instant brightness pop).
+          const img = playerImgRef.current;
+          if (img) {
+            img.style.filter = 'brightness(3.2) saturate(0) drop-shadow(0 0 24px rgba(255,60,60,0.9))';
+            window.setTimeout(() => {
+              if (playerImgRef.current) playerImgRef.current.style.filter = '';
+            }, 140);
+          }
+
+          // 4. Floating damage number.
+          damageTextsRef.current.push({
+            x: PLAYER.x + (Math.random() - 0.5) * 20,
+            y: PLAYER.y - 40,
+            value: '-' + dmg,
+            life: 55,
+            maxLife: 55,
+          });
+
+          // 5. Shockwave ring at the impact point.
+          shockwavesRef.current.push({
+            x: PLAYER.x, y: PLAYER.y - 8,
+            radius: 6, maxRadius: 120,
+            color: 'rgba(255, 40, 40, ALPHA)',
+          });
+
+          // 6. Red blood burst — more particles, larger spread.
+          const burstCount = 28 + dmg * 5;
           for (let j = 0; j < burstCount; j++) {
             if (particlesRef.current.length >= PARTICLE_CAP) break;
             const ang = Math.random() * Math.PI * 2;
-            const spd = 2 + Math.random() * 5;
+            const spd = 2 + Math.random() * 7;
             particlesRef.current.push({
               x: PLAYER.x, y: PLAYER.y,
-              vx: Math.cos(ang) * spd, vy: Math.sin(ang) * spd,
-              life: 22, maxLife: 22, size: 3,
-              color: '#9b0000',
+              vx: Math.cos(ang) * spd, vy: Math.sin(ang) * spd - 2,
+              life: 28, maxLife: 28, size: 3 + Math.random() * 2,
+              color: Math.random() < 0.2 ? '#ff3030' : '#9b0000',
             });
           }
           if (healthRef.current === 0) {
@@ -651,8 +727,20 @@ export default function App() {
             src="/idle1.png"
             data-state="idle"
             alt="Manus"
-            className="absolute bottom-4 left-[512px] -translate-x-1/2 w-32 h-32 object-contain z-20 player-sprite"
+            className="absolute bottom-4 w-32 h-32 object-contain z-20 player-sprite"
+            style={{left: (PLAYER.x + SPRITE_X_NUDGE) + 'px'}}
             draggable={false}
+          />
+          {/* Red screen flash overlay — opacity driven imperatively from the game loop. */}
+          <div
+            ref={screenFlashRef}
+            aria-hidden
+            className="absolute inset-0 z-[25] pointer-events-none"
+            style={{
+              background: 'radial-gradient(ellipse at 50% 90%, rgba(220,20,20,0.75) 0%, rgba(120,0,0,0.4) 40%, rgba(0,0,0,0) 80%)',
+              opacity: 0,
+              willChange: 'opacity',
+            }}
           />
         </div>
 
