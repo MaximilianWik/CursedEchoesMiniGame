@@ -22,13 +22,14 @@ import {
   type BgState, type Rank, type BossRenderState,
 } from './graphics';
 
-import {ZONES, BOSSES, ENEMY_KINDS, CASTER_WORDS, GHOST_MESSAGES, type EnemyKind, type BossDef} from './game/config';
+import {ZONES, BOSSES, ENEMY_KINDS, CASTER_WORDS, GHOST_MESSAGES, type EnemyKind, type BossDef, type BossPattern} from './game/config';
 import {useSettings, getSettings} from './game/settings';
 import {createStats, registerWrong, sampleCombo, deriveStats, type RunStats} from './game/stats';
 import {
   initAudio, resumeAudio, playMusic, stopMusic,
   sfxCast, sfxMiss, sfxFireball, sfxImpact, sfxShatter, sfxRankUp, sfxComboBreak,
   sfxPlayerHit, sfxBonfire, sfxEstus, sfxDodge, sfxBossAppear, sfxBossDefeated,
+  sfxBossScream, sfxBossCollapse, sfxBossFinale,
   sfxDeath, sfxHeartbeat,
 } from './game/audio';
 
@@ -43,6 +44,7 @@ import {BonfireInterlude, type BonfireReason} from './screens/BonfireInterlude';
 import {GameOverScreen, type HighScore} from './screens/GameOver';
 import {VictoryScreen} from './screens/Victory';
 import {SecretAskScreen, SecretLoveScreen, type SecretHeart} from './screens/SecretScreens';
+import {DevPanel} from './screens/DevPanel';
 
 // ─────────────────────────────────────────────────────────────
 // Constants
@@ -67,11 +69,13 @@ type BossRuntime = {
   def: BossDef;
   currentHp: number;
   phaseIdx: number;
-  nextProjectileAt: number;      // performance.now time
-  phraseSpawnCooldown: number;   // seconds
+  nextAttackAt: number;
+  nextPhraseAt: number;
+  patternRotationIdx: number;
   enraged: boolean;
   attackWindupT: number;
-  defeated: boolean;             // prevents double-trigger after HP=0
+  defeated: boolean;
+  deathStart: number;            // performance.now at moment of defeat (0 while alive)
 };
 
 type BonfireInfo = {
@@ -90,6 +94,7 @@ export default function App() {
   const [paused, setPaused] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showSecretAsk, setShowSecretAsk] = useState(false);
+  const [showDevPanel, setShowDevPanel] = useState(false);
   const [yesChecked, setYesChecked] = useState(false);
   const [noHoverPos, setNoHoverPos] = useState<{x: number; y: number} | null>(null);
   const [secretHearts, setSecretHearts] = useState<SecretHeart[]>([]);
@@ -150,7 +155,7 @@ export default function App() {
   const shakeMagRef = useRef(0);
   const castingUntilRef = useRef(0);
   const hitFlashUntilRef = useRef(0);
-  const damageTextsRef = useRef<{x: number; y: number; value: string; life: number; maxLife: number; color: string}[]>([]);
+  const damageTextsRef = useRef<{x: number; y: number; value: string; life: number; maxLife: number; color: string; big?: boolean}[]>([]);
   const ghostMessageRef = useRef<{text: string; x: number; y: number; life: number} | null>(null);
 
   // Dodge + stamina
@@ -257,7 +262,7 @@ export default function App() {
   const enterZone = useCallback((idx: number) => {
     zoneIdxRef.current = idx;
     const zone = ZONES[idx];
-    setZoneStyling(bgStateRef.current, zone.weather, zone.tintColor);
+    setZoneStyling(bgStateRef.current, zone.weather, zone.tintColor, zone.id as BgState['zoneId']);
     zoneStartTimeRef.current = performance.now();
     zoneElapsedRef.current = 0;
     statsRef.current.zoneReached = idx;
@@ -308,11 +313,13 @@ export default function App() {
       def,
       currentHp: def.maxHp,
       phaseIdx: 0,
-      nextProjectileAt: performance.now() + def.phases[0].projectileRate * 1000,
-      phraseSpawnCooldown: 0,
+      nextAttackAt: performance.now() + 1800,
+      nextPhraseAt: performance.now() + 600,
+      patternRotationIdx: 0,
       enraged: false,
       attackWindupT: 0,
       defeated: false,
+      deathStart: 0,
     };
     wordsRef.current = [];
     activeWordRef.current = null;
@@ -382,6 +389,76 @@ export default function App() {
     phaseRef.current = 'menu';
     setPhase('menu');
   }, []);
+
+  // ─── Dev-mode actions ────────────────────────────────────────
+  const devJumpToZone = useCallback((idx: number) => {
+    initAudio(); resumeAudio();
+    resetRunState();
+    setShowDevPanel(false);
+    enterZone(idx);
+  }, [enterZone, resetRunState]);
+
+  const devJumpToBoss = useCallback((bossId: string) => {
+    initAudio(); resumeAudio();
+    resetRunState();
+    // Locate the zone this boss belongs to so HUD shows the right zone name.
+    const zoneIdx = Math.max(0, ZONES.findIndex(z => z.bossId === bossId));
+    zoneIdxRef.current = zoneIdx;
+    setZoneStyling(bgStateRef.current, ZONES[zoneIdx].weather, ZONES[zoneIdx].tintColor, ZONES[zoneIdx].id as BgState['zoneId']);
+    statsRef.current.zoneReached = zoneIdx;
+    setShowDevPanel(false);
+    enterBoss(bossId);
+  }, [enterBoss, resetRunState]);
+
+  const devJumpToVictory = useCallback(() => {
+    resetRunState();
+    statsRef.current.endTime = Date.now();
+    statsRef.current.bossesDefeated = 3;
+    scoreRef.current = 99999;
+    maxComboRef.current = 150;
+    zoneIdxRef.current = ZONES.length - 1;
+    setFinalSnapshot(snapshotFromRefs());
+    setShowDevPanel(false);
+    phaseRef.current = 'victory';
+    setPhase('victory');
+    playMusic('victory');
+  }, [resetRunState]);
+
+  const devHeal = useCallback(() => { healthRef.current = MAX_HEALTH; }, []);
+  const devGiveEstus = useCallback(() => { estusChargesRef.current = MAX_ESTUS; }, []);
+  const devAddCombo = useCallback((n: number) => {
+    comboRef.current += n;
+    if (comboRef.current > maxComboRef.current) maxComboRef.current = comboRef.current;
+  }, []);
+  const devKillAllWords = useCallback(() => {
+    wordsRef.current = [];
+    projectilesRef.current = [];
+    activeWordRef.current = null;
+  }, []);
+  const devTriggerLightning = useCallback(() => {
+    triggerLightning(bgStateRef.current, performance.now());
+  }, []);
+
+  // Keyboard shortcut: backtick (`) opens the dev gate from the menu.
+  useEffect(() => {
+    if (phase !== 'menu') return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === '`' || e.key === '~') { e.preventDefault(); setShowDevPanel(true); }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [phase]);
+
+  // snapshot helper that reads from refs (for dev victory jump)
+  function snapshotFromRefs(): FinalSnapshot {
+    return {
+      score: scoreRef.current,
+      maxCombo: maxComboRef.current,
+      topRank: rankForCombo(maxComboRef.current),
+      stats: {...statsRef.current, comboOverTime: [...statsRef.current.comboOverTime]},
+      zoneName: ZONES[zoneIdxRef.current]?.name ?? ZONES[0].name,
+    };
+  }
 
   const runAway = (e?: React.MouseEvent | React.TouchEvent) => {
     if (e) { e.preventDefault(); e.stopPropagation(); }
@@ -495,6 +572,7 @@ export default function App() {
     phase, paused, scale, settings,
     showSettings, setShowSettings,
     showSecretAsk, setShowSecretAsk,
+    showDevPanel, setShowDevPanel,
     yesChecked, setYesChecked, noHoverPos, runAway,
     secretHearts, setSecretHearts, kissPos, setKissPos,
     secretPassword, setSecretPassword, passwordError, setPasswordError,
@@ -504,6 +582,8 @@ export default function App() {
     smoochAudioRef,
     startRun, abandonRun, tryAgain, advanceFromBonfire,
     handleChar, setIsMobileFocused, setPaused,
+    devJumpToZone, devJumpToBoss, devJumpToVictory,
+    devHeal, devGiveEstus, devAddCombo, devKillAllWords, devTriggerLightning,
   });
 }
 
@@ -527,6 +607,7 @@ function initialHudStats(): HudStats {
     estusCharges: MAX_ESTUS, estusMax: MAX_ESTUS, estusActive: false,
     stamina: MAX_STAMINA, maxStamina: MAX_STAMINA,
     zoneName: ZONES[0].name, zoneSubtitle: ZONES[0].subtitle,
+    zoneTimeLeft: ZONES[0].duration, zoneDuration: ZONES[0].duration, bossActive: false,
   };
 }
 
@@ -567,7 +648,7 @@ type LoopDeps = {
   shakeMagRef: React.RefObject<number>;
   castingUntilRef: React.RefObject<number>;
   hitFlashUntilRef: React.RefObject<number>;
-  damageTextsRef: React.RefObject<{x: number; y: number; value: string; life: number; maxLife: number; color: string}[]>;
+  damageTextsRef: React.RefObject<{x: number; y: number; value: string; life: number; maxLife: number; color: string; big?: boolean}[]>;
   ghostMessageRef: React.RefObject<{text: string; x: number; y: number; life: number} | null>;
   dodgeUntilRef: React.RefObject<number>;
   iFramesUntilRef: React.RefObject<number>;
@@ -702,7 +783,7 @@ function runGameLoop(d: LoopDeps): () => void {
     if (time - lastHudBump > 100) {
       lastHudBump = time;
       pushHudStats(d);
-      if (d.phaseRef.current === 'boss' && d.bossRef.current) {
+      if (d.phaseRef.current === 'boss' && d.bossRef.current && !d.bossRef.current.defeated) {
         const b = d.bossRef.current;
         d.setBossBarStats({
           name: b.def.name,
@@ -859,7 +940,30 @@ function pickWord(minL: number, maxL: number, existing: Word[], last: string[]):
 
 function updateBoss(d: LoopDeps, time: number, dt: number): void {
   const b = d.bossRef.current;
-  if (!b || b.currentHp <= 0) return;
+  if (!b) return;
+
+  // ── Death cutscene — spawn ongoing bursts while the boss disintegrates.
+  if (b.defeated) {
+    const elapsed = time - b.deathStart;
+    if (elapsed >= 0 && elapsed < 2200 && Math.random() < 0.55) {
+      for (let i = 0; i < 4; i++) {
+        if (d.particlesRef.current.length >= PARTICLE_CAP) break;
+        const ang = Math.random() * Math.PI * 2;
+        const spd = 1.5 + Math.random() * 6;
+        d.particlesRef.current.push({
+          x: BOSS_AIM.x + (Math.random() - 0.5) * 80,
+          y: BOSS_AIM.y + (Math.random() - 0.5) * 90,
+          vx: Math.cos(ang) * spd,
+          vy: Math.sin(ang) * spd - 2,
+          life: 35, maxLife: 35, size: 2.5 + Math.random() * 2,
+          color: Math.random() < 0.4 ? '#a00000' : b.def.themeColor,
+        });
+      }
+    }
+    return;     // skip phase/attack logic while dying
+  }
+
+  if (b.currentHp <= 0) return;
 
   // Phase transition based on HP.
   const hpPct = b.currentHp / b.def.maxHp;
@@ -873,41 +977,94 @@ function updateBoss(d: LoopDeps, time: number, dt: number): void {
     const announce = b.def.phases[newPhase].announcement;
     if (announce) d.bossAnnouncementRef.current = {text: announce, life: 180};
     triggerLightning(d.bgStateRef.current, time);
+    b.patternRotationIdx = 0;
+    // Small grace period after phase shift.
+    b.nextAttackAt = time + 1200;
   }
 
   const phase = b.def.phases[b.phaseIdx];
 
-  // Phrase spawn — keep up to phase.maxSimultaneousPhrases.
-  b.phraseSpawnCooldown -= dt / 60;
-  const liveCount = d.wordsRef.current.length;
-  if (liveCount < phase.maxSimultaneousPhrases && b.phraseSpawnCooldown <= 0) {
+  // ── Phrase spawning: always exactly ONE visible phrase at a time, placed
+  //    near the top of the screen with good horizontal variety. The player
+  //    never has to parse multiple phrases in parallel — this keeps focus.
+  const phraseExists = d.wordsRef.current.length > 0;
+  if (!phraseExists && time >= b.nextPhraseAt) {
     const pool = phase.phraseBank;
     const text = pool[Math.floor(Math.random() * pool.length)];
-    if (!d.wordsRef.current.some(w => w.text === text)) {
-      d.wordsRef.current.push({
-        text, x: 80 + Math.random() * (DESIGN_W - 300), y: 150 + Math.random() * 80,
-        speed: 0.03,
-        typed: '', kind: 'normal', isSpecial: false,
-        hp: 1, fireCooldown: 0, ghostPhase: 0,
-        scrambled: false, stationaryX: 0, spawnTime: time,
-      });
-      b.phraseSpawnCooldown = 4;
-    }
+    // Phrase width (rough estimate — 14px per char at default font) used to pick a
+    // safe x so the phrase doesn't clip the edges.
+    const widthEst = text.length * 14;
+    const minX = 60, maxX = DESIGN_W - widthEst - 60;
+    const xPos = minX + Math.random() * Math.max(10, maxX - minX);
+    d.wordsRef.current.push({
+      text, x: xPos, y: 130 + Math.random() * 30,
+      speed: 0,                                  // stationary — bosses phrases never descend
+      typed: '', kind: 'normal', isSpecial: false,
+      hp: 1, fireCooldown: 0, ghostPhase: 0,
+      scrambled: false, stationaryX: xPos, spawnTime: time,
+    });
   }
 
-  // Boss projectiles.
-  if (time >= b.nextProjectileAt) {
-    const letter = phase.projectileLetters[Math.floor(Math.random() * phase.projectileLetters.length)];
+  // ── Attack pattern scheduler.
+  if (time >= b.nextAttackAt) {
+    const pat = phase.patterns[b.patternRotationIdx % phase.patterns.length];
+    b.patternRotationIdx += 1;
+    spawnBossAttack(d, pat, phase.projectileLetters, time);
+    b.nextAttackAt = time + phase.patternInterval * 1000;
+  }
+}
+
+/** Spawn a wave of boss projectiles following the given pattern. */
+function spawnBossAttack(d: LoopDeps, pattern: BossPattern, letters: string, time: number): void {
+  const pick = () => letters[Math.floor(Math.random() * letters.length)];
+  // Boss body position (silhouette is drawn centered at x=512, baseY=520 with breath offset).
+  const BOSS_BODY_Y = 440;
+
+  if (pattern === 'single') {
+    // One letter, launched from boss center, slight aim toward player.
     d.projectilesRef.current.push({
-      x: BOSS_AIM.x + (Math.random() - 0.5) * 120,
-      y: BOSS_AIM.y - 40,
-      vx: (PLAYER.x - BOSS_AIM.x) * 0.002 + (Math.random() - 0.5) * 0.5,
-      vy: phase.projectileSpeed,
-      char: letter,
+      x: BOSS_AIM.x + (Math.random() - 0.5) * 40,
+      y: BOSS_BODY_Y,
+      vx: (PLAYER.x - BOSS_AIM.x) * 0.0012 + (Math.random() - 0.5) * 0.3,
+      vy: 1.6,
+      char: pick(),
       fromBoss: true,
-      life: 400,
+      life: 520,
     });
-    b.nextProjectileAt = time + phase.projectileRate * 1000;
+  } else if (pattern === 'volley') {
+    // Three simultaneous drops spread across the screen — chord-like.
+    const xs = [BOSS_AIM.x - 220, BOSS_AIM.x, BOSS_AIM.x + 220];
+    for (const x of xs) {
+      d.projectilesRef.current.push({
+        x, y: BOSS_BODY_Y + (Math.random() - 0.5) * 20,
+        vx: 0,
+        vy: 1.8,
+        char: pick(),
+        fromBoss: true,
+        life: 500,
+      });
+    }
+    // Small telegraph — quick screen flicker.
+    triggerLightning(d.bgStateRef.current, time);
+  } else if (pattern === 'wave') {
+    // Five letters in an arc from left to right, staggered vertically so they
+    // arrive at the player in sequence. Each one fans slightly outward.
+    const count = 5;
+    for (let i = 0; i < count; i++) {
+      const tNorm = i / (count - 1);
+      const x = 140 + tNorm * (DESIGN_W - 280);
+      // Higher starting y for later arrivals so the wave sweeps L→R at player.
+      const staggerY = BOSS_BODY_Y - i * 48;
+      d.projectilesRef.current.push({
+        x,
+        y: staggerY,
+        vx: (tNorm - 0.5) * 0.4,
+        vy: 1.5,
+        char: pick(),
+        fromBoss: true,
+        life: 640,
+      });
+    }
   }
 }
 
@@ -922,6 +1079,7 @@ function drawBossToBg(bgCtx: CanvasRenderingContext2D, d: LoopDeps, time: number
     phaseIdx: b.phaseIdx,
     attackWindupT: b.attackWindupT,
     enraged: b.enraged,
+    deathStart: b.deathStart,
   };
   drawBoss(bgCtx, state, time);
 }
@@ -969,9 +1127,30 @@ function updateFireballs(d: LoopDeps, ctx: CanvasRenderingContext2D, time: numbe
       addImpactDecal(d.bgStateRef.current, fb.tx, fb.ty, isSpear);
       // Hit a word (normal case) or damage boss.
       if (fb.targetBoss && d.bossRef.current && !d.bossRef.current.defeated) {
-        d.bossRef.current.currentHp = Math.max(0, d.bossRef.current.currentHp - 1);
-        d.shakeMagRef.current = Math.max(d.shakeMagRef.current, 10);
-        d.shakeUntilRef.current = Math.max(d.shakeUntilRef.current, time + 220);
+        const dmg = fb.bossDamage ?? 0;
+        if (dmg > 0) {
+          d.bossRef.current.currentHp = Math.max(0, d.bossRef.current.currentHp - dmg);
+          d.shakeMagRef.current = Math.max(d.shakeMagRef.current, 10 + dmg * 2);
+          d.shakeUntilRef.current = Math.max(d.shakeUntilRef.current, time + 260);
+          // Big impact burst at the boss.
+          for (let j = 0; j < 24 + dmg * 8; j++) {
+            if (d.particlesRef.current.length >= PARTICLE_CAP) break;
+            const ang = Math.random() * Math.PI * 2;
+            const spd = 2 + Math.random() * 7;
+            d.particlesRef.current.push({
+              x: BOSS_AIM.x, y: BOSS_AIM.y,
+              vx: Math.cos(ang) * spd, vy: Math.sin(ang) * spd - 2,
+              life: 30, maxLife: 30, size: 3,
+              color: d.bossRef.current.def.themeColor,
+            });
+          }
+          // Floating damage number above the boss.
+          d.damageTextsRef.current.push({
+            x: BOSS_AIM.x + (Math.random() - 0.5) * 30, y: BOSS_AIM.y - 100,
+            value: '-' + dmg, life: 60, maxLife: 60,
+            color: d.bossRef.current.def.themeColor,
+          });
+        }
         if (d.bossRef.current.currentHp <= 0) defeatBoss(d, time);
       } else if (!fb.targetBoss) {
         const wIdx = d.wordsRef.current.findIndex(w => Math.abs(w.x - fb.tx) < 70);
@@ -991,27 +1170,67 @@ function defeatBoss(d: LoopDeps, time: number): void {
   const b = d.bossRef.current;
   if (!b || b.defeated) return;
   b.defeated = true;
+  b.deathStart = time;
   d.scoreRef.current += b.def.soulsReward;
   d.statsRef.current.bossesDefeated += 1;
-  sfxBossDefeated();
-  // Big explosion at boss position.
-  for (let i = 0; i < 80; i++) {
+
+  // Moment-of-death: guttural scream + first massive burst.
+  sfxBossScream();
+  triggerLightning(d.bgStateRef.current, time);
+  d.shakeMagRef.current = Math.max(d.shakeMagRef.current, 18);
+  d.shakeUntilRef.current = Math.max(d.shakeUntilRef.current, time + 900);
+  for (let i = 0; i < 60; i++) {
     if (d.particlesRef.current.length >= PARTICLE_CAP) break;
     const ang = Math.random() * Math.PI * 2;
-    const spd = 2 + Math.random() * 8;
+    const spd = 3 + Math.random() * 9;
     d.particlesRef.current.push({
       x: BOSS_AIM.x, y: BOSS_AIM.y,
-      vx: Math.cos(ang) * spd, vy: Math.sin(ang) * spd,
-      life: 40, maxLife: 40, size: 4,
-      color: b.def.themeColor,
+      vx: Math.cos(ang) * spd, vy: Math.sin(ang) * spd - 3,
+      life: 45, maxLife: 45, size: 3 + Math.random() * 2,
+      color: Math.random() < 0.45 ? '#9b0000' : b.def.themeColor,
     });
   }
-  d.shockwavesRef.current.push({x: BOSS_AIM.x, y: BOSS_AIM.y, radius: 8, maxRadius: 220, color: 'rgba(255,200,80,ALPHA)'});
-  triggerLightning(d.bgStateRef.current, time);
-  // Queue bonfire after a beat.
+  d.shockwavesRef.current.push({x: BOSS_AIM.x, y: BOSS_AIM.y, radius: 8, maxRadius: 240, color: 'rgba(255, 60, 40, ALPHA)'});
+
+  // Clear all incoming threats + active phrase so the player just watches.
+  d.projectilesRef.current = [];
+  d.wordsRef.current = [];
+  d.activeWordRef.current = null;
+  d.iFramesUntilRef.current = time + 3200;    // invulnerability for the duration
+  d.bossAnnouncementRef.current = {text: b.def.name + ' FELLED', life: 180};
+
+  // Floating "souls earned" text — flies up from the boss's chest.
+  d.damageTextsRef.current.push({
+    x: BOSS_AIM.x, y: BOSS_AIM.y - 60,
+    value: '+' + b.def.soulsReward.toLocaleString() + ' SOULS',
+    life: 180, maxLife: 180,
+    color: '#ffe28a',
+    big: true,
+  });
+
+  // Mid-cutscene: deep collapse rumble + second big shockwave.
   window.setTimeout(() => {
-    d.beginBonfire('boss-defeated', d.zoneIdxRef.current + 1, b.def.name);
+    if (!d.bossRef.current || !d.bossRef.current.defeated) return;
+    sfxBossCollapse();
+    triggerLightning(d.bgStateRef.current, performance.now());
+    d.shockwavesRef.current.push({x: BOSS_AIM.x, y: BOSS_AIM.y, radius: 10, maxRadius: 300, color: 'rgba(180, 40, 20, ALPHA)'});
+    d.shakeMagRef.current = Math.max(d.shakeMagRef.current, 14);
+    d.shakeUntilRef.current = Math.max(d.shakeUntilRef.current, performance.now() + 600);
   }, 900);
+
+  // Final beat: resolving chord + brightest flash + transition to bonfire.
+  window.setTimeout(() => {
+    if (!d.bossRef.current || !d.bossRef.current.defeated) return;
+    sfxBossFinale();
+    sfxBossDefeated();
+    triggerLightning(d.bgStateRef.current, performance.now());
+    d.shockwavesRef.current.push({x: BOSS_AIM.x, y: BOSS_AIM.y, radius: 12, maxRadius: 380, color: 'rgba(255, 220, 140, ALPHA)'});
+  }, 2400);
+
+  window.setTimeout(() => {
+    if (!d.bossRef.current || !d.bossRef.current.defeated) return;
+    d.beginBonfire('boss-defeated', d.zoneIdxRef.current + 1, b.def.name);
+  }, 3200);
 }
 
 function updateProjectiles(d: LoopDeps, ctx: CanvasRenderingContext2D, time: number, dt: number): void {
@@ -1091,14 +1310,25 @@ function updateWords(d: LoopDeps, ctx: CanvasRenderingContext2D, textCtx: Canvas
       }
     }
 
-    // Mimic scramble at 50%.
-    if (w.kind === 'mimic' && !w.scrambled && w.typed.length >= Math.floor(w.text.length / 2)) {
-      const head = w.text.slice(0, w.typed.length);
-      const tailLen = w.text.length - w.typed.length;
-      let tail = '';
-      for (let k = 0; k < tailLen; k++) tail += String.fromCharCode(65 + Math.floor(Math.random() * 26));
-      w.text = head + tail;
-      w.scrambled = true;
+    // Summoner (chanter kind): stationary at top; periodically spawns a small
+    // minion echo that homes toward the player. Killing the summoner stops spawns.
+    if (w.kind === 'chanter') {
+      w.fireCooldown -= dt / 60;
+      if (w.fireCooldown <= 0) {
+        w.fireCooldown = 4.0 + Math.random() * 1.2;
+        // Only spawn if there's a free first-letter to pick.
+        const used = new Set(d.wordsRef.current.map(ww => ww.text[0]));
+        const candidates = GOTHIC_WORDS.filter(x => x.length >= 3 && x.length <= 5 && !used.has(x[0]));
+        if (candidates.length > 0) {
+          const minionText = candidates[Math.floor(Math.random() * candidates.length)];
+          d.wordsRef.current.push({
+            text: minionText, x: w.x + 20, y: w.y + 30,
+            speed: 0.32, typed: '', kind: 'normal', isSpecial: false,
+            hp: 1, fireCooldown: 0, ghostPhase: 0, scrambled: false,
+            stationaryX: 0, spawnTime: time,
+          });
+        }
+      }
     }
 
     // Visual width.
@@ -1140,17 +1370,23 @@ function updateWords(d: LoopDeps, ctx: CanvasRenderingContext2D, textCtx: Canvas
 function drawDamageTexts(d: LoopDeps, textCtx: CanvasRenderingContext2D, dt: number): void {
   if (d.damageTextsRef.current.length === 0) return;
   textCtx.save();
-  textCtx.font = 'bold 28px "Cinzel", serif';
   textCtx.textAlign = 'center';
   for (let i = d.damageTextsRef.current.length - 1; i >= 0; i--) {
     const dmg = d.damageTextsRef.current[i];
-    dmg.y -= 1.2 * dt;
+    dmg.y -= (dmg.big ? 0.7 : 1.2) * dt;
     dmg.life -= dt;
     if (dmg.life <= 0) { d.damageTextsRef.current.splice(i, 1); continue; }
-    const alpha = Math.min(1, dmg.life / 30);
+    const alpha = Math.min(1, dmg.life / (dmg.big ? 60 : 30));
     textCtx.fillStyle = dmg.color;
     textCtx.globalAlpha = alpha;
-    textCtx.shadowBlur = 14; textCtx.shadowColor = dmg.color;
+    if (dmg.big) {
+      textCtx.font = 'bold 44px "Cinzel", serif';
+      textCtx.shadowBlur = 24;
+    } else {
+      textCtx.font = 'bold 28px "Cinzel", serif';
+      textCtx.shadowBlur = 14;
+    }
+    textCtx.shadowColor = dmg.color;
     textCtx.fillText(dmg.value, dmg.x, dmg.y);
   }
   textCtx.globalAlpha = 1;
@@ -1214,6 +1450,9 @@ function pushHudStats(d: LoopDeps): void {
   const diff = d.phaseRef.current === 'zone'
     ? Math.round(Math.min(d.zoneElapsedRef.current / zone.duration, 1) * 10)
     : 10;
+  const zoneTimeLeft = d.phaseRef.current === 'zone'
+    ? Math.max(0, zone.duration - d.zoneElapsedRef.current)
+    : 0;
   d.setHudStats({
     score: d.scoreRef.current,
     health: d.healthRef.current,
@@ -1231,6 +1470,9 @@ function pushHudStats(d: LoopDeps): void {
     maxStamina: MAX_STAMINA,
     zoneName: zone.name,
     zoneSubtitle: zone.subtitle,
+    zoneTimeLeft,
+    zoneDuration: zone.duration,
+    bossActive: d.phaseRef.current === 'boss',
   });
 }
 
@@ -1250,15 +1492,6 @@ function handleCharLive(d: LoopDeps, rawChar: string): void {
 
   d.totalKeyRef.current += 1;
   d.statsRef.current.totalLetters += 1;
-
-  // Chanter debuff — roll to mis-register.
-  const chanterPresent = d.wordsRef.current.some(w => w.kind === 'chanter');
-  if (chanterPresent && Math.random() < 0.15) {
-    registerWrong(d.statsRef.current, char);
-    sfxMiss();
-    d.comboRef.current = 0;
-    return;
-  }
 
   // Casting sprite swap.
   const img = d.playerImgRef.current;
@@ -1361,6 +1594,12 @@ function handleCharLive(d: LoopDeps, rawChar: string): void {
 
 function spawnFireball(d: LoopDeps, w: Word): void {
   const isBoss = d.phaseRef.current === 'boss';
+  let bossDamage: number | undefined;
+  if (isBoss && w.typed === w.text) {
+    // This IS the phrase-completing letter — carry the damage payload.
+    const letters = w.text.replace(/ /g, '').length;
+    bossDamage = Math.max(1, Math.ceil(letters / 7));
+  }
   d.fireballsRef.current.push({
     x: PLAYER.x, y: PLAYER.y,
     tx: isBoss ? BOSS_AIM.x : w.x,
@@ -1368,6 +1607,7 @@ function spawnFireball(d: LoopDeps, w: Word): void {
     progress: 0,
     isSpecial: w.isSpecial,
     targetBoss: isBoss,
+    bossDamage,
   });
   sfxFireball();
 }
@@ -1386,6 +1626,7 @@ function completeWord(d: LoopDeps, w: Word, idx: number, now: number): void {
       });
     }
     d.healthRef.current = MAX_HEALTH;
+    d.estusChargesRef.current = MAX_ESTUS;
     d.isBlessedRef.current = true;
     if (d.blessedTimeoutRef.current !== null) window.clearTimeout(d.blessedTimeoutRef.current);
     d.blessedTimeoutRef.current = window.setTimeout(() => {
@@ -1412,6 +1653,30 @@ function completeWord(d: LoopDeps, w: Word, idx: number, now: number): void {
     }
   }
 
+  // Phantom (mimic kind) — bonus souls + pink celebratory burst.
+  if (w.kind === 'mimic') {
+    const bonusLetters = w.text.replace(/ /g, '').length;
+    const bonus = Math.round(bonusLetters * 10 * 0.5);   // +50% over normal score
+    d.scoreRef.current += bonus;
+    d.damageTextsRef.current.push({
+      x: w.x + 20, y: w.y - 20,
+      value: '+' + bonus, life: 55, maxLife: 55,
+      color: '#ffcaa0',
+    });
+    for (let i = 0; i < 30; i++) {
+      if (d.particlesRef.current.length >= PARTICLE_CAP) break;
+      const ang = Math.random() * Math.PI * 2;
+      const spd = 2 + Math.random() * 5;
+      d.particlesRef.current.push({
+        x: w.x + 20, y: w.y,
+        vx: Math.cos(ang) * spd, vy: Math.sin(ang) * spd,
+        life: 28, maxLife: 28, size: 3,
+        color: '#ffcaa0',
+      });
+    }
+  }
+  }
+
   d.wordsRef.current.splice(idx, 1);
   d.activeWordRef.current = null;
   // Score: length × 10, × 3 for phrases (longer words feel like phrases).
@@ -1421,6 +1686,13 @@ function completeWord(d: LoopDeps, w: Word, idx: number, now: number): void {
   if (w.text.length > d.statsRef.current.longestWord.length) d.statsRef.current.longestWord = w.text;
   d.comboRef.current += 5;
   sfxShatter();
+
+  // Schedule the next phrase if this was a boss phrase.
+  if (d.phaseRef.current === 'boss' && d.bossRef.current && !d.bossRef.current.defeated) {
+    const b = d.bossRef.current;
+    const phase = b.def.phases[b.phaseIdx];
+    b.nextPhraseAt = performance.now() + phase.phraseSpawnCooldown * 1000;
+  }
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -1437,6 +1709,8 @@ type RenderProps = {
   setShowSettings: (v: boolean) => void;
   showSecretAsk: boolean;
   setShowSecretAsk: (v: boolean) => void;
+  showDevPanel: boolean;
+  setShowDevPanel: (v: boolean) => void;
   yesChecked: boolean;
   setYesChecked: (v: boolean) => void;
   noHoverPos: {x: number; y: number} | null;
@@ -1471,6 +1745,14 @@ type RenderProps = {
   handleChar: (c: string) => void;
   setIsMobileFocused: (v: boolean) => void;
   setPaused: React.Dispatch<React.SetStateAction<boolean>>;
+  devJumpToZone: (idx: number) => void;
+  devJumpToBoss: (id: string) => void;
+  devJumpToVictory: () => void;
+  devHeal: () => void;
+  devGiveEstus: () => void;
+  devAddCombo: (n: number) => void;
+  devKillAllWords: () => void;
+  devTriggerLightning: () => void;
 };
 
 function renderAppTree(p: RenderProps) {
@@ -1559,6 +1841,7 @@ function renderAppTree(p: RenderProps) {
           <MenuScreen
             onStart={p.startRun}
             onOpenSettings={() => p.setShowSettings(true)}
+            onOpenDev={() => p.setShowDevPanel(true)}
           />
         )}
 
@@ -1635,6 +1918,21 @@ function renderAppTree(p: RenderProps) {
 
         {/* Settings overlay */}
         {p.showSettings && <SettingsScreen onClose={() => p.setShowSettings(false)} />}
+
+        {/* Dev panel overlay */}
+        {p.showDevPanel && (
+          <DevPanel
+            onClose={() => p.setShowDevPanel(false)}
+            jumpToZone={p.devJumpToZone}
+            jumpToBoss={p.devJumpToBoss}
+            jumpToVictory={p.devJumpToVictory}
+            heal={p.devHeal}
+            giveEstus={p.devGiveEstus}
+            addCombo={p.devAddCombo}
+            killAllWords={p.devKillAllWords}
+            triggerLightning={p.devTriggerLightning}
+          />
+        )}
       </div>
 
       {p.kissPos && (
