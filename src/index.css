@@ -115,8 +115,54 @@
     opacity: 0.5;
     mix-blend-mode: screen;
   }
+
+  /* ── The authentic Dark Souls "YOU DIED" reveal ─── */
+  /* Horizontal squash → widening letter-spacing → blur-in.
+     Settles into a slow pulse that lives forever. */
   .ce-died {
-    animation: diedPulse 2.2s ease-in-out infinite;
+    position: relative;
+    font-family: 'Cinzel', serif;
+    font-weight: 700;
+    font-size: 108px;
+    line-height: 1;
+    color: #8b0000;
+    letter-spacing: 0.15em;
+    opacity: 0;
+    will-change: transform, letter-spacing, filter, opacity, color, text-shadow;
+    animation:
+      youDiedReveal 2.4s cubic-bezier(0.2, 0.7, 0.2, 1) 200ms forwards,
+      youDiedPulse  3.2s ease-in-out 2.8s infinite;
+  }
+  .ce-died-smoke {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 920px;
+    height: 220px;
+    transform: translate(-50%, -50%) scale(0.3, 0.1);
+    pointer-events: none;
+    background:
+      radial-gradient(ellipse at center,
+        rgba(180, 10, 10, 0.55) 0%,
+        rgba(100, 0, 0, 0.35) 35%,
+        rgba(40, 0, 0, 0.15) 60%,
+        transparent 75%);
+    filter: blur(32px);
+    opacity: 0;
+    mix-blend-mode: screen;
+    animation: youDiedSmoke 3.2s ease-out 150ms forwards;
+  }
+  .ce-died-vignette {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background: radial-gradient(ellipse at 50% 42%,
+      transparent 0%,
+      transparent 30%,
+      rgba(100, 0, 0, 0.35) 80%,
+      rgba(40, 0, 0, 0.65) 100%);
+    opacity: 0;
+    animation: youDiedVignette 2.6s ease-out 150ms forwards;
   }
 
   /* ── Keyframes ──────────────────────────────────── */
@@ -145,8 +191,54 @@
     0%, 100% { text-shadow: 0 0 25px rgba(180, 83, 9, 0.45), 0 0 4px rgba(0, 0, 0, 0.8); }
     50%      { text-shadow: 0 0 38px rgba(220, 120, 40, 0.75), 0 0 6px rgba(0, 0, 0, 0.8); }
   }
-  @keyframes diedPulse {
-    0%, 100% { text-shadow: 0 0 25px rgba(139, 0, 0, 0.55); transform: scale(1); }
-    50%      { text-shadow: 0 0 55px rgba(220, 10, 10, 0.9), 0 0 8px rgba(0,0,0,0.9); transform: scale(1.02); }
+  @keyframes youDiedReveal {
+    0% {
+      opacity: 0;
+      letter-spacing: 0;
+      transform: scale(1.7, 0.35);
+      filter: blur(24px);
+      color: #2a0000;
+      text-shadow: 0 0 10px rgba(60, 0, 0, 0.3);
+    }
+    30% {
+      opacity: 0.75;
+      letter-spacing: 0.03em;
+      transform: scale(1.4, 0.55);
+      filter: blur(14px);
+      color: #4a0000;
+      text-shadow: 0 0 28px rgba(120, 10, 10, 0.6);
+    }
+    65% {
+      opacity: 1;
+      letter-spacing: 0.11em;
+      transform: scale(1.06, 0.94);
+      filter: blur(2px);
+      color: #6b0000;
+      text-shadow: 0 0 48px rgba(200, 15, 15, 0.85);
+    }
+    100% {
+      opacity: 1;
+      letter-spacing: 0.15em;
+      transform: scale(1, 1);
+      filter: blur(0);
+      color: #8b0000;
+      text-shadow: 0 0 30px rgba(139, 0, 0, 0.75), 0 0 6px rgba(0, 0, 0, 0.9);
+    }
+  }
+  @keyframes youDiedPulse {
+    0%, 100% { text-shadow: 0 0 30px rgba(139, 0, 0, 0.6), 0 0 6px rgba(0, 0, 0, 0.9); }
+    50%      { text-shadow: 0 0 55px rgba(220, 15, 15, 0.95), 0 0 8px rgba(0, 0, 0, 0.9); }
+  }
+  @keyframes youDiedSmoke {
+    0%   { opacity: 0;   transform: translate(-50%, -50%) scale(0.3, 0.1); }
+    35%  { opacity: 0.85; transform: translate(-50%, -50%) scale(1.15, 0.85); }
+    70%  { opacity: 0.55; transform: translate(-50%, -50%) scale(1.35, 1.1); }
+    100% { opacity: 0.25; transform: translate(-50%, -50%) scale(1.5, 1.25); }
+  }
+  @keyframes youDiedVignette {
+    0%   { opacity: 0; }
+    30%  { opacity: 0; }
+    70%  { opacity: 0.9; }
+    100% { opacity: 0.65; }
   }
 }
