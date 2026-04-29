@@ -62,6 +62,49 @@ export function resetSettings(): void {
   for (const l of listeners) l(current);
 }
 
+// ─────────────────────────────────────────────────────────────
+// Save-data keys (not settings, but kept here so one file owns
+// the full inventory of keys we persist into localStorage).
+// ─────────────────────────────────────────────────────────────
+
+const BOSS_SELECT_SEEN_KEY = 'abyss_boss_select_seen';
+const BOSS_SELECT_CHOICE_KEY = 'abyss_boss_select_choice';
+const HIGHSCORES_KEY = 'abyss_highscores';
+
+export type BossSelectChoice = 'taurus' | 'afroman';
+
+export function getRememberedBossChoice(): BossSelectChoice | null {
+  try {
+    if (localStorage.getItem(BOSS_SELECT_SEEN_KEY) !== '1') return null;
+    const v = localStorage.getItem(BOSS_SELECT_CHOICE_KEY);
+    if (v === 'taurus' || v === 'afroman') return v;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+export function persistBossChoice(choice: BossSelectChoice): void {
+  try {
+    localStorage.setItem(BOSS_SELECT_SEEN_KEY, '1');
+    localStorage.setItem(BOSS_SELECT_CHOICE_KEY, choice);
+  } catch { /* ignore */ }
+}
+
+/** Wipe the boss-select memory so the fork re-appears on the next run.
+ *  Invoked from Settings → Reset save data. */
+export function resetBossSelectGate(): void {
+  try {
+    localStorage.removeItem(BOSS_SELECT_SEEN_KEY);
+    localStorage.removeItem(BOSS_SELECT_CHOICE_KEY);
+  } catch { /* ignore */ }
+}
+
+/** Wipe the hall of records (highscores). Settings → Reset save data. */
+export function resetHighscores(): void {
+  try { localStorage.removeItem(HIGHSCORES_KEY); } catch { /* ignore */ }
+}
+
 export function subscribeSettings(fn: (s: Settings) => void): () => void {
   listeners.add(fn);
   return () => { listeners.delete(fn); };

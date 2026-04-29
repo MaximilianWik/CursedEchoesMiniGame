@@ -3,7 +3,7 @@
 A gothic typing trial. Four zones. Three bosses. Banish the echoes, parry the spells, type the phrases, kindle the fading flame.
 
 **Live:** https://cursedechoes.vercel.app/
-**Current version:** `0.2.12` — lore-accurate per-boss phrase banks, 40% faster Jessyka, summons spawn under the HUD, Kiln 2x estus buff. See [CHANGELOG.md](./CHANGELOG.md) for full history. Version is shown in-game on the menu, pause, settings, game-over and victory screens.
+**Current version:** `0.3.0` — secret boss available before the first fight, rhythm-parry mechanics, full-song buildup cutscene. See [CHANGELOG.md](./CHANGELOG.md) for full history. Version is shown in-game on the menu, pause, settings, game-over and victory screens.
 
 https://github.com/user-attachments/assets/cc4d2332-4475-4e61-bd31-d33734f54dab
 
@@ -37,7 +37,7 @@ Mobile: tap the play area to open the soft keyboard. Taps relay characters into 
 Linear for now — four zones, beat each to advance:
 
 1. **Firelink Shrine** (45 s, no boss) — warm amber sunset, short words, calm intro. A stone shrine stands against a sinking sun, the first bonfire flickering beside it.
-2. **Undead Burg** (75 s) → **Taurus Demon** — stormy rain, ruined city silhouette, two crumbling towers, chains swaying from a broken archway.
+2. **Undead Burg** (75 s) → **Taurus Demon** *or* a hidden secret boss — stormy rain, ruined city silhouette, two crumbling towers, chains swaying from a broken archway. The first time you clear the Burg, the game offers **CHOOSE THY FOE** — a fork in the trial. Your choice is remembered per save file; clear save data in Settings to see the fork again.
 3. **Anor Londo** (85 s) → **Dragon Slayer Ornstein** — the iconic cathedral with a glowing rose window, god rays, twin bell towers, distant mountains.
 4. **Kiln of the First Flame** (70 s) → **Gwyn, Lord of Cinder** — bleached ash, ember storm, a ring of tilted pillars circling the throbbing First Flame.
 

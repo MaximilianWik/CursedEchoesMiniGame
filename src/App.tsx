@@ -22,11 +22,12 @@ import {
   type BgState, type Rank, type BossRenderState,
 } from './graphics';
 
-import {ZONES, BOSSES, ENEMY_KINDS, CASTER_WORDS, GHOST_MESSAGES, type EnemyKind, type BossDef, type BossPattern} from './game/config';
-import {useSettings, getSettings} from './game/settings';
+import {ZONES, BOSSES, ENEMY_KINDS, CASTER_WORDS, GHOST_MESSAGES, AFROMAN_MUNCHIES, type EnemyKind, type BossDef, type BossPattern} from './game/config';
+import {useSettings, getSettings, getRememberedBossChoice, persistBossChoice, resetBossSelectGate, resetHighscores, type BossSelectChoice} from './game/settings';
 import {createStats, registerWrong, sampleCombo, deriveStats, type RunStats} from './game/stats';
 import {
   initAudio, resumeAudio, playMusic, stopMusic,
+  playMusicSample, stopMusicSample, setMusicSampleVolume, subscribeBeat,
   sfxCast, sfxMiss, sfxFireball, sfxImpact, sfxShatter, sfxRankUp, sfxComboBreak,
   sfxPlayerHit, sfxBonfire, sfxEstus, sfxDodge, sfxBossAppear, sfxBossDefeated,
   sfxBossScream, sfxBossCollapse, sfxBossFinale,
@@ -47,6 +48,8 @@ import {GameOverScreen, type HighScore} from './screens/GameOver';
 import {VictoryScreen} from './screens/Victory';
 import {SecretAskScreen, SecretLoveScreen, type SecretHeart} from './screens/SecretScreens';
 import {DevPanel} from './screens/DevPanel';
+import {BossSelect} from './screens/BossSelect';
+import {AfromanIntro} from './screens/AfromanIntro';
 
 // ─────────────────────────────────────────────────────────────
 // Constants
@@ -145,7 +148,7 @@ function hexA(hex: string, alpha: number): string {
   return 'rgba(' + r + ',' + g + ',' + b + ',' + alpha.toFixed(3) + ')';
 }
 
-type Phase = 'menu' | 'zone' | 'boss' | 'bonfire' | 'victory' | 'gameover';
+type Phase = 'menu' | 'zone' | 'boss-select' | 'boss-intro-afroman' | 'boss' | 'bonfire' | 'victory' | 'gameover';
 
 type BossRuntime = {
   def: BossDef;
@@ -178,12 +181,31 @@ const BOSS_INTRO_MS = 4500;
  *  of continuous. */
 const BOSS_SUMMONER_COOLDOWN_MS = 18000;
 const BOSS_CASTER_COOLDOWN_MS = 18000;
+/** AfroMan — perfect-parry acceptance window around a detected beat (ms).
+ *  Parry keystrokes within this window of the most recent beat grant the
+ *  PERFECT popup, +2 combo, and 1 HP of direct boss damage. */
+const PERFECT_PARRY_WINDOW_MS = 150;
+/** AfroMan — HP damage dealt to the boss on a perfect parry. */
+const PERFECT_PARRY_BOSS_DMG = 1;
+/** Seconds between automatic ZOOTED stack decays while the player is actively
+ *  typing correctly. 0 stacks = clean; 3 stacks = maximum disorientation. */
+const ZOOTED_DECAY_INTERVAL_SEC = 2.5;
+/** Max ZOOTED stacks. A 4th application (would be) converts to 2 HP damage
+ *  as a safety cap so the debuff can't trivialise the fight. */
+const ZOOTED_CAP = 3;
 
 type BonfireInfo = {
   reason: BonfireReason;
   nextZoneIdx: number;
   defeatedBossName?: string;
 };
+
+// ─────────────────────────────────────────────────────────────
+// Boss-select persistence — the Undead Burg fork in the road.
+// Actual storage helpers live in src/game/settings.ts so a single
+// file owns every localStorage key we read/write. The gate is
+// cleared from Settings → Reset save data (resetBossSelectGate).
+// ─────────────────────────────────────────────────────────────
 
 // ─────────────────────────────────────────────────────────────
 // App
@@ -281,6 +303,18 @@ export default function App() {
   const bossRef = useRef<BossRuntime | null>(null);
   const bossAnnouncementRef = useRef<{text: string; life: number; color?: string} | null>(null);
 
+  // ─── AfroMan secret fight — beat detection + ZOOTED debuff ───
+  const zootedStacksRef = useRef(0);          // 0..3 — ZOOTED intensity
+  const zootedDecayAtRef = useRef(0);         // performance.now at which next stack decays
+  const lastBeatNowRef = useRef(0);           // performance.now of most recent detected beat
+  const beatPulseRef = useRef(0);             // 0..1 visual pulse (gold ring breathe)
+  // React state mirrors — only used for CSS class wiring on the shake wrapper
+  // and the zooted leaf icons. Updated at most ~15 Hz to avoid thrash.
+  const [zootedLevel, setZootedLevel] = useState<0 | 1 | 2 | 3>(0);
+  const [afromanBossPhase, setAfromanBossPhase] = useState<'hidden' | 'idle' | 'attack' | 'dying'>('hidden');
+  const [afromanBossHit, setAfromanBossHit] = useState(false);
+  const [afromanGrooving, setAfromanGrooving] = useState(false);
+
   // Jessyka companion + kisses.
   const jessykaRef = useRef<JessykaCompanion | null>(null);
   const jessykaKissesRef = useRef<JessykaKiss[]>([]);
@@ -321,6 +355,20 @@ export default function App() {
     if (phase === 'menu') playMusic('menu');
     return () => { /* each phase switch triggers its own playMusic */ };
   }, [phase]);
+
+  // ─── Beat subscription ───────────────────────────────────────
+  // Feeds lastBeatNowRef each time the audio analyser fires. The AfroMan
+  // fight reads this from the game loop to time perfect-parry windows and
+  // the boss sprite head-bop. Cheap no-op when no sample is playing.
+  useEffect(() => {
+    return subscribeBeat((t) => {
+      lastBeatNowRef.current = t;
+      beatPulseRef.current = 1;
+      // Quickly toggle the grooving class so the boss sprite bops.
+      setAfromanGrooving(true);
+      window.setTimeout(() => setAfromanGrooving(false), 240);
+    });
+  }, []);
 
   // ─── Helpers to mutate game state ────────────────────────────
 
@@ -369,6 +417,16 @@ export default function App() {
     jessykaKissesRef.current = [];
     setJessykaVisible(false);
     setJessykaDespawning(false);
+    // 0.3.0 — AfroMan fight state reset.
+    zootedStacksRef.current = 0;
+    zootedDecayAtRef.current = 0;
+    lastBeatNowRef.current = 0;
+    beatPulseRef.current = 0;
+    setZootedLevel(0);
+    setAfromanBossPhase('hidden');
+    setAfromanBossHit(false);
+    setAfromanGrooving(false);
+    stopMusicSample(200);
   }, []);
 
   const enterZone = useCallback((idx: number) => {
@@ -398,6 +456,14 @@ export default function App() {
     activeWordRef.current = null;
     bossRef.current = null;
     setBossBarStats(null);
+    // Clear any AfroMan-specific state so the next fight is fresh.
+    zootedStacksRef.current = 0;
+    zootedDecayAtRef.current = 0;
+    setZootedLevel(0);
+    setAfromanBossPhase('hidden');
+    setAfromanBossHit(false);
+    setAfromanGrooving(false);
+    stopMusicSample(600);
     sfxBonfire();
     setBonfireInfo({reason, nextZoneIdx, defeatedBossName});
     phaseRef.current = 'bonfire';
@@ -422,20 +488,22 @@ export default function App() {
     const def = BOSSES[bossId];
     if (!def) { beginBonfire('zone-cleared', zoneIdxRef.current + 1); return; }
     const nowMs = performance.now();
+    const isSecret = !!def.secret;
     bossRef.current = {
       def,
       currentHp: def.maxHp,
       phaseIdx: 0,
-      // Attacks and phrases are suppressed during the intro cutscene.
-      // Schedule the first phrase + first attack *after* the intro ends.
-      nextAttackAt: nowMs + BOSS_INTRO_MS + 1200,
-      nextPhraseAt: nowMs + BOSS_INTRO_MS + 400,
+      // Secret boss has its own 20s intro cutscene — by the time we call
+      // enterBoss for him, it's already finished. Skip the default boss
+      // intro window so attacks + phrases can spawn immediately.
+      nextAttackAt: nowMs + (isSecret ? 800 : BOSS_INTRO_MS + 1200),
+      nextPhraseAt: nowMs + (isSecret ? 400 : BOSS_INTRO_MS + 400),
       patternRotationIdx: 0,
       enraged: false,
       attackWindupT: 0,
       defeated: false,
       deathStart: 0,
-      introStart: nowMs,
+      introStart: isSecret ? 0 : nowMs,
       summonerCooldownUntil: 0,
       casterCooldownUntil: 0,
       recentPhrases: [],
@@ -443,18 +511,67 @@ export default function App() {
     wordsRef.current = [];
     activeWordRef.current = null;
     projectilesRef.current = [];
-    // No announcement here — the new intro cutscene overlay handles boss name + lore.
-    sfxBossAppear();
-    playMusic('boss');
+    zootedStacksRef.current = 0;
+    zootedDecayAtRef.current = 0;
+    if (isSecret) {
+      // Music sample is already playing from the intro — just ensure it's at
+      // full volume. Don't stop procedural music (already stopped by sample).
+      setMusicSampleVolume(1.0, 400);
+      setAfromanBossPhase('idle');
+    } else {
+      sfxBossAppear();
+      playMusic('boss');
+      setAfromanBossPhase('hidden');
+    }
     phaseRef.current = 'boss';
     setPhase('boss');
   }, [beginBonfire]);
+
+  /** Pick a boss for the Undead Burg fork. Called from:
+   *   - updateZoneTimer when the burg timer elapses (intercepts zone.bossId = 'taurus')
+   *   - the dev panel indirectly via jumpToBoss
+   *
+   *  First time: routes to the 'boss-select' phase so the player can choose.
+   *  Subsequent runs: remembered choice → enterBoss directly. */
+  const startBossEntryFlow = useCallback((bossIdFromZone: string) => {
+    // Only the burg boss is subject to the fork. Later bosses (ornstein, gwyn)
+    // go straight through.
+    if (bossIdFromZone !== 'taurus') {
+      enterBoss(bossIdFromZone);
+      return;
+    }
+    const remembered = getRememberedBossChoice();
+    if (remembered) {
+      enterBoss(remembered);
+      return;
+    }
+    // First encounter — clear the arena, show the fork overlay.
+    wordsRef.current = [];
+    projectilesRef.current = [];
+    activeWordRef.current = null;
+    phaseRef.current = 'boss-select';
+    setPhase('boss-select');
+  }, [enterBoss]);
+
+  const commitBossChoice = useCallback((choice: BossSelectChoice) => {
+    persistBossChoice(choice);
+    statsRef.current.secretBossChosen = choice === 'afroman';
+    if (choice === 'afroman') {
+      // The 20 s cutscene phase handles music fade-in + sprite reveal.
+      // It then hands off to enterBoss('afroman') on completion.
+      phaseRef.current = 'boss-intro-afroman';
+      setPhase('boss-intro-afroman');
+    } else {
+      enterBoss('taurus');
+    }
+  }, [enterBoss]);
 
   const triggerDeath = useCallback(() => {
     if (phaseRef.current === 'gameover' || phaseRef.current === 'victory') return;
     statsRef.current.endTime = Date.now();
     sfxDeath();
     stopMusic(0.4);
+    stopMusicSample(400);
     setFinalSnapshot(snapshot());
     phaseRef.current = 'gameover';
     setPhase('gameover');
@@ -491,11 +608,14 @@ export default function App() {
 
   const abandonRun = useCallback(() => {
     stopMusic(0.2);
+    stopMusicSample(200);
     setPaused(false);
     jessykaRef.current = null;
     jessykaKissesRef.current = [];
     setJessykaVisible(false);
     setJessykaDespawning(false);
+    setAfromanBossPhase('hidden');
+    setZootedLevel(0);
     phaseRef.current = 'menu';
     setPhase('menu');
   }, []);
@@ -508,10 +628,13 @@ export default function App() {
     setYesChecked(false); setNoHoverPos(null);
     setKissPos(null);
     stopMusic(0.2);
+    stopMusicSample(200);
     jessykaRef.current = null;
     jessykaKissesRef.current = [];
     setJessykaVisible(false);
     setJessykaDespawning(false);
+    setAfromanBossPhase('hidden');
+    setZootedLevel(0);
     phaseRef.current = 'menu';
     setPhase('menu');
   }, []);
@@ -527,13 +650,22 @@ export default function App() {
   const devJumpToBoss = useCallback((bossId: string) => {
     initAudio(); resumeAudio();
     resetRunState();
-    // Locate the zone this boss belongs to so HUD shows the right zone name.
-    const zoneIdx = Math.max(0, ZONES.findIndex(z => z.bossId === bossId));
+    // AfroMan is the secret fork of the burg boss — treat him as a burg fight
+    // for HUD/zone purposes (the zone def has bossId = 'taurus', not 'afroman').
+    const lookupId = bossId === 'afroman' ? 'taurus' : bossId;
+    const zoneIdx = Math.max(0, ZONES.findIndex(z => z.bossId === lookupId));
     zoneIdxRef.current = zoneIdx;
     setZoneStyling(bgStateRef.current, ZONES[zoneIdx].weather, ZONES[zoneIdx].tintColor, ZONES[zoneIdx].id as BgState['zoneId']);
     statsRef.current.zoneReached = zoneIdx;
     setShowDevPanel(false);
-    enterBoss(bossId);
+    if (bossId === 'afroman') {
+      // Jumping straight into the intro cutscene so the dev can QA it end-to-end.
+      statsRef.current.secretBossChosen = true;
+      phaseRef.current = 'boss-intro-afroman';
+      setPhase('boss-intro-afroman');
+    } else {
+      enterBoss(bossId);
+    }
   }, [enterBoss, resetRunState]);
 
   const devJumpToVictory = useCallback(() => {
@@ -564,6 +696,86 @@ export default function App() {
   const devTriggerLightning = useCallback(() => {
     triggerLightning(bgStateRef.current, performance.now());
   }, []);
+  // ─── 0.3.1 dev actions ───────────────────────────────────────
+  /** Wipe the boss-select gate + highscores. Surfaces the fork again on
+   *  the next burg clear. Does NOT touch audio/accessibility settings. */
+  const devResetSaveData = useCallback(() => {
+    resetBossSelectGate();
+    resetHighscores();
+    setHighscores([]);
+  }, []);
+  /** Force-spawn Jessyka RIGHT NOW (no estus cost). Mirrors the Q-summon
+   *  path but bypasses the charge / intro / already-here guards so the
+   *  dev can test her presence in any phase. */
+  const devSpawnJessyka = useCallback(() => {
+    const phase = phaseRef.current;
+    if (phase !== 'zone' && phase !== 'boss') return;
+    // If she's already here, clean-slate her first.
+    if (jessykaRef.current) {
+      jessykaRef.current = null;
+      setJessykaVisible(false);
+      setJessykaDespawning(false);
+    }
+    const now = performance.now();
+    jessykaRef.current = {
+      state: 'spawning',
+      spawnStart: now,
+      despawnStart: 0,
+      targetId: null,
+      lettersFired: 0,
+      nextKissAt: now + JESS_SPAWN_MS + 300,
+      castingUntil: 0,
+      summonSource: 'estus',
+      projectileTargetId: null,
+      autoDespawnAt: now + JESS_SPAWN_MS + JESS_ESTUS_ACTIVE_MS
+        * (ZONES[zoneIdxRef.current]?.id === 'kiln' ? 2 : 1),
+      graceUsed: false,
+    };
+    setJessykaVisible(true);
+    setJessykaDespawning(false);
+    bossAnnouncementRef.current = {text: 'DEV · LOVE SUMMONED', life: 120, color: '#ffb8d8'};
+    sfxJessykaSummon();
+  }, []);
+  /** Nudge ZOOTED +1. Caps at ZOOTED_CAP — no overflow-to-HP-damage here
+   *  since this is a dev toggle, not an in-fight contact event. */
+  const devAddZooted = useCallback(() => {
+    const next = Math.min(ZOOTED_CAP, zootedStacksRef.current + 1);
+    zootedStacksRef.current = next;
+    zootedDecayAtRef.current = performance.now() + ZOOTED_DECAY_INTERVAL_SEC * 1000;
+    setZootedLevel(next as 0 | 1 | 2 | 3);
+  }, []);
+  /** Clear ZOOTED → 0. */
+  const devClearZooted = useCallback(() => {
+    zootedStacksRef.current = 0;
+    zootedDecayAtRef.current = 0;
+    setZootedLevel(0);
+  }, []);
+  /** Instant-skip the current boss intro cutscene so attacks + phrases can
+   *  start immediately. Works on every boss; AfroMan's 20 s React overlay
+   *  skips itself from SKIP_ALLOWED_AFTER_MS — this only affects the
+   *  canvas-driven silhouette intros of the three canonical bosses. */
+  const devSkipBossIntro = useCallback(() => {
+    const b = bossRef.current;
+    if (!b || b.introStart === 0) return;
+    b.introStart = 0;
+    b.nextAttackAt = performance.now() + 400;
+    b.nextPhraseAt = performance.now() + 200;
+  }, []);
+  /** Open the boss-select fork overlay right now — for QA of the choice UX
+   *  without having to clear the gate + replay Undead Burg. Resets the
+   *  persisted choice so the commit has the canonical effect. */
+  const devOpenBossSelect = useCallback(() => {
+    initAudio(); resumeAudio();
+    resetRunState();
+    resetBossSelectGate();
+    // Position the run state as if we just finished the Burg — same zone
+    // index the real fork uses, so the taurus/afroman path routes correctly.
+    zoneIdxRef.current = Math.max(0, ZONES.findIndex(z => z.bossId === 'taurus'));
+    statsRef.current.zoneReached = zoneIdxRef.current;
+    setShowDevPanel(false);
+    phaseRef.current = 'boss-select';
+    setPhase('boss-select');
+  }, [resetRunState]);
 
   // Keyboard shortcut: backtick (`) opens the dev gate from the menu.
   useEffect(() => {
@@ -757,13 +969,17 @@ export default function App() {
       dodgeUntilRef, iFramesUntilRef, dodgeDirectionRef, staminaRef,
       estusChargesRef, estusActiveUntilRef, estusGodmodeUntilRef,
       zoneIdxRef, zoneStartTimeRef, zoneElapsedRef, bossRef, bossAnnouncementRef,
+      zootedStacksRef, zootedDecayAtRef, lastBeatNowRef, beatPulseRef,
+      setZootedLevel, setAfromanBossPhase, setAfromanBossHit,
       statsRef,
       jessykaRef, jessykaKissesRef, jessykaImgRef,
       setJessykaVisible, setJessykaDespawning,
-      setHudStats, setBossBarStats, triggerRankUp, enterBoss, beginBonfire, triggerDeath,
+      setHudStats, setBossBarStats, triggerRankUp, enterBoss, startBossEntryFlow, beginBonfire, triggerDeath,
       handleCharImpl,
     });
-  }, [phase, enterBoss, beginBonfire, triggerDeath, triggerRankUp]);
+  }, [phase, enterBoss, startBossEntryFlow, beginBonfire, triggerDeath, triggerRankUp]);
+
+  const afromanIntroEnd = useCallback(() => enterBoss('afroman'), [enterBoss]);
 
   // ─── Render ──────────────────────────────────────────────────
   // RENDER_PLACEHOLDER
@@ -784,6 +1000,13 @@ export default function App() {
     handleChar, setIsMobileFocused, setPaused,
     devJumpToZone, devJumpToBoss, devJumpToVictory,
     devHeal, devGiveEstus, devAddCombo, devKillAllWords, devTriggerLightning,
+    devResetSaveData, devSpawnJessyka, devAddZooted, devClearZooted, devSkipBossIntro, devOpenBossSelect,
+    commitBossChoice,
+    onAfromanIntroEnd: afromanIntroEnd,
+    zootedLevel,
+    afromanBossPhase,
+    afromanBossHit,
+    afromanGrooving,
   });
 }
 
@@ -864,6 +1087,14 @@ type LoopDeps = {
   zoneElapsedRef: React.RefObject<number>;
   bossRef: React.RefObject<BossRuntime | null>;
   bossAnnouncementRef: React.RefObject<{text: string; life: number; color?: string} | null>;
+  // 0.3.0 — AfroMan fight refs.
+  zootedStacksRef: React.RefObject<number>;
+  zootedDecayAtRef: React.RefObject<number>;
+  lastBeatNowRef: React.RefObject<number>;
+  beatPulseRef: React.RefObject<number>;
+  setZootedLevel: (v: 0 | 1 | 2 | 3) => void;
+  setAfromanBossPhase: (p: 'hidden' | 'idle' | 'attack' | 'dying') => void;
+  setAfromanBossHit: (v: boolean) => void;
   statsRef: React.RefObject<RunStats>;
   jessykaRef: React.RefObject<JessykaCompanion | null>;
   jessykaKissesRef: React.RefObject<JessykaKiss[]>;
@@ -874,6 +1105,7 @@ type LoopDeps = {
   setBossBarStats: (s: BossBarStats | null) => void;
   triggerRankUp: (rank: Rank) => void;
   enterBoss: (id: string) => void;
+  startBossEntryFlow: (bossIdFromZone: string) => void;
   beginBonfire: (reason: BonfireReason, nextZoneIdx: number, defeatedBossName?: string) => void;
   triggerDeath: () => void;
   handleCharImpl: React.RefObject<(c: string) => void>;
@@ -945,6 +1177,8 @@ function runGameLoop(d: LoopDeps): () => void {
     updateParticles(d, ctx, dt);
     updateJessyka(d, ctx, time);
     drawEstusChug(d, ctx, time);
+    // AfroMan beat-pulse ring around the player — breathes with each bass kick.
+    drawBeatPulseRing(d, ctx, time, dt);
 
     // ── Words (enemy update + draw + contact check) ───────────
     updateWords(d, ctx, textCtx, time, dt, s.fontScale);
@@ -1013,6 +1247,7 @@ function runGameLoop(d: LoopDeps): () => void {
           hpPct: b.currentHp / b.def.maxHp,
           themeColor: b.def.themeColor,
           phaseIdx: b.phaseIdx,
+          skin: b.def.id === 'afroman' ? 'afroman' : 'default',
         });
       } else {
         d.setBossBarStats(null);
@@ -1066,9 +1301,11 @@ function updateZoneTimer(d: LoopDeps, realDtSec: number): void {
   d.zoneElapsedRef.current += realDtSec;
   const zone = ZONES[d.zoneIdxRef.current];
   if (d.zoneElapsedRef.current >= zone.duration) {
-    // End of zone: either go to boss or straight to bonfire.
+    // End of zone: either go to boss or straight to bonfire. For the burg
+    // fork, startBossEntryFlow decides boss-select vs. direct entry based on
+    // the saved localStorage choice.
     if (zone.bossId) {
-      d.enterBoss(zone.bossId);
+      d.startBossEntryFlow(zone.bossId);
     } else {
       d.beginBonfire('zone-cleared', d.zoneIdxRef.current + 1);
     }
@@ -1279,6 +1516,20 @@ function spawnBossAttack(d: LoopDeps, pattern: BossPattern, _letters: string, ti
   // to projectiles, never both. The `letters` parameter is kept for schema
   // continuity with config.ts but no longer influences projectile chars.
   const pick = () => PROJECTILE_DIGITS[Math.floor(Math.random() * PROJECTILE_DIGITS.length)];
+  // AfroMan-specific: projectiles render as tall-can silhouettes instead of
+  // floating digit motes. Pure cosmetic flag — mechanics are unchanged except
+  // for the beat-volley path which also sets onBeat for perfect-parry scoring.
+  const isAfroman = d.bossRef.current?.def.id === 'afroman';
+  // Flash the AfroMan sprite to its attack pose briefly whenever he spawns
+  // anything — matches Jessyka's idle↔kiss swap for the other bosses.
+  if (isAfroman) {
+    d.setAfromanBossPhase('attack');
+    window.setTimeout(() => {
+      if (d.bossRef.current && !d.bossRef.current.defeated && d.bossRef.current.def.id === 'afroman') {
+        d.setAfromanBossPhase('idle');
+      }
+    }, 420);
+  }
   // Track letters present in the current boss phrase so summoner/caster word
   // spawns don't pick a first letter that conflicts with what the player is
   // currently typing.
@@ -1300,10 +1551,12 @@ function spawnBossAttack(d: LoopDeps, pattern: BossPattern, _letters: string, ti
       x: BOSS_AIM.x + (Math.random() - 0.5) * 40,
       y: BOSS_BODY_Y,
       vx: (PLAYER.x - BOSS_AIM.x) * 0.0012 + (Math.random() - 0.5) * 0.3,
-      vy: 1.15,   // slowed from 1.6 — projectiles now tracks clearer on screen
+      vy: isAfroman ? 0.9 : 1.15,   // afroman: slower for chill pacing
       char: pick(),
       fromBoss: true,
       life: 520,
+      isTallCan: isAfroman || undefined,
+      spawnedAt: performance.now(),
     });
     return true;
   } else if (pattern === 'volley') {
@@ -1316,10 +1569,12 @@ function spawnBossAttack(d: LoopDeps, pattern: BossPattern, _letters: string, ti
         id: nextProjectileId(),
         x, y: BOSS_BODY_Y + (Math.random() - 0.5) * 20,
         vx: 0,
-        vy: 1.15,   // slowed from 1.55 — volley reads as telegraph not instant kill
+        vy: isAfroman ? 0.9 : 1.15,
         char: pick(),
         fromBoss: true,
         life: 500,
+        isTallCan: isAfroman || undefined,
+        spawnedAt: performance.now(),
       });
     }
     // Small telegraph — quick screen flicker.
@@ -1452,6 +1707,56 @@ function spawnBossAttack(d: LoopDeps, pattern: BossPattern, _letters: string, ti
     sfxBossSummonCaster();
     triggerLightning(d.bgStateRef.current, time);
     return true;
+  } else if (pattern === 'munchie') {
+    // AfroMan — drop one slow "munchie" word from the top. Contact with the
+    // player doesn't damage HP; it applies a stack of the ZOOTED debuff
+    // (handled in updateWords contact check). Words move 30% slower than
+    // baseline to give the player time to read them in the chaos.
+    const firstLettersUsed = new Set(d.wordsRef.current.map(w => w.text[0]));
+    const available = AFROMAN_MUNCHIES.filter(x => !firstLettersUsed.has(x[0]));
+    if (available.length === 0) return false;
+    const text = available[Math.floor(Math.random() * available.length)];
+    const xPos = 60 + Math.random() * (DESIGN_W - 160);
+    d.wordsRef.current.push({
+      id: nextWordId(),
+      text, x: xPos, y: -20,
+      speed: 0.22,                              // ~30% slower than a normal runner word
+      typed: '', kind: 'normal', isSpecial: false,
+      hp: 1, fireCooldown: 0, ghostPhase: 0,
+      scrambled: false, stationaryX: xPos, spawnTime: time,
+      isBossAttack: true,
+      isMunchie: true,
+    });
+    return true;
+  } else if (pattern === 'beat-volley') {
+    // AfroMan — four tall-can projectiles spawned on a 4-on-the-floor rhythm
+    // (150 ms apart). Each one is flagged onBeat so the player gets the
+    // perfect-parry window at its spawn time. Vertical velocity is slower
+    // than the default so the rhythm reads clearly on screen.
+    const bossY = 340;
+    const xs = [BOSS_AIM.x - 160, BOSS_AIM.x - 50, BOSS_AIM.x + 60, BOSS_AIM.x + 170];
+    for (let i = 0; i < xs.length; i++) {
+      const spawnAt = time + i * 150;
+      // Defer pushes so each arrives ON a future frame — matches the audible
+      // 4-kick. We rely on setTimeout; projectiles enter the live array at
+      // staggered moments and each carries onBeat=true for perfect parry.
+      window.setTimeout(() => {
+        if (!d.bossRef.current || d.bossRef.current.defeated) return;
+        d.projectilesRef.current.push({
+          id: nextProjectileId(),
+          x: xs[i], y: bossY,
+          vx: (PLAYER.x - xs[i]) * 0.0005,
+          vy: 0.9,                               // slower fall than standard volleys
+          char: PROJECTILE_DIGITS[Math.floor(Math.random() * PROJECTILE_DIGITS.length)],
+          fromBoss: true,
+          life: 560,
+          isTallCan: true,
+          onBeat: true,
+          spawnedAt: performance.now(),
+        });
+      }, spawnAt - time);
+    }
+    return true;
   }
   return false;
 }
@@ -1576,6 +1881,24 @@ function updateFireballs(d: LoopDeps, ctx: CanvasRenderingContext2D, time: numbe
       d.shakeUntilRef.current = Math.max(d.shakeUntilRef.current, time + 140);
       sfxImpact(isSpear);
       if (!isChase) addImpactDecal(d.bgStateRef.current, fb.tx, fb.ty, isSpear);
+      // AfroMan perfect-parry — chase fireball carrying perfectParryBonus
+      // detonates on the projectile, and also deals HP damage to the boss.
+      // Regular parries still just destroy the projectile (no boss damage).
+      if (isChase && fb.perfectParryBonus && d.bossRef.current && !d.bossRef.current.defeated
+          && d.bossRef.current.def.id === 'afroman') {
+        const dmg = PERFECT_PARRY_BOSS_DMG;
+        d.bossRef.current.currentHp = Math.max(0, d.bossRef.current.currentHp - dmg);
+        d.damageTextsRef.current.push({
+          x: BOSS_AIM.x + (Math.random() - 0.5) * 24, y: BOSS_AIM.y - 80,
+          value: '-' + dmg, life: 55, maxLife: 55,
+          color: '#ffe28a',
+        });
+        d.shakeMagRef.current = Math.max(d.shakeMagRef.current, 8);
+        d.shakeUntilRef.current = Math.max(d.shakeUntilRef.current, time + 180);
+        d.setAfromanBossHit(true);
+        window.setTimeout(() => d.setAfromanBossHit(false), 520);
+        if (d.bossRef.current.currentHp <= 0) defeatBoss(d, time);
+      }
       // Hit a word (normal case) or damage boss. Chase fireballs never target
       // words or bosses — they exist only to physically neutralise a projectile.
       if (!isChase && fb.targetBoss && d.bossRef.current && !d.bossRef.current.defeated) {
@@ -1625,6 +1948,14 @@ function defeatBoss(d: LoopDeps, time: number): void {
   b.deathStart = time;
   d.scoreRef.current += b.def.soulsReward;
   d.statsRef.current.bossesDefeated += 1;
+  // 0.3.0 — secret-route marker + sprite death transition for AfroMan.
+  const isSecret = b.def.id === 'afroman';
+  if (isSecret) {
+    d.statsRef.current.secretBossDefeated = true;
+    d.setAfromanBossPhase('dying');
+    // Duck the music sample during the death cutscene.
+    setMusicSampleVolume(0.15, 1000);
+  }
 
   // Moment-of-death: guttural scream + first massive burst.
   sfxBossScream();
@@ -1649,7 +1980,11 @@ function defeatBoss(d: LoopDeps, time: number): void {
   d.wordsRef.current = [];
   d.activeWordRef.current = null;
   d.iFramesUntilRef.current = time + 3200;    // invulnerability for the duration
-  d.bossAnnouncementRef.current = {text: b.def.name + ' FELLED', life: 180};
+  d.bossAnnouncementRef.current = {
+    text: isSecret ? 'THE SET IS OVER' : b.def.name + ' FELLED',
+    life: 180,
+    color: isSecret ? '#ffd6ec' : undefined,
+  };
 
   // Floating "souls earned" text — flies up from the boss's chest.
   d.damageTextsRef.current.push({
@@ -1846,23 +2181,53 @@ function updateJessyka(d: LoopDeps, ctx: CanvasRenderingContext2D, time: number)
   // ── Active / leaving: pick and fire on targets.
   if (j.state === 'active' || j.state === 'leaving') {
     if (j.summonSource === 'estus') {
-      // Boss-fight variant — target boss projectiles instead of words. She
-      // picks a new projectile each shot (no sticky target since projectiles
-      // die on deflection). Fires as fast as JESS_KISS_INTERVAL_MS allows,
-      // and waits idle when nothing's in the air.
-      if (time >= j.nextKissAt) {
-        const fired = fireJessykaProjectileKiss(d, j, time);
-        if (!fired) {
-          // Nothing to shoot — short backoff so we don't scan the array every frame.
-          j.nextKissAt = time + 120;
+      // 0.3.1 — Q-summon now works in zones too. Split sub-behaviour by
+      // whether there's a live boss firing projectiles:
+      //   - boss fight: chase boss projectiles (original 0.2.6 behaviour)
+      //   - zone:       target falling words (same code path as the
+      //                 word-summon variant, but honouring autoDespawnAt)
+      const hasBossProjectiles = d.phaseRef.current === 'boss'
+        && d.bossRef.current !== null
+        && !d.bossRef.current.defeated;
+
+      if (hasBossProjectiles) {
+        // Boss-fight variant — target boss projectiles. She picks a new
+        // projectile each shot (no sticky target since projectiles die on
+        // deflection). Fires as fast as JESS_KISS_INTERVAL_MS allows, and
+        // waits idle when nothing's in the air.
+        if (time >= j.nextKissAt) {
+          const fired = fireJessykaProjectileKiss(d, j, time);
+          if (!fired) {
+            // Nothing to shoot — short backoff so we don't scan the array every frame.
+            j.nextKissAt = time + 120;
+          }
+        }
+      } else {
+        // Zone variant — identical semantics to the word-summon's targeting
+        // logic: pick a high-up, typable word; fire kisses down the letters;
+        // release on splice / completion; re-pick next frame.
+        if (j.targetId !== null) {
+          const wIdx = d.wordsRef.current.findIndex(w => w.id === j.targetId);
+          if (wIdx === -1) {
+            j.targetId = null;
+            j.lettersFired = 0;
+          } else {
+            const w = d.wordsRef.current[wIdx];
+            if (j.lettersFired < w.text.length && time >= j.nextKissAt) {
+              fireJessykaKiss(d, j, w, time);
+            }
+          }
+        } else if (j.state !== 'leaving') {
+          tryPickJessykaTarget(d, j);
         }
       }
-      // Auto-despawn trigger.
+      // Auto-despawn trigger applies to BOTH sub-modes.
       if (j.state === 'active' && j.autoDespawnAt > 0 && time >= j.autoDespawnAt) {
         j.state = 'leaving';
       }
       if (j.state === 'leaving') {
-        // Estus summon exits immediately — no "finish the word" semantics here.
+        // Estus summon exits immediately — no "finish the word" semantics
+        // here (matches the original boss-fight behaviour).
         j.state = 'despawning';
         j.despawnStart = time;
         d.setJessykaDespawning(true);
@@ -2527,6 +2892,13 @@ function updateWords(d: LoopDeps, ctx: CanvasRenderingContext2D, textCtx: Canvas
           j.targetId = null;
           j.lettersFired = 0;
         }
+        // AfroMan munchie — contact applies ZOOTED instead of HP damage.
+        // A 4th stack (would be) converts to 2 HP damage as a safety cap so
+        // a player who just stands still can still lose the fight.
+        if (w.isMunchie) {
+          applyZootedStack(d, time);
+          continue;
+        }
         const baseDmg = w.isBossAttack
           ? Math.ceil(1.5 + w.text.length * 0.2)       // word-projectile: punchy
           : (() => {
@@ -2917,6 +3289,82 @@ function tryJessykaGraceShield(d: LoopDeps, time: number): boolean {
   return true;
 }
 
+/** AfroMan — apply one ZOOTED stack. Clamped to ZOOTED_CAP; a 4th (would be)
+ *  application converts to 2 HP damage instead so the debuff can't be fully
+ *  soaked. Also resets the decay clock so the stack doesn't immediately start
+ *  ticking down (the player needs to type a correct letter to trigger decay).
+ */
+function applyZootedStack(d: LoopDeps, time: number): void {
+  const current = d.zootedStacksRef.current;
+  if (current >= ZOOTED_CAP) {
+    // Overflow safety — take real damage instead of stacking beyond 3.
+    if (!isInvulnerable(d, time)) {
+      applyDamageToPlayer(d, 2, time);
+    }
+    return;
+  }
+  d.zootedStacksRef.current = current + 1;
+  d.zootedDecayAtRef.current = time + ZOOTED_DECAY_INTERVAL_SEC * 1000;
+  d.setZootedLevel((current + 1) as 0 | 1 | 2 | 3);
+  d.damageTextsRef.current.push({
+    x: PLAYER.x, y: PLAYER.y - 60,
+    value: 'ZOOTED x' + (current + 1), life: 60, maxLife: 60,
+    color: '#9be69e',
+  });
+  // Combo break on ZOOTED — the player's headspace is scrambled.
+  d.comboRef.current = 0;
+  d.bossAnnouncementRef.current = {text: 'ZOOTED', life: 80, color: '#9be69e'};
+}
+
+/** Decay one ZOOTED stack after ZOOTED_DECAY_INTERVAL_SEC of clean typing. */
+function tryDecayZooted(d: LoopDeps, time: number): void {
+  if (d.zootedStacksRef.current <= 0) return;
+  if (time < d.zootedDecayAtRef.current) return;
+  const next = Math.max(0, d.zootedStacksRef.current - 1);
+  d.zootedStacksRef.current = next;
+  d.setZootedLevel(next as 0 | 1 | 2 | 3);
+  d.zootedDecayAtRef.current = next > 0 ? time + ZOOTED_DECAY_INTERVAL_SEC * 1000 : 0;
+  if (next === 0) {
+    d.damageTextsRef.current.push({
+      x: PLAYER.x, y: PLAYER.y - 60,
+      value: 'CLEAR', life: 45, maxLife: 45, color: '#cfffcf',
+    });
+  }
+}
+
+/** AfroMan — gold parry ring around the player that breathes with each beat.
+ *  Intensity decays linearly between beats so it always reads as "alive" to
+ *  the rhythm. Only rendered during an active AfroMan boss fight. */
+function drawBeatPulseRing(d: LoopDeps, ctx: CanvasRenderingContext2D, time: number, dt: number): void {
+  const b = d.bossRef.current;
+  if (!b || b.def.id !== 'afroman' || b.defeated) return;
+  // Bump pulse on each new beat.
+  const lastBeat = d.lastBeatNowRef.current;
+  if (lastBeat > 0 && time - lastBeat < 200) {
+    d.beatPulseRef.current = 1;
+  } else {
+    d.beatPulseRef.current = Math.max(0, d.beatPulseRef.current - 0.025 * dt);
+  }
+  const intensity = d.beatPulseRef.current;
+  if (intensity <= 0.02) return;
+  const px = PLAYER.x, py = PLAYER.y;
+  const baseR = 54;
+  const r = baseR + (1 - intensity) * 24;
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.strokeStyle = 'rgba(255, 220, 130, ' + (intensity * 0.7).toFixed(3) + ')';
+  ctx.lineWidth = 2 + intensity * 2.5;
+  ctx.beginPath();
+  ctx.arc(px, py - 10, r, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.strokeStyle = 'rgba(255, 160, 220, ' + (intensity * 0.4).toFixed(3) + ')';
+  ctx.lineWidth = 1 + intensity * 1.5;
+  ctx.beginPath();
+  ctx.arc(px, py - 10, r + 6, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.restore();
+}
+
 function applyDamageToPlayer(d: LoopDeps, dmg: number, time: number): void {
   // Jessyka grace shield — once per spawn she can veil the player in her
   // grace, cancelling this incoming hit and pushing everything hostile away.
@@ -2957,7 +3405,13 @@ function applyDamageToPlayer(d: LoopDeps, dmg: number, time: number): void {
   // Combo break.
   if (d.comboRef.current > 5) sfxComboBreak();
   d.comboRef.current = 0;
-  if (d.healthRef.current === 0) d.triggerDeath();
+  if (d.healthRef.current === 0) {
+    // AfroMan flavour — "PARTY FOUL" cue before the YOU DIED reveal.
+    if (d.bossRef.current?.def.id === 'afroman' && !d.bossRef.current.defeated) {
+      d.bossAnnouncementRef.current = {text: 'PARTY FOUL', life: 180, color: '#ff9dd6'};
+    }
+    d.triggerDeath();
+  }
 }
 
 function updateHitFlash(d: LoopDeps, time: number, reduceMotion: boolean): void {
@@ -3024,11 +3478,19 @@ function pushHudStats(d: LoopDeps): void {
     // Rendered in the HUD as part of the boss-approach countdown so the
     // player always knows who — and when — they're about to fight.
     upcomingBossName: zone.bossId ? (BOSSES[zone.bossId]?.name ?? null) : null,
-    jessykaSummonAvailable: d.phaseRef.current === 'boss'
-      && d.bossRef.current !== null && !d.bossRef.current.defeated
-      && d.bossRef.current.currentHp > 0 && d.bossRef.current.introStart === 0
-      && d.estusChargesRef.current >= 1
-      && d.jessykaRef.current === null,
+    jessykaSummonAvailable: (() => {
+      // 0.3.1 — available in both zones and boss fights. The gates are
+      // phase-dependent: in boss we still need the fight to be "live" (not
+      // intro, not defeated); in zones any active zone frame qualifies.
+      if (d.estusChargesRef.current < 1 || d.jessykaRef.current !== null) return false;
+      const phase = d.phaseRef.current;
+      if (phase === 'zone') return true;
+      if (phase === 'boss') {
+        const b = d.bossRef.current;
+        return b !== null && !b.defeated && b.currentHp > 0 && b.introStart === 0;
+      }
+      return false;
+    })(),
   });
 }
 
@@ -3042,10 +3504,19 @@ function pushHudStats(d: LoopDeps): void {
  *  consumed (either a summon succeeded, or a precondition-failure message
  *  flashed). Returns false only if no boss is active. */
 function trySummonEstusJessyka(d: LoopDeps, now: number): boolean {
+  // 0.3.1 — Q-summon works in both zones and boss fights. Semantics:
+  //   - boss fight: she chases boss projectiles (original 0.2.6 behaviour)
+  //   - zone:       she auto-targets falling words the player isn't typing yet
+  // The summonSource is still 'estus' in both cases — updateJessyka inspects
+  // phaseRef to decide which sub-behaviour to run.
+  const phase = d.phaseRef.current;
+  if (phase !== 'zone' && phase !== 'boss') return false;
+  // In boss fights the usual intro/defeat guards still apply — you can't burn
+  // an estus on her while the boss is mid-intro or already dying.
   const b = d.bossRef.current;
-  if (!b) return false;
-  // Boss must be alive and out of the intro cutscene.
-  if (b.defeated || b.currentHp <= 0 || b.introStart > 0) return false;
+  if (phase === 'boss') {
+    if (!b || b.defeated || b.currentHp <= 0 || b.introStart > 0) return false;
+  }
   // Already-here / no-estus flashes still consume the keystroke so the player
   // isn't punished for a deliberate Q press with a combo-break miss.
   if (d.jessykaRef.current !== null) {
@@ -3070,7 +3541,8 @@ function trySummonEstusJessyka(d: LoopDeps, now: number): boolean {
     projectileTargetId: null,
     // Kiln doubles the Q-summon duration as a final-zone buff (0.2.12) —
     // 50 s instead of 25 s on the standard bosses. The 2x multiplier matches
-    // the estus godmode doubling in handleTab for consistency.
+    // the estus godmode doubling in handleTab for consistency. Zones other
+    // than Kiln get the baseline 25 s.
     autoDespawnAt: now + JESS_SPAWN_MS + JESS_ESTUS_ACTIVE_MS
       * (ZONES[d.zoneIdxRef.current]?.id === 'kiln' ? 2 : 1),
     graceUsed: false,
@@ -3110,14 +3582,16 @@ function handleCharLive(d: LoopDeps, rawChar: string): void {
   if (!isLetter && !isDigit) return;
   const char = upper;
 
-  // ── Q-binding — boss-fight Jessyka summon (0.2.6). Fall-through priority
-  //    preserves typing: if any word can currently accept a Q (active word's
-  //    next letter is Q, or an idle word starts with Q) the keystroke routes
-  //    to normal typing first. Projectiles now use digits, so Q can never
-  //    match one — the projectile fall-through check was dropped.
+  // ── Q-binding — estus-burn Jessyka summon. Fall-through priority preserves
+  //    typing: if any word can currently accept a Q (active word's next
+  //    letter is Q, or an idle word starts with Q) the keystroke routes to
+  //    normal typing first. Projectiles use digits, so Q can never match one
+  //    — the projectile fall-through check was dropped. Works in both zones
+  //    and boss fights (0.3.1) — see trySummonEstusJessyka + updateJessyka
+  //    for the per-phase targeting split.
   //    A failed summon (no estus / already here) still consumes the keystroke
   //    so the player doesn't eat a miss for pressing Q deliberately.
-  if (char === 'Q' && phase === 'boss') {
+  if (char === 'Q') {
     const wordWantsQ = d.wordsRef.current.some(w =>
       !w.spawnAnim && !w.jessykaTarget && w.text.charAt(w.typed.length) === 'Q',
     );
@@ -3143,10 +3617,20 @@ function handleCharLive(d: LoopDeps, rawChar: string): void {
   //    A press that doesn't match any projectile is a miss (combo reset).
   if (isDigit) {
     let deflectedCount = 0;
+    let perfectParry = false;
     for (let i = d.projectilesRef.current.length - 1; i >= 0; i--) {
       const p = d.projectilesRef.current[i];
       if (p.deflected || p.char !== char) continue;
       p.deflected = true;
+      // AfroMan perfect-parry detection — projectile spawned on the beat AND
+      // the keystroke is within PERFECT_PARRY_WINDOW_MS of the most recent
+      // detected beat. Stats + damage are handled by the fireball intercept.
+      const nowBeatDelta = now - (d.lastBeatNowRef.current || 0);
+      const isPerfect = p.onBeat === true && nowBeatDelta >= 0 && nowBeatDelta <= PERFECT_PARRY_WINDOW_MS;
+      if (isPerfect) {
+        perfectParry = true;
+        d.statsRef.current.perfectParries += 1;
+      }
       d.fireballsRef.current.push({
         x: PLAYER.x, y: PLAYER.y,
         tx: p.x, ty: p.y,
@@ -3155,14 +3639,19 @@ function handleCharLive(d: LoopDeps, rawChar: string): void {
         targetBoss: false,
         chaseProjectileId: p.id,
         life: 72,
+        // Perfect-parry: mark this chase fireball so its intercept applies
+        // 2× bonus damage to the boss (AfroMan only). For non-AfroMan bosses
+        // projectiles don't damage the boss anyway — harmless flag.
+        perfectParryBonus: isPerfect || undefined,
       });
-      for (let k = 0; k < 10; k++) {
+      for (let k = 0; k < (isPerfect ? 18 : 10); k++) {
         if (d.particlesRef.current.length >= PARTICLE_CAP) break;
         d.particlesRef.current.push({
           x: p.x, y: p.y,
-          vx: (Math.random() - 0.5) * 4, vy: (Math.random() - 0.5) * 4,
-          life: 14, maxLife: 14, size: 2.5,
-          color: p.fromBoss ? '#ffaa55' : '#ff88ff',
+          vx: (Math.random() - 0.5) * (isPerfect ? 6 : 4),
+          vy: (Math.random() - 0.5) * (isPerfect ? 6 : 4),
+          life: isPerfect ? 20 : 14, maxLife: isPerfect ? 20 : 14, size: 2.5,
+          color: isPerfect ? '#ffe28a' : (p.fromBoss ? '#ffaa55' : '#ff88ff'),
         });
       }
       deflectedCount += 1;
@@ -3174,6 +3663,16 @@ function handleCharLive(d: LoopDeps, rawChar: string): void {
       d.statsRef.current.correctLetters += 1;
       d.comboRef.current += 1;
       progressed = true;
+      if (perfectParry) {
+        // "PERFECT" popup + combo bonus. Extra combo points on top of the
+        // regular +1 make perfect-parry a meaningful skill expression.
+        d.comboRef.current += 2;
+        d.damageTextsRef.current.push({
+          x: PLAYER.x, y: PLAYER.y - 80,
+          value: 'PERFECT', life: 60, maxLife: 60,
+          color: '#ffe28a',
+        });
+      }
     } else {
       registerWrong(d.statsRef.current, char);
       sfxMiss();
@@ -3261,6 +3760,8 @@ function handleCharLive(d: LoopDeps, rawChar: string): void {
   if (progressed) {
     sfxCast(d.comboRef.current);
     if (d.comboRef.current > d.maxComboRef.current) d.maxComboRef.current = d.comboRef.current;
+    // Decay ZOOTED one step on any correct keystroke in an AfroMan fight.
+    tryDecayZooted(d, now);
     // Rank up?
     let rankIdx = 0;
     for (let i = COMBO_RANKS.length - 1; i >= 0; i--) {
@@ -3504,19 +4005,32 @@ type RenderProps = {
   devAddCombo: (n: number) => void;
   devKillAllWords: () => void;
   devTriggerLightning: () => void;
+  devResetSaveData: () => void;
+  devSpawnJessyka: () => void;
+  devAddZooted: () => void;
+  devClearZooted: () => void;
+  devSkipBossIntro: () => void;
+  devOpenBossSelect: () => void;
+  commitBossChoice: (choice: BossSelectChoice) => void;
+  onAfromanIntroEnd: () => void;
+  zootedLevel: 0 | 1 | 2 | 3;
+  afromanBossPhase: 'hidden' | 'idle' | 'attack' | 'dying';
+  afromanBossHit: boolean;
+  afromanGrooving: boolean;
 };
 
 function renderAppTree(p: RenderProps) {
   const highContrastClass = p.settings.highContrast ? 'high-contrast' : '';
   const colorblindClass = p.settings.colorblind ? 'colorblind' : '';
   const reduceMotionClass = p.settings.reduceMotion ? 'reduce-motion' : '';
+  const zootedClass = p.zootedLevel > 0 ? `afroman-zooted-${p.zootedLevel}` : '';
 
   const nextZoneIdx = p.bonfireInfo?.nextZoneIdx ?? 0;
   const nextZone = ZONES[Math.min(nextZoneIdx, ZONES.length - 1)];
 
   return (
     <div
-      className={`w-full h-[100dvh] bg-black flex items-center justify-center font-serif text-[#d1c7b7] overflow-hidden ${highContrastClass} ${colorblindClass} ${reduceMotionClass}`}
+      className={`w-full h-[100dvh] bg-black flex items-center justify-center font-serif text-[#d1c7b7] overflow-hidden ${highContrastClass} ${colorblindClass} ${reduceMotionClass} ${zootedClass}`}
       onClick={() => {
         if ((p.phase === 'zone' || p.phase === 'boss') && !p.paused && p.mobileInputRef.current) {
           p.mobileInputRef.current.focus();
@@ -3545,6 +4059,10 @@ function renderAppTree(p: RenderProps) {
             visually pass OVER HUD elements instead of behind them. */}
         <div ref={p.shakeRef} className="absolute top-0 left-0 w-full h-full will-change-transform">
           <canvas ref={p.bgCanvasRef} width={DESIGN_W} height={DESIGN_H} className="absolute top-0 left-0 z-0" />
+          {/* AfroMan psychedelic scene overlay — z=1 over the canvas bg. */}
+          {p.afromanBossPhase !== 'hidden' && (
+            <div className="absolute inset-0 z-[1] pointer-events-none afroman-scene-overlay" aria-hidden />
+          )}
           <canvas ref={p.canvasRef} width={DESIGN_W} height={DESIGN_H} className="absolute top-0 left-0 z-10" />
           <img
             ref={p.playerImgRef}
@@ -3565,6 +4083,26 @@ function renderAppTree(p: RenderProps) {
               style={{left: (PLAYER.x + JESS_X_OFFSET) + 'px'}}
               draggable={false}
             />
+          )}
+          {/* AfroMan — DOM sprite layer during the secret boss fight.
+              `afromanBossPhase` flips to 'idle' on enterBoss('afroman'), to
+              'attack' briefly during spawn windows, to 'dying' on defeat.
+              The 'is-grooving' class kicks the head-bop when a beat fires. */}
+          {p.afromanBossPhase !== 'hidden' && (
+            <img
+              src={p.afromanBossPhase === 'attack' ? '/AfroManATTACK.png' : '/AfroManIDLE.png'}
+              alt="AfroMan"
+              className={`afroman-boss-sprite ${p.afromanGrooving ? 'is-grooving' : ''} ${p.afromanBossHit ? 'is-hit' : ''} ${p.afromanBossPhase === 'dying' ? 'is-dying' : ''}`}
+              draggable={false}
+            />
+          )}
+          {/* ZOOTED debuff — cannabis-leaf icons floating above the player. */}
+          {p.zootedLevel > 0 && (p.phase === 'zone' || p.phase === 'boss') && (
+            <div className="zooted-leaves" style={{left: PLAYER.x + 'px'}} aria-hidden>
+              {Array.from({length: p.zootedLevel}).map((_, i) => (
+                <span key={i} className={`zooted-leaf zooted-leaf-${i + 1}`}>✦</span>
+              ))}
+            </div>
           )}
           <div
             ref={p.screenFlashRef}
@@ -3612,6 +4150,16 @@ function renderAppTree(p: RenderProps) {
             onOpenSettings={() => p.setShowSettings(true)}
             onOpenDev={() => p.setShowDevPanel(true)}
           />
+        )}
+
+        {/* Boss-select fork (Undead Burg, first-time only) */}
+        {p.phase === 'boss-select' && (
+          <BossSelect onPick={p.commitBossChoice} />
+        )}
+
+        {/* AfroMan 20s intro cutscene — sprite reveal + music fade-in */}
+        {p.phase === 'boss-intro-afroman' && (
+          <AfromanIntro onComplete={p.onAfromanIntroEnd} />
         )}
 
         {/* Bonfire interlude */}
@@ -3703,6 +4251,12 @@ function renderAppTree(p: RenderProps) {
             addCombo={p.devAddCombo}
             killAllWords={p.devKillAllWords}
             triggerLightning={p.devTriggerLightning}
+            resetSaveData={p.devResetSaveData}
+            spawnJessyka={p.devSpawnJessyka}
+            addZooted={p.devAddZooted}
+            clearZooted={p.devClearZooted}
+            skipBossIntro={p.devSkipBossIntro}
+            openBossSelect={p.devOpenBossSelect}
           />
         )}
       </div>

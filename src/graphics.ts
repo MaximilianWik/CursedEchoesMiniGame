@@ -52,6 +52,9 @@ export type Word = {
   isBossAttack?: boolean;             // word-projectile fired by a boss
   isBossPhrase?: boolean;             // stationary phrase that damages the boss when completed
   isBossSummoned?: boolean;           // summoner/caster spawned by a boss pattern
+  // 0.3.0 — AfroMan "munchie" word. Doesn't damage HP on contact; instead
+  // applies a stack of the ZOOTED debuff. Renders with a greenish haze.
+  isMunchie?: boolean;
   jessykaTarget?: boolean;            // claimed by the Jessyka companion; player cannot start typing this
   // New in 0.2.10 — Jessyka grace shield push. While `graceUntil > time` the
   // word skips its normal homing-toward-player movement and instead drifts
@@ -82,6 +85,10 @@ export type Fireball = {
   bossDamage?: number;                // amount to deduct from boss HP on impact
   chaseProjectileId?: number;         // if set, fireball homes on this projectile until intercept
   life?: number;                      // seconds of grace for chase fireballs before they self-detonate
+  // 0.3.0 — AfroMan perfect-parry. Set when the chase fireball was spawned
+  // by a parry within the PERFECT window of a detected beat. On intercept
+  // it returns PERFECT_PARRY_BOSS_DMG to the AfroMan boss.
+  perfectParryBonus?: boolean;
 };
 
 export type Particle = {
@@ -120,6 +127,14 @@ export type Projectile = {
   fromBoss: boolean;
   life: number;                      // seconds
   deflected?: boolean;               // player parried — no longer damages; waits for chase-fireball intercept
+  // 0.3.0 — AfroMan tall-can projectile marker. Renders a silhouette of a
+  // tall can behind the digit glyph (amber rectangle with ridged stripes).
+  isTallCan?: boolean;
+  // 0.3.0 — true if the projectile was spawned ON a detected beat. Used for
+  // perfect-parry scoring — a parry during the tiny window after its spawn
+  // grants 2× damage + PERFECT popup.
+  onBeat?: boolean;
+  spawnedAt?: number;                // performance.now at spawn; used with onBeat
   // Spiral-pattern fields — when set, position is computed from origin/ang/radius
   // each frame instead of from linear vx/vy. Used by the "wave" bullet-hell attack.
   spiralOrigin?: {x: number; y: number};
@@ -1357,6 +1372,14 @@ export function drawWordAura(
     g.addColorStop(0, 'rgba(255, 140, 215, 0.42)');
     g.addColorStop(0.55, 'rgba(255, 80, 180, 0.16)');
     g.addColorStop(1, 'rgba(220, 60, 160, 0)');
+  } else if (word.isMunchie) {
+    // AfroMan munchie — weed-green haze + amber inner core. Distinct from
+    // the normal run of enemies so the player reads "this one applies ZOOTED,
+    // not HP damage" without needing a legend.
+    const greenPulse = 0.55 + Math.sin(time * 0.005 + word.x * 0.02) * 0.25;
+    g.addColorStop(0, 'rgba(155, 230, 158, ' + (0.4 * greenPulse).toFixed(3) + ')');
+    g.addColorStop(0.55, 'rgba(80, 200, 120, 0.18)');
+    g.addColorStop(1, 'rgba(60, 160, 80, 0)');
   } else if (word.isSpecial) {
     g.addColorStop(0, 'rgba(255, 120, 200, 0.35)');
     g.addColorStop(0.5, 'rgba(220, 60, 160, 0.12)');
@@ -1737,12 +1760,92 @@ export function drawProjectile(ctx: CanvasRenderingContext2D, p: Projectile, tim
     ctx.filter = 'saturate(0.25) brightness(1.3)';
   }
   if (p.fromBoss) {
-    drawBossProjectile(ctx, p);
+    if (p.isTallCan) drawTallCanProjectile(ctx, p);
+    else drawBossProjectile(ctx, p);
   } else {
     drawCasterProjectile(ctx, p, time);
   }
   if (p.deflected) {
     ctx.restore();
+  }
+}
+
+/** AfroMan tall-can projectile — amber rectangle with ridged stripes, digit
+ *  etched on the label. Same legibility as the default boss projectile but
+ *  thematically tied to the fight. */
+function drawTallCanProjectile(ctx: CanvasRenderingContext2D, p: Projectile): void {
+  const canW = 22, canH = 40;
+  const x = p.x, y = p.y;
+  // Hue shift subtly based on spawnedAt to vary can colours across a volley.
+  const hueOffset = ((p.spawnedAt ?? 0) * 0.01) % 30;
+
+  // Glow halo — pink-magenta for afroman vibe.
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  const halo = ctx.createRadialGradient(x, y, 0, x, y, 36);
+  halo.addColorStop(0, 'rgba(255, 140, 210, 0.7)');
+  halo.addColorStop(0.55, 'rgba(255, 160, 90, 0.3)');
+  halo.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = halo;
+  ctx.fillRect(x - 36, y - 36, 72, 72);
+  ctx.restore();
+
+  // Can body — vertical amber gradient.
+  ctx.save();
+  const cx = x - canW / 2, cy = y - canH / 2;
+  const body = ctx.createLinearGradient(x, cy, x, cy + canH);
+  body.addColorStop(0, `hsl(${(34 + hueOffset).toFixed(0)}, 85%, 72%)`);
+  body.addColorStop(0.5, `hsl(${(30 + hueOffset).toFixed(0)}, 78%, 52%)`);
+  body.addColorStop(1, `hsl(${(26 + hueOffset).toFixed(0)}, 72%, 32%)`);
+  ctx.fillStyle = body;
+  ctx.fillRect(cx, cy, canW, canH);
+  // Rim top/bottom — darker bands.
+  ctx.fillStyle = 'rgba(35, 15, 10, 0.9)';
+  ctx.fillRect(cx, cy, canW, 3);
+  ctx.fillRect(cx, cy + canH - 3, canW, 3);
+  // Ridge stripes — thin horizontals on the body.
+  ctx.fillStyle = 'rgba(120, 50, 25, 0.45)';
+  for (let i = 0; i < 3; i++) {
+    ctx.fillRect(cx, cy + 8 + i * 8, canW, 1);
+  }
+  // Dark label background (center).
+  const labelH = 16;
+  const labelY = cy + (canH - labelH) / 2;
+  ctx.fillStyle = 'rgba(10, 5, 4, 0.82)';
+  ctx.fillRect(cx + 2, labelY, canW - 4, labelH);
+  // Thin outline.
+  ctx.strokeStyle = 'rgba(50, 20, 12, 1)';
+  ctx.lineWidth = 1.2;
+  ctx.strokeRect(cx, cy, canW, canH);
+  ctx.restore();
+
+  // Digit — high-contrast on the label.
+  ctx.save();
+  ctx.font = 'bold 18px "Cinzel", serif';
+  ctx.fillStyle = '#fff4d6';
+  ctx.strokeStyle = '#0a0503';
+  ctx.lineWidth = 2.4;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.strokeText(p.char, x, y);
+  ctx.fillText(p.char, x, y);
+  ctx.restore();
+
+  // Beat-marker — small ring around projectiles spawned ON a beat so the
+  // perfect-parry window is readable. Fades to nothing over ~500 ms.
+  if (p.onBeat && p.spawnedAt !== undefined) {
+    const age = performance.now() - p.spawnedAt;
+    if (age < 500) {
+      const t = 1 - age / 500;
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.strokeStyle = `rgba(255, 220, 130, ${(t * 0.8).toFixed(3)})`;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(x, y, 18 + (1 - t) * 12, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
   }
 }
 
@@ -1903,7 +2006,7 @@ export function addImpactDecal(bg: BgState, x: number, y: number, bigImpact: boo
 // ─────────────────────────────────────────────────────────────
 
 export type BossRenderState = {
-  silhouette: 'taurus' | 'ornstein' | 'gwyn';
+  silhouette: 'taurus' | 'ornstein' | 'gwyn' | 'afroman';
   themeColor: string;
   currentHp: number;
   maxHp: number;
@@ -1920,6 +2023,9 @@ export function drawBoss(
   state: BossRenderState,
   time: number,
 ): void {
+  // AfroMan is rendered as a DOM <img> sprite (AfroManIDLE.png / AfroManATTACK.png).
+  // The canvas path here skips drawing him so the DOM layer is authoritative.
+  if (state.silhouette === 'afroman') return;
   const cx = 512, baseY = 440;
   const breath = Math.sin(time * 0.002) * 6;
   const hpT = state.currentHp / state.maxHp;
@@ -1989,7 +2095,8 @@ export function drawBoss(
   ctx.scale(introScale, introScale);
   if (state.silhouette === 'taurus') drawTaurus(ctx, state, time);
   else if (state.silhouette === 'ornstein') drawOrnstein(ctx, state, time);
-  else drawGwyn(ctx, state, time);
+  else if (state.silhouette === 'gwyn') drawGwyn(ctx, state, time);
+  // AfroMan has no canvas silhouette — the DOM <img> sprite layer handles him.
   ctx.restore();
 
   // HP low OR death: cracks on the silhouette.
@@ -2140,13 +2247,16 @@ function hexWithAlpha(hex: string, alpha: number): string {
  *  sprite's *foot* (bottom-center) in world space. */
 export function drawBossMinionSprite(
   ctx: CanvasRenderingContext2D,
-  silhouette: 'taurus' | 'ornstein' | 'gwyn',
+  silhouette: 'taurus' | 'ornstein' | 'gwyn' | 'afroman',
   themeColor: string,
   x: number,
   y: number,
   scale: number,
   time: number,
 ): void {
+  // AfroMan doesn't summon minions (no chanter/caster patterns) so we never
+  // hit this branch in practice — short-circuit defensively anyway.
+  if (silhouette === 'afroman') return;
   // Minimal boss state just to drive the silhouette-draw helpers.
   const state: BossRenderState = {
     silhouette,
@@ -2173,7 +2283,7 @@ export function drawBossMinionSprite(
   ctx.scale(scale, scale);
   if (silhouette === 'taurus') drawTaurus(ctx, state, time);
   else if (silhouette === 'ornstein') drawOrnstein(ctx, state, time);
-  else drawGwyn(ctx, state, time);
+  else if (silhouette === 'gwyn') drawGwyn(ctx, state, time);
   ctx.restore();
   // Theme-colour wash over the silhouette — lighter composite gives a "possessed
   // by the boss's aura" feel without hiding the shape outline.

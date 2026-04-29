@@ -30,6 +30,12 @@ export function VictoryScreen(props: VictoryScreenProps) {
         The First Flame is yours to kindle.
       </p>
 
+      {stats.secretBossDefeated && (
+        <div className="mb-6 px-4 py-1.5 border border-pink-400/80 bg-pink-950/30 rounded-sm font-[Cinzel] text-[11px] tracking-[0.35em] uppercase text-pink-200 shadow-[0_0_14px_rgba(255,120,200,0.35)] select-none">
+          ★ Secret Route · AfroMan felled
+        </div>
+      )}
+
       <div className="grid grid-cols-2 gap-x-12 gap-y-1 text-amber-100/80 font-[Cinzel] text-sm tracking-widest">
         <StatLine label="Souls" value={finalScore.toLocaleString()} />
         <StatLine label="Max Combo" value={String(maxCombo)} trailing={<img src={`/${topRank.id}-removebg-preview.png`} alt={topRank.label} className="inline h-7 object-contain ml-2" />} />

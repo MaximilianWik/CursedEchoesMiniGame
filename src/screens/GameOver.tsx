@@ -86,6 +86,12 @@ export function GameOverScreen(props: GameOverScreenProps) {
         <StatLine label="Deadliest letter" value={stats.deadliestLetter || '—'} />
       </div>
 
+      {(stats.secretBossChosen || stats.secretBossDefeated) && (
+        <div className="mt-4 px-4 py-1.5 border border-pink-400/80 bg-pink-950/30 rounded-sm font-[Cinzel] text-[11px] tracking-[0.35em] uppercase text-pink-200 shadow-[0_0_14px_rgba(255,120,200,0.35)] select-none slide-in" style={{animationDelay: '2400ms'}}>
+          {stats.secretBossDefeated ? '★ Secret Route · AfroMan felled' : '★ Secret Route · AfroMan challenged'}
+        </div>
+      )}
+
       <div className="flex items-center gap-6 mt-8 slide-in" style={{animationDelay: '2600ms'}}>
         <div className="text-[10px] text-amber-600/60 tracking-[0.4em] uppercase">Combo over time</div>
         <canvas ref={graphRef} className="border border-amber-900/30 bg-black/40" />

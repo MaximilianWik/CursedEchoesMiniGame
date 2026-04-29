@@ -623,3 +623,160 @@ export function stopMusic(fade: number = 0.8): void {
   activeMusic = null;
   currentMusicId = null;
 }
+
+// ─────────────────────────────────────────────────────────────
+// Music samples — real audio files (MP3) routed through the master
+// chain with an AnalyserNode for beat detection. Used only by the
+// secret AfroMan boss fight for now.
+// ─────────────────────────────────────────────────────────────
+
+export type MusicSampleId = 'afroman';
+
+type SampleHandle = {
+  id: MusicSampleId;
+  audio: HTMLAudioElement;
+  source: MediaElementAudioSourceNode;
+  gain: GainNode;
+  analyser: AnalyserNode;
+};
+
+const SAMPLE_SRC: Record<MusicSampleId, string> = {
+  afroman: '/TallCans.mp3',
+};
+
+let activeSample: SampleHandle | null = null;
+let sampleFadeTimer: number | null = null;
+
+/** Subscribers for per-frame beat events. Called from playMusicSample's
+ *  loop when the low-band energy exceeds the rolling average by a
+ *  configurable threshold. */
+type BeatSubscriber = (now: number) => void;
+const beatSubscribers = new Set<BeatSubscriber>();
+
+export function subscribeBeat(fn: BeatSubscriber): () => void {
+  beatSubscribers.add(fn);
+  return () => { beatSubscribers.delete(fn); };
+}
+
+/** Begin sample playback with fade-in. Idempotent — calling with the same
+ *  id while the sample is already playing returns the existing handle. */
+export function playMusicSample(id: MusicSampleId, volume: number = 1, fadeInMs: number = 1500): SampleHandle | null {
+  if (!ctx) { initAudio(); if (!ctx) return null; }
+  if (!musicGain) return null;
+  if (activeSample && activeSample.id === id) return activeSample;
+  stopMusicSample(200);   // replace any currently-playing sample
+  // Stop the procedural drone — the sample is the music now.
+  stopMusic(0.6);
+
+  const audio = new Audio(SAMPLE_SRC[id]);
+  audio.loop = true;
+  audio.crossOrigin = 'anonymous';
+  audio.preload = 'auto';
+  const source = ctx.createMediaElementSource(audio);
+  const gain = ctx.createGain();
+  gain.gain.value = 0;
+  const analyser = ctx.createAnalyser();
+  analyser.fftSize = 512;
+  analyser.smoothingTimeConstant = 0.55;
+  source.connect(gain);
+  gain.connect(analyser);
+  analyser.connect(musicGain);
+
+  const handle: SampleHandle = {id, audio, source, gain, analyser};
+  activeSample = handle;
+
+  // Fade gain in via setTargetAtTime.
+  const now = ctx.currentTime;
+  gain.gain.setValueAtTime(0, now);
+  gain.gain.linearRampToValueAtTime(volume, now + fadeInMs / 1000);
+
+  void audio.play().catch(() => { /* autoplay block — user gesture will retry */ });
+
+  startBeatLoop();
+  return handle;
+}
+
+/** Override/re-ramp the active sample's gain value. Lets the intro cutscene
+ *  gradually climb the music volume over the 20 s buildup. */
+export function setMusicSampleVolume(vol: number, rampMs: number = 250): void {
+  if (!ctx || !activeSample) return;
+  const now = ctx.currentTime;
+  activeSample.gain.gain.cancelScheduledValues(now);
+  activeSample.gain.gain.setValueAtTime(activeSample.gain.gain.value, now);
+  activeSample.gain.gain.linearRampToValueAtTime(Math.max(0, vol), now + rampMs / 1000);
+}
+
+/** Stop the current sample with a short fade, then release nodes. */
+export function stopMusicSample(fadeMs: number = 400): void {
+  if (!ctx || !activeSample) return;
+  const handle = activeSample;
+  activeSample = null;
+  stopBeatLoop();
+  const now = ctx.currentTime;
+  handle.gain.gain.cancelScheduledValues(now);
+  handle.gain.gain.setValueAtTime(handle.gain.gain.value, now);
+  handle.gain.gain.linearRampToValueAtTime(0, now + fadeMs / 1000);
+  if (sampleFadeTimer !== null) window.clearTimeout(sampleFadeTimer);
+  sampleFadeTimer = window.setTimeout(() => {
+    try {
+      handle.audio.pause();
+      handle.audio.src = '';
+      handle.source.disconnect();
+      handle.gain.disconnect();
+      handle.analyser.disconnect();
+    } catch { /* ignore */ }
+    sampleFadeTimer = null;
+  }, fadeMs + 60);
+}
+
+// ── Beat detection loop ──────────────────────────────────────
+// bins ~1-8 of the frequency spectrum (≈60-250 Hz) drive the bass energy.
+// A rolling 1s average is kept; when instantaneous energy > avg * threshold
+// AND at least MIN_BEAT_GAP has elapsed, we call onBeat for all subscribers.
+
+const BEAT_MIN_GAP_MS = 200;
+const BEAT_THRESHOLD_MUL = 1.35;
+const BEAT_HISTORY_MS = 1000;
+let beatRaf = 0;
+let beatHistory: {t: number; energy: number}[] = [];
+let lastBeatAt = 0;
+
+function startBeatLoop(): void {
+  if (beatRaf !== 0) return;
+  beatHistory = [];
+  lastBeatAt = 0;
+  const buf = new Uint8Array(64);
+  const loop = () => {
+    if (!activeSample || !ctx) { beatRaf = 0; return; }
+    const now = performance.now();
+    activeSample.analyser.getByteFrequencyData(buf);
+    let bassSum = 0;
+    for (let i = 1; i <= 8; i++) bassSum += buf[i];
+    const energy = bassSum / 8;
+    beatHistory.push({t: now, energy});
+    // Trim history older than BEAT_HISTORY_MS.
+    while (beatHistory.length > 0 && now - beatHistory[0].t > BEAT_HISTORY_MS) {
+      beatHistory.shift();
+    }
+    const avg = beatHistory.reduce((s, e) => s + e.energy, 0) / Math.max(1, beatHistory.length);
+    if (energy > avg * BEAT_THRESHOLD_MUL && energy > 80 && (now - lastBeatAt) > BEAT_MIN_GAP_MS) {
+      lastBeatAt = now;
+      for (const fn of beatSubscribers) {
+        try { fn(now); } catch { /* ignore */ }
+      }
+    }
+    beatRaf = requestAnimationFrame(loop);
+  };
+  beatRaf = requestAnimationFrame(loop);
+}
+
+function stopBeatLoop(): void {
+  if (beatRaf !== 0) cancelAnimationFrame(beatRaf);
+  beatRaf = 0;
+  beatHistory = [];
+}
+
+/** Exposed for the HUD BPM ticker — timestamp of the most recently fired beat. */
+export function getLastBeatAt(): number {
+  return lastBeatAt;
+}

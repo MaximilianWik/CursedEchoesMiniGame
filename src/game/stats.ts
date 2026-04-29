@@ -20,6 +20,12 @@ export type RunStats = {
   deadliestLetter: string;            // letter player got wrong most
   wrongPerLetter: Record<string, number>;
   comboOverTime: {t: number; combo: number}[];  // sampled by loop
+  // 0.3.0 — secret boss (AfroMan) route flags. Set when the player takes the
+  // fork after Undead Burg and commits to AfroMan; `Defeated` flips on kill.
+  secretBossChosen: boolean;
+  secretBossDefeated: boolean;
+  // 0.3.0 — rhythm-parry bookkeeping for the AfroMan fight.
+  perfectParries: number;
 };
 
 export function createStats(): RunStats {
@@ -40,6 +46,9 @@ export function createStats(): RunStats {
     deadliestLetter: '',
     wrongPerLetter: {},
     comboOverTime: [],
+    secretBossChosen: false,
+    secretBossDefeated: false,
+    perfectParries: 0,
   };
 }
 
