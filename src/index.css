@@ -177,7 +177,7 @@
     position: relative;
     font-family: 'Cinzel', serif;
     font-weight: 700;
-    font-size: 108px;
+    font-size: 92px;
     line-height: 1;
     color: #8b0000;
     letter-spacing: 0.15em;
@@ -209,6 +209,426 @@
       rgba(100, 0, 0, 0.35) 80%, rgba(40, 0, 0, 0.65) 100%);
     opacity: 0;
     animation: youDiedVignette 2.6s ease-out 150ms forwards;
+  }
+
+  /* ═══════════════════════════════════════════════════════════ */
+  /* Game-over revamp (0.3.5) — three-column gothic stat plate   */
+  /* ═══════════════════════════════════════════════════════════ */
+
+  /* Secret-route badge — promoted from a sidenote to a hero subtitle. */
+  .go-secret-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 14px;
+    margin-top: 10px;
+    padding: 6px 22px;
+    border-top: 1px solid rgba(255, 140, 210, 0.45);
+    border-bottom: 1px solid rgba(255, 140, 210, 0.45);
+    font-family: "Cinzel", serif;
+    font-size: 12px;
+    letter-spacing: 0.4em;
+    text-transform: uppercase;
+    color: #ffc5e6;
+    text-shadow: 0 0 14px rgba(255, 120, 200, 0.65), 0 0 4px rgba(0, 0, 0, 0.9);
+  }
+  .go-secret-sigil {
+    color: #ff80cc;
+    font-size: 14px;
+    text-shadow: 0 0 10px rgba(255, 128, 204, 0.9);
+  }
+
+  /* Three-column plate */
+  .go-columns {
+    display: grid;
+    grid-template-columns: 300px 340px 260px;
+    gap: 20px;
+    padding: 0 18px;
+    align-items: stretch;
+  }
+
+  /* Parchment-style card. Double border + subtle inner glow. */
+  .go-card {
+    position: relative;
+    background:
+      radial-gradient(ellipse 120% 60% at 50% 0%, rgba(120, 40, 20, 0.18) 0%, transparent 70%),
+      linear-gradient(180deg, rgba(20, 10, 12, 0.85), rgba(10, 4, 6, 0.88));
+    border: 1px solid rgba(180, 120, 60, 0.32);
+    box-shadow:
+      0 0 28px rgba(0, 0, 0, 0.6),
+      inset 0 0 40px rgba(40, 10, 10, 0.35);
+    padding: 16px 20px 20px;
+    display: flex;
+    flex-direction: column;
+  }
+  .go-card::before, .go-card::after {
+    content: '';
+    position: absolute;
+    width: 14px; height: 14px;
+    border: 1px solid rgba(255, 180, 100, 0.45);
+  }
+  /* Corner brackets — top-left + bottom-right for a framed feel. */
+  .go-card::before {
+    top: 4px; left: 4px;
+    border-right: none; border-bottom: none;
+  }
+  .go-card::after {
+    bottom: 4px; right: 4px;
+    border-left: none; border-top: none;
+  }
+
+  .go-card-header {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    margin-bottom: 14px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid rgba(180, 120, 60, 0.25);
+  }
+  .go-card-header h2 {
+    font-family: "Cinzel", serif;
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0.45em;
+    text-transform: uppercase;
+    color: #e8c684;
+    text-shadow: 0 0 10px rgba(255, 180, 80, 0.4);
+    margin: 0;
+  }
+  .go-card-sigil {
+    color: rgba(255, 180, 80, 0.7);
+    font-size: 10px;
+    text-shadow: 0 0 6px rgba(255, 160, 60, 0.55);
+  }
+
+  /* Column 1 — THE RUN. Hero-sized featured stats. */
+  .go-card-run {
+    text-align: center;
+  }
+  .go-hero-stat {
+    padding: 6px 0;
+  }
+  .go-hero-label {
+    font-family: "Cinzel", serif;
+    font-size: 10px;
+    letter-spacing: 0.45em;
+    text-transform: uppercase;
+    color: rgba(200, 140, 80, 0.7);
+    margin-bottom: 4px;
+  }
+  .go-hero-sublabel {
+    font-family: "EB Garamond", serif;
+    font-style: italic;
+    font-size: 12px;
+    color: rgba(220, 170, 100, 0.65);
+    margin-top: 2px;
+  }
+  .go-hero-value {
+    font-family: "Cinzel", serif;
+    font-weight: 700;
+    font-size: 30px;
+    color: #ffe2a0;
+    letter-spacing: 0.08em;
+    text-shadow: 0 0 18px rgba(255, 180, 80, 0.55), 0 0 4px rgba(0, 0, 0, 0.9);
+    line-height: 1.1;
+  }
+  .go-hero-value-xl {
+    font-size: 40px;
+    color: #ffd98a;
+    text-shadow: 0 0 24px rgba(255, 180, 80, 0.75), 0 0 4px rgba(0, 0, 0, 0.9);
+  }
+  .go-hero-value-zone {
+    font-size: 18px;
+    letter-spacing: 0.12em;
+  }
+  .go-hero-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+    margin-top: 2px;
+  }
+  .go-hero-micro {
+    padding: 2px 0;
+  }
+  .go-divider {
+    height: 1px;
+    margin: 12px 8px;
+    background: linear-gradient(90deg, transparent, rgba(180, 120, 60, 0.45), transparent);
+    position: relative;
+  }
+  .go-divider::after {
+    content: '◆';
+    position: absolute;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    color: rgba(255, 180, 80, 0.65);
+    font-size: 8px;
+    background: #0a0406;
+    padding: 0 6px;
+    text-shadow: 0 0 6px rgba(255, 160, 60, 0.6);
+  }
+
+  /* Column 2 — THE TRIAL. Dotted-leader stat inventory. */
+  .go-stat-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .go-stat {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    font-family: "Cinzel", serif;
+    font-size: 12px;
+    letter-spacing: 0.12em;
+  }
+  .go-stat-label {
+    color: rgba(220, 170, 110, 0.75);
+    text-transform: uppercase;
+    font-size: 10px;
+    letter-spacing: 0.28em;
+    white-space: nowrap;
+  }
+  .go-stat-dots {
+    flex: 1;
+    border-bottom: 1px dotted rgba(180, 120, 60, 0.35);
+    transform: translateY(-3px);
+  }
+  .go-stat-value {
+    color: #ffe2a0;
+    font-weight: 700;
+    font-size: 15px;
+    letter-spacing: 0.1em;
+    white-space: nowrap;
+    text-shadow: 0 0 10px rgba(255, 180, 80, 0.35);
+  }
+  .go-stat-danger .go-stat-value {
+    color: #ff9090;
+    text-shadow: 0 0 12px rgba(255, 80, 80, 0.55);
+  }
+  .go-stat-secret .go-stat-value {
+    color: #ffbde3;
+    text-shadow: 0 0 12px rgba(255, 120, 200, 0.55);
+  }
+  .go-stat-secret .go-stat-label {
+    color: rgba(255, 180, 220, 0.75);
+  }
+
+  /* Column 3 — HALL OF RECORDS. Richer than the old cramped version. */
+  .go-card-records {
+    min-height: 260px;
+  }
+  .go-records-empty {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 20px 10px;
+    text-align: center;
+    font-family: "EB Garamond", serif;
+    font-size: 12px;
+    color: rgba(200, 140, 80, 0.55);
+  }
+  .go-records-sigil {
+    font-size: 26px;
+    color: rgba(255, 180, 80, 0.5);
+    text-shadow: 0 0 12px rgba(255, 160, 60, 0.4);
+    margin-bottom: 4px;
+  }
+  .go-records-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .go-record {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 12px;
+    border: 1px solid rgba(180, 120, 60, 0.25);
+    background: linear-gradient(180deg, rgba(30, 14, 10, 0.5), rgba(15, 6, 6, 0.55));
+    transition: border-color 220ms ease, background 220ms ease, box-shadow 220ms ease;
+  }
+  .go-record:hover {
+    border-color: rgba(255, 180, 100, 0.5);
+    background: linear-gradient(180deg, rgba(50, 24, 14, 0.55), rgba(25, 10, 8, 0.55));
+  }
+  .go-record.is-current {
+    border-color: rgba(255, 200, 120, 0.9);
+    box-shadow: 0 0 22px rgba(255, 180, 80, 0.4), inset 0 0 16px rgba(255, 180, 80, 0.1);
+    background: linear-gradient(180deg, rgba(70, 34, 18, 0.55), rgba(35, 16, 12, 0.55));
+  }
+  .go-record.is-current::before {
+    content: 'THIS RUN';
+    position: absolute;
+    top: -8px; right: 8px;
+    font-family: "Cinzel", serif;
+    font-size: 8px;
+    letter-spacing: 0.35em;
+    padding: 1px 6px;
+    background: #0a0406;
+    color: #ffd98a;
+    border: 1px solid rgba(255, 200, 120, 0.7);
+  }
+  .go-record {
+    position: relative;
+  }
+  .go-record-rank {
+    font-family: "Cinzel", serif;
+    font-size: 16px;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    color: rgba(255, 180, 80, 0.75);
+    width: 28px;
+    text-align: center;
+    border-right: 1px solid rgba(180, 120, 60, 0.25);
+    padding-right: 10px;
+    text-shadow: 0 0 8px rgba(255, 160, 60, 0.4);
+  }
+  .go-record-body {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .go-record-souls {
+    font-family: "Cinzel", serif;
+    font-weight: 700;
+    font-size: 17px;
+    color: #ffd98a;
+    letter-spacing: 0.06em;
+    text-shadow: 0 0 12px rgba(255, 180, 80, 0.45);
+  }
+  .go-record-meta {
+    display: flex;
+    justify-content: space-between;
+    font-family: "Cinzel", serif;
+    font-size: 9px;
+    letter-spacing: 0.3em;
+    text-transform: uppercase;
+    color: rgba(200, 140, 80, 0.6);
+  }
+  .go-record-meta-value {
+    color: #ffc878;
+    font-weight: 700;
+  }
+
+  /* Combo-over-time graph — banner below the columns. */
+  .go-graph-frame {
+    margin-top: 14px;
+    padding: 10px 16px 6px;
+    border: 1px solid rgba(180, 120, 60, 0.28);
+    background: linear-gradient(180deg, rgba(20, 10, 12, 0.7), rgba(10, 4, 6, 0.75));
+    box-shadow: 0 0 18px rgba(0, 0, 0, 0.5), inset 0 0 22px rgba(40, 12, 8, 0.35);
+    width: 660px;
+    max-width: 96%;
+  }
+  .go-graph-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 4px;
+    font-family: "Cinzel", serif;
+    font-size: 10px;
+    letter-spacing: 0.35em;
+    text-transform: uppercase;
+  }
+  .go-graph-title { color: rgba(220, 170, 100, 0.65); }
+  .go-graph-peak {
+    color: #ffd98a;
+    font-size: 9px;
+    letter-spacing: 0.3em;
+  }
+  .go-graph-canvas {
+    display: block;
+    width: 100%;
+    background: rgba(10, 5, 5, 0.6);
+    border: 1px solid rgba(180, 120, 60, 0.15);
+  }
+
+  /* Secret-password gate — framed field instead of a floating input. */
+  .go-secret-gate {
+    margin-top: 14px;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 6px 16px;
+    border-top: 1px solid rgba(255, 68, 68, 0.3);
+    border-bottom: 1px solid rgba(255, 68, 68, 0.3);
+  }
+  .go-secret-gate-label {
+    font-family: "Cinzel", serif;
+    font-size: 10px;
+    letter-spacing: 0.5em;
+    text-transform: uppercase;
+    color: #ff8080;
+    text-shadow: 0 0 8px rgba(255, 40, 40, 0.65);
+    animation: goSecretLabelPulse 2.4s ease-in-out infinite;
+  }
+  .go-secret-gate-input {
+    background: rgba(10, 2, 2, 0.9);
+    border: 1px solid rgba(255, 68, 68, 0.5);
+    color: #ffc0c0;
+    font-family: "EB Garamond", serif;
+    font-size: 14px;
+    letter-spacing: 0.3em;
+    text-align: center;
+    padding: 6px 14px;
+    width: 200px;
+    outline: none;
+    transition: border-color 180ms, box-shadow 180ms;
+    box-shadow: 0 0 14px rgba(255, 40, 40, 0.2), inset 0 0 8px rgba(80, 0, 0, 0.4);
+  }
+  .go-secret-gate-input:focus {
+    border-color: #ff4040;
+    box-shadow: 0 0 20px rgba(255, 40, 40, 0.5), inset 0 0 10px rgba(100, 0, 0, 0.4);
+  }
+  .go-secret-gate-input.is-error {
+    border-color: #ff4040;
+    box-shadow: 0 0 22px rgba(255, 0, 0, 0.65);
+  }
+  .go-secret-gate-input::placeholder {
+    color: rgba(255, 68, 68, 0.35);
+    letter-spacing: 0.4em;
+  }
+  @keyframes goSecretLabelPulse {
+    0%, 100% { opacity: 0.85; text-shadow: 0 0 8px rgba(255, 40, 40, 0.65); }
+    50%      { opacity: 1;    text-shadow: 0 0 14px rgba(255, 80, 80, 0.9); }
+  }
+
+  /* Try Again CTA — gothic-framed with flanking sigils. */
+  .go-try-again {
+    margin-top: 14px;
+    display: inline-flex;
+    align-items: center;
+    gap: 18px;
+    padding: 11px 40px;
+    border: 1px solid rgba(220, 160, 80, 0.7);
+    background:
+      linear-gradient(180deg, rgba(60, 26, 14, 0.7), rgba(20, 8, 6, 0.75));
+    font-family: "Cinzel", serif;
+    font-weight: 700;
+    font-size: 14px;
+    letter-spacing: 0.45em;
+    text-transform: uppercase;
+    color: #ffe2a0;
+    text-shadow: 0 0 10px rgba(255, 180, 80, 0.6);
+    box-shadow: 0 0 22px rgba(255, 140, 60, 0.22), inset 0 0 14px rgba(255, 160, 60, 0.08);
+    cursor: pointer;
+    transition: border-color 200ms ease, box-shadow 200ms ease, color 200ms ease, background 200ms ease;
+  }
+  .go-try-again:hover {
+    border-color: #ffc470;
+    color: #fff2d0;
+    background: linear-gradient(180deg, rgba(90, 44, 20, 0.75), rgba(30, 12, 8, 0.75));
+    box-shadow: 0 0 36px rgba(255, 180, 80, 0.45), inset 0 0 22px rgba(255, 180, 80, 0.12);
+  }
+  .go-try-again-sigil {
+    color: #ffc470;
+    font-size: 10px;
+    text-shadow: 0 0 10px rgba(255, 160, 60, 0.9);
   }
 
   /* ═══════════════════════════════════════════════════════════ */

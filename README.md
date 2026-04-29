@@ -3,7 +3,7 @@
 A gothic typing trial. Four zones. Three bosses. Banish the echoes, parry the spells, type the phrases, kindle the fading flame.
 
 **Live:** https://cursedechoes.vercel.app/
-**Current version:** `0.3.4` — Dev Console password gate dropped; Jessyka dances on the AfroMan stage as a background prop. See [CHANGELOG.md](./CHANGELOG.md) for full history. Version is shown in-game on the menu, pause, settings, game-over and victory screens.
+**Current version:** `0.3.5` — Game-over screen revamped with a three-column gothic stat plate, featured rank badge, and a prettier combo-over-time banner. See [CHANGELOG.md](./CHANGELOG.md) for full history. Version is shown in-game on the menu, pause, settings, game-over and victory screens.
 
 https://github.com/user-attachments/assets/cc4d2332-4475-4e61-bd31-d33734f54dab
 

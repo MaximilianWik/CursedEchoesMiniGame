@@ -4,6 +4,75 @@ All notable changes to Cursed Echoes. Format loosely follows [Keep a Changelog](
 
 ---
 
+## [0.3.5] — Game-over screen revamp
+
+The post-death reveal was functional but read as a raw data dump — a vertical list of label/value pairs with a tiny graph and a cramped corner Hall of Records. The YOU DIED moment itself was great; everything after it wasn't. 0.3.5 re-lays the whole screen as a gothic stat plate that matches the rest of the game's production quality. Every element from the old screen is still there — they're just dressed properly now.
+
+### New layout
+
+The screen is a vertical stack of four bands:
+
+1. **Hero** — the YOU DIED reveal (unchanged animation), optionally followed by a framed *"Secret Route — AfroMan challenged / felled"* subtitle when the player took the fork.
+2. **Three-column plate** — `THE RUN`, `THE TRIAL`, `HALL OF RECORDS`, each a bordered card with corner brackets and a sigil-flanked header.
+3. **Combo-over-time banner** — a wider 620 × 96 canvas inside a framed panel; amber curve instead of red, with a gradient area fill, three faint gridlines, and a small peak marker that highlights your best moment.
+4. **Secret-password gate + Try Again CTA** — two flanking-rule affordances at the bottom, plus the Dev button and version pill in the corners.
+
+### The Run — featured numbers
+
+- **Souls** at 40 px Cinzel, amber glow, the hero number.
+- **Max Combo** at 30 px flanked by the earned rank badge (image) and a subtitle with the rank label (*Dismal / Crazy / Badass / Apocalyptic / Savage! / Sick Skills!! / Smokin' Sexy Style!!*).
+- **Time** + **Fell in** as a pair of smaller stat blocks at the bottom of the card, sharing a diamond-sigil divider.
+
+### The Trial — full inventory
+
+Dotted-leader list — label on the left (small-caps tracking), dotted row across to a bold amber value on the right. Reads like an accountant's ledger for the run.
+
+- Accuracy, Words/min, Bosses felled, Words banished, Projectiles parried, Dodges, Estus drunk
+- **Perfect parries** line appears only when the player felled AfroMan (reads from `stats.perfectParries`, hidden otherwise).
+- **Deadliest letter** rendered in danger-red accent (`#ff9090`) so the weakness reads visually, not just textually.
+
+### Hall of Records — given proper space
+
+Bumped from a 192 px corner column to a full card. Each entry is:
+
+- Roman numeral rank (I–V) in a column with its own divider
+- Souls in amber Cinzel at 17 px with a drop-shadow glow
+- `MAX COMBO · 142` meta row below
+
+The record matching the current run's souls + max-combo gets an `is-current` highlight — golden border, deeper inset glow, and a *"THIS RUN"* pill at the top-right corner so the player sees exactly where they landed. Empty-state (fresh save) shows a centered ◈ sigil and *"No legendary souls yet. The ledger waits."* instead of dead space.
+
+### Combo-over-time graph — prettier + peak marker
+
+- 620 × 96 canvas (was 260 × 80) inside a `.go-graph-frame` with title + *"peak N"* header.
+- Amber curve (`#ffb055`) with a vertical gradient area fill underneath and a soft orange shadow on the line — reads as the story of the run, not a second death cue.
+- Three faint horizontal gridlines at 25 / 50 / 75 % of max.
+- Peak marker — a small filled circle + ring at the combo maximum so the high-water mark is visually anchored.
+- Empty-state string (*"Not enough combo to remember"*) replaces the stark black rectangle when there aren't enough samples.
+
+### Secret-password gate
+
+Was a bare floating input with a pulsing red header. Now framed between two red rules with the label and input on the same line — clearly an *affordance* instead of floating UI. Input box has inset shadow, proper focus state (brighter glow), shake-on-error animation preserved. ILOVEMYGF still triggers `onUnlock`.
+
+### Try Again CTA
+
+Upgraded from a thin outline button to a proper CTA — flanking ◈ sigils, amber gradient fill, brighter border glow on hover. Same function, much more "I want to press this".
+
+### Title tweak
+
+`.ce-died` shrank from 108 px → 92 px to give the three-column plate below room to breathe inside the 768 px frame. The reveal + pulse animations are unchanged.
+
+### Files touched
+
+- `src/screens/GameOver.tsx` — rewritten. Three-column grid, hero card, trial card, records card, banner graph, framed password gate, upgraded CTA. All original props and functionality preserved.
+- `src/index.css` — `.go-*` class family (≈320 LOC) covering cards, headers, dividers, stat grids, records, graph frame, password gate, Try Again button; `.ce-died` base font-size 108 → 92.
+- `package.json` + `src/version.ts` — 0.3.5.
+
+### Known limitations
+
+- The three-column plate assumes the game frame is at its native 1024 × 768 layout. At heavily scaled-down viewports (mobile portrait) the columns will clip; the frame's `scale` transform handles fit, but content within the frame is designed for the native size.
+
+---
+
 ## [0.3.4] — Open dev console; Jessyka on the AfroMan stage
 
 Two small quality-of-life tweaks.
