@@ -4,6 +4,132 @@ All notable changes to Cursed Echoes. Format loosely follows [Keep a Changelog](
 
 ---
 
+## [0.2.5] — Physical deflection
+
+Parries now feel like parries. Pressing a letter that matches an incoming projectile no longer teleport-despawns the projectile on the spot — instead the game marks it as *neutralised* and spawns a chase-fireball from the player that actively homes in on it until it physically connects. You see the cause, the travel, and the impact, in that order, every time.
+
+### ⚔️ New mechanic — chase-fireballs
+
+- **Stable IDs**: every projectile (boss + caster) is now stamped with a globally-unique `id` at spawn so fireballs can chase a *specific* target across frames even as other projectiles spawn and despawn around it.
+- **Deflection flow**: on a matching keypress the projectile gets `deflected = true` (no longer damages the player, no longer collides) and a chase-fireball spawns from the player's chest aimed at the projectile's current position. The fireball re-aims every frame to the projectile's *live* position and seeks at 16 px/frame — fast enough that intercept is guaranteed within the 1.2 s grace window.
+- **Real intercept**: when the chase-fireball closes within 20 px, it snaps to the projectile, splices it out of the array, and detonates *at the projectile's position*. Bigger explosion (14-unit burst vs 8), bigger shockwave (70 px vs 55), and a dedicated 5-mag screen-shake beat so the parry reads as an impact event — not a silent remove.
+- **Graceful fallback**: if the target projectile vanishes for any reason (boss death clears the array, projectile leaves the arena, grace expires) the chase-fireball self-detonates in place instead of orphaning.
+- **Ghost rendering**: deflected projectiles render at 40 % opacity with desaturated/brightened filter so players can *see* the neutralisation even before the fireball physically connects. The doomed letter drifts visibly harmlessly toward the player until the chase-fireball blows it apart.
+- **Pass-through**: deflected projectiles that happen to reach the player's hitbox before intercept are silently filtered out of the contact-damage check — a parried projectile never hits, regardless of timing.
+
+### 🔧 Why this matters
+
+The old system credited the combo tick but visually teleport-despawned the projectile and fired a cosmetic fireball that landed on empty space. Players reported parries feeling "instant but unsatisfying". Now the keystroke → travel → impact chain is physical: the parry still credits atomically on keypress (no combo risk) but the visual-audio-shake beat lands when the fireball actually connects. Cause and effect, on screen, every time.
+
+### 📁 Files
+
+- `src/graphics.ts` — added `Projectile.id`, `Projectile.deflected`, `Fireball.chaseProjectileId`, `Fireball.life`; `drawProjectile` now ghosts deflected projectiles.
+- `src/App.tsx` — module-level projectile ID counter; IDs assigned at every projectile spawn (boss attacks + caster fire); deflection loop rewritten to mark + spawn chase-fireball instead of splice; `updateFireballs` given a chase branch with velocity-seek, life grace, graceful target-loss handling, and chase-specific impact FX; `updateProjectiles` contact check gated on `!p.deflected`.
+
+---
+
+## [0.2.4] — Jessyka companion
+
+Typing JESSYKA now summons her into the fight as a support AI. She stands beside you, picks the highest-threat word on screen, and blows kiss projectiles at it while you focus on everything else. Lasts for the full 10 s *Blessed by Godess* window; finishes her current word before ascending.
+
+### 🎀 New entity — Jessyka companion
+
+- **Spawns to the right of the player** (x = player + 130) whenever you complete a `JESSYKA` special word and the *Blessed by Godess* buff activates. A dedicated `<img>` element alternates between `/jessIDLE.png` and `/jessKISS.png` via a ref-driven sprite-switch (same pattern as the player sprite).
+- **Dramatic lovebomb spawn animation** (`jessykaLovebomb` @ 1.3 s):
+  - Enters from the right with translation `(60, 40) → (0, 0)`, rotation `15° → 0°`, scale `0.4 → 1.0` with a 35 %-keyframe overshoot to 1.15×
+  - Brightness spike + heavy pink drop-shadow that settles into a softer idle glow
+  - Blur 16 px → 0 so she materializes instead of just sliding in
+  - Follows into a continuous `jessykaIdleFloat` — ±4 px vertical, subtle 1.015× scale pulse
+- **Angelic despawn animation** (`jessykaAngelic` @ 1.6 s):
+  - Brightens to 2.4× while floating 140 px upward
+  - Drop-shadow expands from 20 px → 100 px cream-white glow
+  - Opacity fades to 0 with a final 10 px blur for the dissolve
+- **Soul-offering particle burst** at despawn start — 40 hearts + cream specks fountain upward from her position.
+
+### ⚔️ Combat behavior
+
+- **Target selection**: filters words that are not already Jessyka-claimed, not special / boss-phrase / boss-attack / chanter, AND have `typed.length === 0` (not already mid-progress). Sorts by `y ASC` — she always prioritizes the **highest / most-dangerous word** on screen. No target? She waits.
+- **Kiss cadence**: one kiss every **550 ms** (≈ 1.8 letters/sec) — deliberately slower than a typical player typing rate so she assists without trivializing play. A 7-letter word takes her ~3.9 s.
+- **Kiss projectiles** — pink heart glyphs traveling in a bezier arc from her chest to the targeted letter's position. Flight time ~420 ms with a sin-lifted arc for a blown-kiss feel. Re-homes each frame if the target word moves. Impact spawns a 10-particle pink heart burst.
+- **Word damage** happens on kiss **arrival** (not fire), so you see the cause → effect. Only advances `w.typed` if `typed.length === letterIdx` to stay ordered.
+- **Kill reward**: when Jessyka finishes a word, score `length × 15` (50% bonus over normal), `sfxShatter`, and a 26-heart-&-spark burst at the word's position.
+- **Player cannot target her word** — `findIndex` now filters out any word with `jessykaTarget === true`. No poaching, no conflict.
+- **Graceful release**: if her target is destroyed by contact damage (reaches the player), she releases and picks a new one next frame. No stuck state.
+- **Finish-then-leave**: when the blessed timer expires (10 s), she transitions to `'leaving'` but keeps firing kisses at her current target. Only once the target is dead (or she had no target) does she enter `'despawning'`.
+
+### 🔄 State machine
+
+```
+[null]       ──(JESSYKA kill)──>  [spawning]
+[spawning]   ──(1.3 s timer)──>   [active]
+[active]     ──(blessed expires)──> [leaving]
+[leaving]    ──(target done / no target)──> [despawning]
+[despawning] ──(1.6 s timer)──>   [null]
+```
+
+Re-completing JESSYKA while she's already present refreshes her back to `'active'` instead of re-spawning — chained blesses extend her stay without interrupting her animations.
+
+### 🧰 Internal / data changes
+
+- `Word.id: number` — new required field, unique across all spawns (`_wordIdCounter`). Stable across splices so Jessyka's target can survive word-list mutations. All 5 `wordsRef.current.push(...)` sites updated.
+- `Word.jessykaTarget?: boolean` — flag set when she claims a word; the player's start-word `findIndex` filters these out.
+- `JessykaCompanion` state object held in `jessykaRef: React.RefObject<JessykaCompanion | null>`:
+  - `state` — one of `'spawning' | 'active' | 'leaving' | 'despawning'`
+  - `spawnStart / despawnStart` — `performance.now()` timestamps
+  - `targetId / lettersFired / nextKissAt` — targeting + pacing
+  - `castingUntil` — when to show the kiss.png vs idle.png
+- `JessykaKiss` projectile in `jessykaKissesRef`:
+  - `(sx, sy)` spawn origin + `(tx, ty)` current target → arc interpolated from `progress` with a sin-based lift
+  - `wordId + letterIdx` so arrival knows which word/letter to advance
+- `updateJessyka`, `tryPickJessykaTarget`, `fireJessykaKiss`, `updateJessykaKisses`, `jessykaKillTarget`, `drawKissHeart`, `spawnJessykaAngelicBurst` — all new helpers in `App.tsx`.
+- `resetRunState`, `tryAgain`, `abandonRun` all clear Jessyka state so a new run starts clean.
+- Contact-damage branch in `updateWords` now releases `jessykaRef.targetId` if the damaged word was hers.
+- Blessed-expiry `setTimeout` now also flips Jessyka to `'leaving'` if she's present.
+
+### 🎨 Assets
+
+- Uses `/jessIDLE.png` and `/jessKISS.png` in `public/`. Until those files exist, the sprite slot renders the `alt="Jessyka"` fallback. Drop the PNGs in and she's live — no code changes needed.
+
+### ⚖️ Balance notes
+
+- Jessyka is tuned to assist, not dominate. At ≈0.55 s / letter she's about **half** the speed of a competent player. In 10 s of blessed she completes ~2-3 words, mostly the ones highest on screen (the ones you were going to lose anyway).
+- She gives bonus souls (+50 % per kill) so you're incentivized to trigger her, but you still have to do the heavy lifting.
+- She never targets boss phrases or boss word-projectiles — those remain fully your responsibility.
+
+---
+
+## [0.2.3] — JESSYKA heart rework
+
+Small, focused pass on the special fireball visuals.
+
+### 🎨 JESSYKA fireball revamped
+
+- **Dedicated `drawJessykaHeart` render path.** The old fireball branch squeezed the heart through a janky bezier with `size * 6` scaling, so combo stacks produced cartoonishly huge hearts that swallowed the screen.
+- **New clean heart shape** — classic two-lobe bezier with a proper top dip and bottom point. Fills with a radial gradient (`#ffe8f4 → #ffb0d8 → #ff5aa6 → #d62a7f`) from a highlight origin at the upper-left lobe for depth.
+- **Base size 26 px** (was effectively 30–60 px). Combo scaling clamped to **max 1.3× past 120 combo** (`1 + min(0.3, combo / 400)`) instead of the previous 6× runaway at SSS.
+- **Gentle breathing pulse** — `0.94 + sin(time × 0.012) × 0.06` — subtle, not distracting.
+- **Soft pink halo** behind the heart (`rgba(255, 150, 210, 0.55)` → transparent) with `globalCompositeOperation = 'lighter'` so it blooms into the scene instead of obscuring it.
+- **White shine highlight** — a small diagonal ellipse in the upper-left lobe gives the heart a wet/candy look.
+- **Thin magenta rim** (`rgba(180, 20, 100, 0.85)`, 1.5 px) defines the silhouette against busy backgrounds.
+- **Two orbiting sparkle specks** rotate slowly around the heart at radius `s × 1.35` — signals "special fire" without adding clutter.
+
+### 🌸 Particle trail cleaned up
+
+- Trail particles spawned by a flying heart now **alternate hearts + small white sparkle dots** (`#ffe4f1`) instead of a single stream of pink hearts. Gives a candy-ribbon trail.
+- Particle heart shape replaced with a cleaner two-arc + triangle construction (was another awkward cubic-bezier knockoff).
+- Slight downward `vy` bias on the trail so the sparkles drift naturally behind the fireball's motion.
+
+### 🛠️ Signature change
+
+- `drawFireball` now takes an optional `time: number` parameter (default 0) so the new heart can read elapsed time for its pulse/sparkle animations. Other fireball branches ignore it.
+- Call site in `App.tsx` updated to pass `time` from the render loop.
+
+### 🐛 No behavioral changes
+
+All gameplay rules unchanged — JESSYKA still grants full heal, refills estus, and activates the *Blessed by Godess* buff. This was purely a visual pass.
+
+---
+
 ## [0.2.2] — Deflection, cutscene, and clarity
 
 ### 🐛 Bug fixes

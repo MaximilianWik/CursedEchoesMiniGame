@@ -62,6 +62,48 @@ const ESTUS_CHUG_MS = 1150;
 const ESTUS_HEAL = 4;
 const BOSS_AIM = {x: DESIGN_W / 2, y: 380};
 
+// Monotonic counter yielding unique Word.id values for stable cross-splice lookup.
+let _wordIdCounter = 1;
+const nextWordId = (): number => _wordIdCounter++;
+
+// Same idea for projectiles — chase fireballs look these up to home in on a
+// still-alive projectile even as it moves across frames.
+let _projectileIdCounter = 1;
+const nextProjectileId = (): number => _projectileIdCounter++;
+
+// ─────────────────────────────────────────────────────────────
+// Jessyka support companion — spawns on blessed activation, targets
+// high-up words with kiss projectiles, finishes its word before leaving.
+// ─────────────────────────────────────────────────────────────
+
+const JESS_SPAWN_MS = 1300;
+const JESS_DESPAWN_MS = 1600;
+const JESS_KISS_INTERVAL_MS = 550;       // time between kiss fires
+const JESS_KISS_FLIGHT_MS = 420;         // how long a kiss is in-flight
+const JESS_X_OFFSET = 130;               // how far right of the player she stands
+
+type JessykaState = 'spawning' | 'active' | 'leaving' | 'despawning';
+
+type JessykaCompanion = {
+  state: JessykaState;
+  spawnStart: number;       // performance.now at spawn start
+  despawnStart: number;     // performance.now at despawn start (0 otherwise)
+  targetId: number | null;  // Word.id she's firing at
+  lettersFired: number;     // how many kisses she has fired at the target
+  nextKissAt: number;       // performance.now when she fires her next kiss
+  castingUntil: number;     // sprite swap to kiss.png while time < this
+};
+
+type JessykaKiss = {
+  x: number; y: number;
+  sx: number; sy: number;               // spawn origin (for bezier curve)
+  tx: number; ty: number;                // current target position
+  progress: number;                      // 0..1
+  wordId: number;
+  letterIdx: number;                     // which letter this kiss represents
+};
+
+
 /** Small helper — convert a #rrggbb color + alpha into an rgba() string. */
 function hexA(hex: string, alpha: number): string {
   const h = hex.replace('#', '');
@@ -185,6 +227,13 @@ export default function App() {
   const bossRef = useRef<BossRuntime | null>(null);
   const bossAnnouncementRef = useRef<{text: string; life: number} | null>(null);
 
+  // Jessyka companion + kisses.
+  const jessykaRef = useRef<JessykaCompanion | null>(null);
+  const jessykaKissesRef = useRef<JessykaKiss[]>([]);
+  const jessykaImgRef = useRef<HTMLImageElement | null>(null);
+  const [jessykaVisible, setJessykaVisible] = useState(false);
+  const [jessykaDespawning, setJessykaDespawning] = useState(false);
+
   // Stats
   const statsRef = useRef<RunStats>(createStats());
 
@@ -261,6 +310,10 @@ export default function App() {
     statsRef.current = createStats();
     statsRef.current.startTime = Date.now();
     bgStateRef.current = createBgState();
+    jessykaRef.current = null;
+    jessykaKissesRef.current = [];
+    setJessykaVisible(false);
+    setJessykaDespawning(false);
   }, []);
 
   const enterZone = useCallback((idx: number) => {
@@ -381,6 +434,10 @@ export default function App() {
   const abandonRun = useCallback(() => {
     stopMusic(0.2);
     setPaused(false);
+    jessykaRef.current = null;
+    jessykaKissesRef.current = [];
+    setJessykaVisible(false);
+    setJessykaDespawning(false);
     phaseRef.current = 'menu';
     setPhase('menu');
   }, []);
@@ -393,6 +450,10 @@ export default function App() {
     setYesChecked(false); setNoHoverPos(null);
     setKissPos(null);
     stopMusic(0.2);
+    jessykaRef.current = null;
+    jessykaKissesRef.current = [];
+    setJessykaVisible(false);
+    setJessykaDespawning(false);
     phaseRef.current = 'menu';
     setPhase('menu');
   }, []);
@@ -580,6 +641,8 @@ export default function App() {
       estusChargesRef, estusActiveUntilRef,
       zoneIdxRef, zoneStartTimeRef, zoneElapsedRef, bossRef, bossAnnouncementRef,
       statsRef,
+      jessykaRef, jessykaKissesRef, jessykaImgRef,
+      setJessykaVisible, setJessykaDespawning,
       setHudStats, setBossBarStats, triggerRankUp, enterBoss, beginBonfire, triggerDeath,
       handleCharImpl,
     });
@@ -596,6 +659,7 @@ export default function App() {
     secretHearts, setSecretHearts, kissPos, setKissPos,
     secretPassword, setSecretPassword, passwordError, setPasswordError,
     hudStats, bossBarStats, bonfireInfo, finalSnapshot,
+    jessykaVisible, jessykaDespawning, jessykaImgRef,
     highscores, isMobileFocused,
     bgCanvasRef, canvasRef, textCanvasRef, playerImgRef, shakeRef, screenFlashRef, mobileInputRef,
     smoochAudioRef,
@@ -681,6 +745,11 @@ type LoopDeps = {
   bossRef: React.RefObject<BossRuntime | null>;
   bossAnnouncementRef: React.RefObject<{text: string; life: number} | null>;
   statsRef: React.RefObject<RunStats>;
+  jessykaRef: React.RefObject<JessykaCompanion | null>;
+  jessykaKissesRef: React.RefObject<JessykaKiss[]>;
+  jessykaImgRef: React.RefObject<HTMLImageElement | null>;
+  setJessykaVisible: (v: boolean) => void;
+  setJessykaDespawning: (v: boolean) => void;
   setHudStats: (s: HudStats) => void;
   setBossBarStats: (s: BossBarStats | null) => void;
   triggerRankUp: (rank: Rank) => void;
@@ -754,6 +823,7 @@ function runGameLoop(d: LoopDeps): () => void {
     updateProjectiles(d, ctx, time, dt);
     updateShockwaves(d, ctx, dt);
     updateParticles(d, ctx, dt);
+    updateJessyka(d, ctx, time);
     drawEstusChug(d, ctx, time);
 
     // ── Words (enemy update + draw + contact check) ───────────
@@ -942,6 +1012,7 @@ function updateZoneSpawn(d: LoopDeps, time: number, dt: number): void {
   if (d.wordsRef.current.some(e => Math.abs(e.x - newX) < 150 && Math.abs(e.y - -50) < 100)) return;
 
   d.wordsRef.current.push({
+    id: nextWordId(),
     text, x: newX, y: -50,
     speed: (0.15 + Math.random() * 0.3) * speedMod * kdef.speedMul,
     typed: '', kind, isSpecial,
@@ -1036,6 +1107,7 @@ function updateBoss(d: LoopDeps, time: number, dt: number): void {
     const widthEst = text.length * 14;
     const xPos = (DESIGN_W - widthEst) / 2;     // dead center
     d.wordsRef.current.push({
+      id: nextWordId(),
       text, x: xPos, y: 150,
       speed: 0,
       typed: '', kind: 'normal', isSpecial: false,
@@ -1077,6 +1149,7 @@ function spawnBossAttack(d: LoopDeps, pattern: BossPattern, letters: string, tim
   if (pattern === 'single') {
     // One letter, launched from boss center, slight aim toward player.
     d.projectilesRef.current.push({
+      id: nextProjectileId(),
       x: BOSS_AIM.x + (Math.random() - 0.5) * 40,
       y: BOSS_BODY_Y,
       vx: (PLAYER.x - BOSS_AIM.x) * 0.0012 + (Math.random() - 0.5) * 0.3,
@@ -1091,6 +1164,7 @@ function spawnBossAttack(d: LoopDeps, pattern: BossPattern, letters: string, tim
     const xs = [BOSS_AIM.x - 140, BOSS_AIM.x, BOSS_AIM.x + 140];
     for (const x of xs) {
       d.projectilesRef.current.push({
+        id: nextProjectileId(),
         x, y: BOSS_BODY_Y + (Math.random() - 0.5) * 20,
         vx: 0,
         vy: 1.9,
@@ -1111,6 +1185,7 @@ function spawnBossAttack(d: LoopDeps, pattern: BossPattern, letters: string, tim
     for (let i = 0; i < count; i++) {
       const startAng = (i / count) * Math.PI * 2;
       d.projectilesRef.current.push({
+        id: nextProjectileId(),
         x: BOSS_AIM.x + Math.cos(startAng) * 50,
         y: BOSS_BODY_Y + Math.sin(startAng) * 50,
         vx: 0, vy: 0,
@@ -1134,6 +1209,7 @@ function spawnBossAttack(d: LoopDeps, pattern: BossPattern, letters: string, tim
     const text = available[Math.floor(Math.random() * available.length)];
     // Spawn from boss center, drifting toward player.
     d.wordsRef.current.push({
+      id: nextWordId(),
       text,
       x: BOSS_AIM.x - text.length * 7,       // roughly centered on boss x
       y: BOSS_BODY_Y + 10,
@@ -1169,25 +1245,86 @@ function drawBossToBg(bgCtx: CanvasRenderingContext2D, d: LoopDeps, time: number
 function updateFireballs(d: LoopDeps, ctx: CanvasRenderingContext2D, time: number, dt: number, rankId: string): void {
   for (let i = d.fireballsRef.current.length - 1; i >= 0; i--) {
     const fb = d.fireballsRef.current[i];
-    fb.progress += (fb.isSpecial ? 0.02 : 0.04) * dt;
-    fb.x = PLAYER.x + (fb.tx - PLAYER.x) * fb.progress;
-    fb.y = PLAYER.y + (fb.ty - PLAYER.y) * fb.progress;
-    const color = drawFireball(ctx, fb, d.comboRef.current, rankId);
+
+    // ── Chase mode: fireball is homing on a deflected projectile. Re-aim
+    //    every frame to the projectile's CURRENT position and move at a fixed
+    //    speed (faster than the projectile so intercept is guaranteed within
+    //    its life grace). Impact when distance < 20 OR when life runs out OR
+    //    when the target projectile has already vanished for any reason.
+    let detonate = false;
+    if (fb.chaseProjectileId !== undefined) {
+      const target = d.projectilesRef.current.find(pp => pp.id === fb.chaseProjectileId);
+      fb.life = (fb.life ?? 72) - dt;   // frame-units — matches projectile lifetime
+      if (target) {
+        fb.tx = target.x;
+        fb.ty = target.y;
+        const dx = target.x - fb.x, dy = target.y - fb.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        const speed = 16 * dt;   // px per frame-unit — beats projectile fall (~6 px) easily
+        if (dist <= Math.max(20, speed)) {
+          // Intercept: destroy the projectile and detonate here at its position.
+          fb.x = target.x;
+          fb.y = target.y;
+          const pIdx = d.projectilesRef.current.findIndex(pp => pp.id === target.id);
+          if (pIdx !== -1) d.projectilesRef.current.splice(pIdx, 1);
+          // fb.tx/ty already = target.x/y → impact FX lands on the projectile.
+          detonate = true;
+        } else {
+          fb.x += (dx / dist) * speed;
+          fb.y += (dy / dist) * speed;
+        }
+      } else {
+        // Target gone (e.g. left the arena, cleared on boss death). Self-detonate in place.
+        fb.tx = fb.x;
+        fb.ty = fb.y;
+        detonate = true;
+      }
+      if (!detonate && (fb.life ?? 0) <= 0) {
+        // Grace expired without intercept — detonate at current position.
+        fb.tx = fb.x;
+        fb.ty = fb.y;
+        detonate = true;
+      }
+      fb.progress = detonate ? 1 : 0.99;   // keep drawFireball happy; render full-bright
+    } else {
+      // ── Normal mode: classic 0..1 lerp from player to tx/ty.
+      fb.progress += (fb.isSpecial ? 0.02 : 0.04) * dt;
+      fb.x = PLAYER.x + (fb.tx - PLAYER.x) * fb.progress;
+      fb.y = PLAYER.y + (fb.ty - PLAYER.y) * fb.progress;
+    }
+
+    const color = drawFireball(ctx, fb, d.comboRef.current, rankId, time);
     const isSpear = rankId === 'S' || rankId === 'SS' || rankId === 'SSS';
-    const trailCount = fb.isSpecial ? 2 : isSpear ? 4 : Math.min(3, Math.floor(d.comboRef.current / 30) + 1);
+    const isChase = fb.chaseProjectileId !== undefined;
+    const trailCount = fb.isSpecial ? 3 : isChase ? 3 : isSpear ? 4 : Math.min(3, Math.floor(d.comboRef.current / 30) + 1);
     for (let k = 0; k < trailCount; k++) {
       if (d.particlesRef.current.length >= PARTICLE_CAP) break;
-      d.particlesRef.current.push({
-        x: fb.x, y: fb.y,
-        vx: (Math.random() - 0.5) * (isSpear ? 5 : 3),
-        vy: (Math.random() - 0.5) * (isSpear ? 5 : 3),
-        life: isSpear ? 14 : 8, maxLife: isSpear ? 14 : 8,
-        size: 3, color: fb.isSpecial ? '#ff80cc' : color,
-        isHeart: fb.isSpecial,
-      });
+      if (fb.isSpecial) {
+        // Alternate hearts with small white sparkle specks for a candy-trail.
+        const isSparkle = k > 0;
+        d.particlesRef.current.push({
+          x: fb.x + (Math.random() - 0.5) * 12,
+          y: fb.y + (Math.random() - 0.5) * 12,
+          vx: (Math.random() - 0.5) * 2.5,
+          vy: (Math.random() - 0.5) * 2.5 + 0.6,
+          life: isSparkle ? 18 : 14,
+          maxLife: isSparkle ? 18 : 14,
+          size: isSparkle ? 2 : 3,
+          color: isSparkle ? '#ffe4f1' : '#ff78bd',
+          isHeart: !isSparkle,
+        });
+      } else {
+        d.particlesRef.current.push({
+          x: fb.x, y: fb.y,
+          vx: (Math.random() - 0.5) * (isSpear ? 5 : 3),
+          vy: (Math.random() - 0.5) * (isSpear ? 5 : 3),
+          life: isSpear ? 14 : 8, maxLife: isSpear ? 14 : 8,
+          size: 3, color,
+        });
+      }
     }
-    if (fb.progress >= 1) {
-      const explosion = 8 + Math.floor(d.comboRef.current / 60);
+    if (fb.progress >= 1 || detonate) {
+      const explosion = isChase ? 14 : 8 + Math.floor(d.comboRef.current / 60);
       for (let j = 0; j < explosion * 4; j++) {
         if (d.particlesRef.current.length >= PARTICLE_CAP) break;
         d.particlesRef.current.push({
@@ -1199,16 +1336,17 @@ function updateFireballs(d: LoopDeps, ctx: CanvasRenderingContext2D, time: numbe
         });
       }
       d.shockwavesRef.current.push({
-        x: fb.tx, y: fb.ty, radius: 4, maxRadius: isSpear ? 90 : 55,
+        x: fb.tx, y: fb.ty, radius: 4, maxRadius: isSpear ? 90 : isChase ? 70 : 55,
         color: fb.isSpecial ? 'rgba(255,128,204,ALPHA)' : isSpear ? 'rgba(180,230,255,ALPHA)' : 'rgba(255,160,60,ALPHA)',
       });
-      const mag = fb.isSpecial ? 8 : isSpear ? 6 : 3;
+      const mag = fb.isSpecial ? 8 : isSpear ? 6 : isChase ? 5 : 3;
       d.shakeMagRef.current = Math.max(d.shakeMagRef.current, mag);
       d.shakeUntilRef.current = Math.max(d.shakeUntilRef.current, time + 140);
       sfxImpact(isSpear);
-      addImpactDecal(d.bgStateRef.current, fb.tx, fb.ty, isSpear);
-      // Hit a word (normal case) or damage boss.
-      if (fb.targetBoss && d.bossRef.current && !d.bossRef.current.defeated) {
+      if (!isChase) addImpactDecal(d.bgStateRef.current, fb.tx, fb.ty, isSpear);
+      // Hit a word (normal case) or damage boss. Chase fireballs never target
+      // words or bosses — they exist only to physically neutralise a projectile.
+      if (!isChase && fb.targetBoss && d.bossRef.current && !d.bossRef.current.defeated) {
         const dmg = fb.bossDamage ?? 0;
         if (dmg > 0) {
           d.bossRef.current.currentHp = Math.max(0, d.bossRef.current.currentHp - dmg);
@@ -1234,7 +1372,7 @@ function updateFireballs(d: LoopDeps, ctx: CanvasRenderingContext2D, time: numbe
           });
         }
         if (d.bossRef.current.currentHp <= 0) defeatBoss(d, time);
-      } else if (!fb.targetBoss) {
+      } else if (!isChase && !fb.targetBoss) {
         const wIdx = d.wordsRef.current.findIndex(w => Math.abs(w.x - fb.tx) < 70 && Math.abs(w.y - fb.ty) < 80);
         if (wIdx !== -1) {
           const w = d.wordsRef.current[wIdx];
@@ -1341,10 +1479,11 @@ function updateProjectiles(d: LoopDeps, ctx: CanvasRenderingContext2D, time: num
 
     drawProjectile(ctx, p, time);
 
-    // Contact with player.
+    // Contact with player. Deflected projectiles pass through harmlessly —
+    // they're already doomed and the chase fireball is on its way to destroy them.
     const dxp = PLAYER.x - p.x, dyp = PLAYER.y - p.y;
     const distP = Math.sqrt(dxp * dxp + dyp * dyp);
-    if (distP < 45) {
+    if (distP < 45 && !p.deflected) {
       if (time < d.iFramesUntilRef.current) {
         d.statsRef.current.dodgesSuccessful += 1;
         d.damageTextsRef.current.push({
@@ -1444,6 +1583,256 @@ function drawEstusChug(d: LoopDeps, ctx: CanvasRenderingContext2D, time: number)
   }
 }
 
+/** Jessyka companion driver — state machine, target selection, kiss firing,
+ *  kiss flight/arrival handling, sprite switching, spawn/despawn transitions.
+ *  Draws kisses directly on the action canvas. */
+function updateJessyka(d: LoopDeps, ctx: CanvasRenderingContext2D, time: number): void {
+  const j = d.jessykaRef.current;
+
+  // Drive kisses regardless of Jessyka's state — they live independently
+  // (e.g., finish flying even after she despawns).
+  updateJessykaKisses(d, ctx, time);
+
+  if (!j) return;
+
+  // Sprite switching (kiss ↔ idle) based on castingUntil window.
+  const img = d.jessykaImgRef.current;
+  if (img) {
+    const kissing = time < j.castingUntil;
+    const desired = kissing ? 'kiss' : 'idle';
+    if (img.dataset.state !== desired) {
+      img.src = kissing ? '/jessKISS.png' : '/jessIDLE.png';
+      img.dataset.state = desired;
+    }
+  }
+
+  // ── Spawn → active transition.
+  if (j.state === 'spawning' && time - j.spawnStart >= JESS_SPAWN_MS) {
+    j.state = 'active';
+  }
+
+  // ── Active / leaving: pick and fire on targets.
+  if (j.state === 'active' || j.state === 'leaving') {
+    // Validate current target.
+    if (j.targetId !== null) {
+      const wIdx = d.wordsRef.current.findIndex(w => w.id === j.targetId);
+      if (wIdx === -1) {
+        // Target is gone (contact damage, etc). Release and re-pick next frame.
+        j.targetId = null;
+        j.lettersFired = 0;
+      } else {
+        const w = d.wordsRef.current[wIdx];
+        // Fire next kiss when due, and we still have letters to fire.
+        if (j.lettersFired < w.text.length && time >= j.nextKissAt) {
+          fireJessykaKiss(d, j, w, time);
+        }
+        // No further action until the word fully typed + splice happens in arrival handler.
+      }
+    } else {
+      // No target — pick one, unless we're leaving (then despawn).
+      if (j.state === 'leaving') {
+        j.state = 'despawning';
+        j.despawnStart = time;
+        d.setJessykaDespawning(true);
+        spawnJessykaAngelicBurst(d, time);
+      } else {
+        tryPickJessykaTarget(d, j);
+      }
+    }
+  }
+
+  // ── Despawn → removal.
+  if (j.state === 'despawning' && time - j.despawnStart >= JESS_DESPAWN_MS) {
+    // Unclaim any lingering target (shouldn't be any, but defensive).
+    if (j.targetId !== null) {
+      const wIdx = d.wordsRef.current.findIndex(w => w.id === j.targetId);
+      if (wIdx !== -1) d.wordsRef.current[wIdx].jessykaTarget = false;
+    }
+    d.jessykaRef.current = null;
+    d.setJessykaVisible(false);
+    d.setJessykaDespawning(false);
+  }
+}
+
+/** Prefer a high-up, non-boss, non-special, non-chanter word. Falls back to any. */
+function tryPickJessykaTarget(d: LoopDeps, j: JessykaCompanion): void {
+  const candidates = d.wordsRef.current.filter(w =>
+    !w.jessykaTarget && !w.isSpecial && !w.isBossPhrase && !w.isBossAttack
+    && w.kind !== 'chanter' && w.typed.length === 0,
+  );
+  if (candidates.length === 0) return;
+  // Sort by y ASC (topmost first) — "high up" preference.
+  candidates.sort((a, b) => a.y - b.y);
+  const target = candidates[0];
+  target.jessykaTarget = true;
+  j.targetId = target.id;
+  j.lettersFired = 0;
+  j.nextKissAt = performance.now() + 200;      // small windup delay
+}
+
+/** Fire one kiss toward the current target's current position. */
+function fireJessykaKiss(d: LoopDeps, j: JessykaCompanion, w: Word, time: number): void {
+  const origin = {x: PLAYER.x + JESS_X_OFFSET, y: PLAYER.y - 12};
+  const letterIdx = j.lettersFired;
+  d.jessykaKissesRef.current.push({
+    x: origin.x, y: origin.y,
+    sx: origin.x, sy: origin.y,
+    tx: w.x + letterIdx * 16, ty: w.y - 14,
+    progress: 0,
+    wordId: w.id,
+    letterIdx,
+  });
+  j.lettersFired += 1;
+  j.nextKissAt = time + JESS_KISS_INTERVAL_MS;
+  j.castingUntil = time + 220;
+
+  // Muzzle puff at her mouth.
+  for (let k = 0; k < 8; k++) {
+    if (d.particlesRef.current.length >= PARTICLE_CAP) break;
+    const ang = Math.random() * Math.PI * 2;
+    const spd = 0.8 + Math.random() * 2;
+    d.particlesRef.current.push({
+      x: origin.x, y: origin.y,
+      vx: Math.cos(ang) * spd, vy: Math.sin(ang) * spd - 0.5,
+      life: 16, maxLife: 16, size: 2,
+      color: Math.random() < 0.5 ? '#ff80cc' : '#ffd6ec',
+    });
+  }
+}
+
+/** Advance and render kisses. On arrival, advance target-word's typed and
+ *  splice the word if fully typed. */
+function updateJessykaKisses(d: LoopDeps, ctx: CanvasRenderingContext2D, time: number): void {
+  const kisses = d.jessykaKissesRef.current;
+  for (let i = kisses.length - 1; i >= 0; i--) {
+    const k = kisses[i];
+    k.progress += (1000 / 60) / JESS_KISS_FLIGHT_MS;     // normalized to 60fps frames
+
+    // Re-home target position in case the word is still moving.
+    const wIdx = d.wordsRef.current.findIndex(w => w.id === k.wordId);
+    if (wIdx !== -1) {
+      const w = d.wordsRef.current[wIdx];
+      k.tx = w.x + k.letterIdx * 16;
+      k.ty = w.y - 14;
+    }
+
+    // Arc trajectory — linear base + small parabolic rise in the middle.
+    const t = Math.min(1, k.progress);
+    const arcLift = Math.sin(t * Math.PI) * 30;
+    k.x = k.sx + (k.tx - k.sx) * t;
+    k.y = k.sy + (k.ty - k.sy) * t - arcLift;
+
+    // Render a small pink heart.
+    drawKissHeart(ctx, k.x, k.y, 7);
+
+    if (k.progress >= 1) {
+      // Arrival — apply the letter to the target (if it still exists).
+      if (wIdx !== -1) {
+        const w = d.wordsRef.current[wIdx];
+        // Only advance if the typed-length matches what this kiss was meant to add.
+        if (w.typed.length === k.letterIdx) {
+          w.typed += w.text[k.letterIdx] ?? '';
+        }
+        // Impact sparkles.
+        for (let p = 0; p < 10; p++) {
+          if (d.particlesRef.current.length >= PARTICLE_CAP) break;
+          const ang = Math.random() * Math.PI * 2;
+          const spd = 0.5 + Math.random() * 2.5;
+          d.particlesRef.current.push({
+            x: k.x, y: k.y,
+            vx: Math.cos(ang) * spd, vy: Math.sin(ang) * spd,
+            life: 18, maxLife: 18, size: 2.5,
+            color: '#ff9dd6',
+            isHeart: Math.random() < 0.3,
+          });
+        }
+        // If target complete, consume it.
+        if (w.typed === w.text) jessykaKillTarget(d, w, wIdx, time);
+      }
+      kisses.splice(i, 1);
+    }
+  }
+}
+
+function jessykaKillTarget(d: LoopDeps, w: Word, wIdx: number, _time: number): void {
+  // Score + stats.
+  d.scoreRef.current += w.text.replace(/ /g, '').length * 15;
+  d.statsRef.current.wordsKilled += 1;
+  sfxShatter();
+  // Heart burst at word position.
+  for (let p = 0; p < 26; p++) {
+    if (d.particlesRef.current.length >= PARTICLE_CAP) break;
+    const ang = Math.random() * Math.PI * 2;
+    const spd = 1 + Math.random() * 5;
+    d.particlesRef.current.push({
+      x: w.x + w.text.length * 6, y: w.y - 10,
+      vx: Math.cos(ang) * spd, vy: Math.sin(ang) * spd - 1.5,
+      life: 28, maxLife: 28, size: 3,
+      color: Math.random() < 0.5 ? '#ff80cc' : '#ffd6ec',
+      isHeart: Math.random() < 0.5,
+    });
+  }
+  // Splice + adjust player's active index if needed.
+  d.wordsRef.current.splice(wIdx, 1);
+  if (d.activeWordRef.current !== null && d.activeWordRef.current > wIdx) {
+    d.activeWordRef.current -= 1;
+  }
+  // Clear Jessyka's target so she can pick another.
+  const j = d.jessykaRef.current;
+  if (j && j.targetId === w.id) {
+    j.targetId = null;
+    j.lettersFired = 0;
+  }
+}
+
+/** Draw a small heart at (x,y) with half-extent s. Used for kiss projectiles. */
+function drawKissHeart(ctx: CanvasRenderingContext2D, x: number, y: number, s: number): void {
+  // Soft pink glow halo.
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  const halo = ctx.createRadialGradient(x, y, 0, x, y, s * 2.2);
+  halo.addColorStop(0, 'rgba(255, 150, 210, 0.55)');
+  halo.addColorStop(1, 'rgba(255, 150, 210, 0)');
+  ctx.fillStyle = halo;
+  ctx.fillRect(x - s * 2.2, y - s * 2.2, s * 4.4, s * 4.4);
+  ctx.restore();
+  // Heart glyph (two-arc + triangle).
+  ctx.save();
+  const lobeR = s * 0.55;
+  ctx.fillStyle = '#ff78bd';
+  ctx.beginPath();
+  ctx.arc(x - lobeR * 0.7, y - s * 0.1, lobeR, Math.PI, 0, false);
+  ctx.arc(x + lobeR * 0.7, y - s * 0.1, lobeR, Math.PI, 0, false);
+  ctx.lineTo(x, y + s * 0.85);
+  ctx.closePath();
+  ctx.fill();
+  // Subtle shine.
+  ctx.fillStyle = 'rgba(255, 235, 245, 0.7)';
+  ctx.beginPath();
+  ctx.ellipse(x - s * 0.35, y - s * 0.3, s * 0.22, s * 0.14, -0.5, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
+/** Angelic ascension burst spawned when Jessyka begins despawning. */
+function spawnJessykaAngelicBurst(d: LoopDeps, _time: number): void {
+  const origin = {x: PLAYER.x + JESS_X_OFFSET, y: PLAYER.y - 20};
+  for (let i = 0; i < 40; i++) {
+    if (d.particlesRef.current.length >= PARTICLE_CAP) break;
+    const ang = -Math.PI / 2 + (Math.random() - 0.5) * 1.2;
+    const spd = 1 + Math.random() * 3.5;
+    d.particlesRef.current.push({
+      x: origin.x + (Math.random() - 0.5) * 30,
+      y: origin.y,
+      vx: Math.cos(ang) * spd * 0.4,
+      vy: Math.sin(ang) * spd,
+      life: 50, maxLife: 50, size: 2 + Math.random() * 2,
+      color: Math.random() < 0.6 ? '#ffe6f2' : '#ffd660',
+      isHeart: Math.random() < 0.4,
+    });
+  }
+}
+
 function updateParticles(d: LoopDeps, ctx: CanvasRenderingContext2D, dt: number): void {
   for (let i = d.particlesRef.current.length - 1; i >= 0; i--) {
     const p = d.particlesRef.current[i];
@@ -1479,6 +1868,7 @@ function updateWords(d: LoopDeps, ctx: CanvasRenderingContext2D, textCtx: Canvas
         w.fireCooldown = 2.4 + Math.random() * 0.8;
         const spawnX = w.x + 40, spawnY = w.y + 10;
         d.projectilesRef.current.push({
+          id: nextProjectileId(),
           x: spawnX, y: spawnY,
           vx: (PLAYER.x - spawnX) * 0.004,
           vy: 2.2 + Math.random() * 0.8,
@@ -1513,6 +1903,7 @@ function updateWords(d: LoopDeps, ctx: CanvasRenderingContext2D, textCtx: Canvas
         if (candidates.length > 0) {
           const minionText = candidates[Math.floor(Math.random() * candidates.length)];
           d.wordsRef.current.push({
+            id: nextWordId(),
             text: minionText, x: w.x + 20, y: w.y + 30,
             speed: 0.32, typed: '', kind: 'normal', isSpecial: false,
             hp: 1, fireCooldown: 0, ghostPhase: 0, scrambled: false,
@@ -1584,6 +1975,12 @@ function updateWords(d: LoopDeps, ctx: CanvasRenderingContext2D, textCtx: Canvas
         if (d.activeWordRef.current !== null) {
           if (d.activeWordRef.current === i) d.activeWordRef.current = null;
           else if (d.activeWordRef.current > i) d.activeWordRef.current -= 1;
+        }
+        // If Jessyka was targeting this word, release her target.
+        const j = d.jessykaRef.current;
+        if (j && j.targetId === w.id) {
+          j.targetId = null;
+          j.lettersFired = 0;
         }
         const baseDmg = w.isBossAttack
           ? Math.ceil(1.5 + w.text.length * 0.2)       // word-projectile: punchy
@@ -1845,36 +2242,42 @@ function handleCharLive(d: LoopDeps, rawChar: string): void {
   let progressed = false;
 
   // ── Phase 1: Projectile deflection.
-  //    Any in-flight projectile whose char matches fires a real fireball from
-  //    the player at its position + destroys it. Deflection is ATOMIC — it
-  //    credits the keystroke and a combo tick, and blocks any "wrong key"
-  //    combo reset further down. This way a successful parry never punishes.
+  //    Any in-flight projectile whose char matches is MARKED as deflected
+  //    (no longer damages the player) and a chase-fireball is spawned from
+  //    the player that actively homes in on it. The projectile keeps moving
+  //    until the fireball physically catches up and blows it apart — which
+  //    makes cause and effect visible instead of teleport-despawn. Deflection
+  //    is ATOMIC: it credits the keystroke and a combo tick, and blocks any
+  //    "wrong key" combo reset further down. A successful parry never punishes.
   let deflectedCount = 0;
   for (let i = d.projectilesRef.current.length - 1; i >= 0; i--) {
-    if (d.projectilesRef.current[i].char === char) {
-      const p = d.projectilesRef.current[i];
-      // Visible fireball from player toward the projectile.
-      d.fireballsRef.current.push({
-        x: PLAYER.x, y: PLAYER.y,
-        tx: p.x, ty: p.y,
-        progress: 0,
-        isSpecial: false,
-        targetBoss: false,
+    const p = d.projectilesRef.current[i];
+    if (p.deflected || p.char !== char) continue;
+    p.deflected = true;
+    // Chase fireball — tx/ty seeded to current projectile pos, but updateFireballs
+    // re-aims every frame via chaseProjectileId. life grace caps it at ~1.2 s.
+    d.fireballsRef.current.push({
+      x: PLAYER.x, y: PLAYER.y,
+      tx: p.x, ty: p.y,
+      progress: 0,
+      isSpecial: false,
+      targetBoss: false,
+      chaseProjectileId: p.id,
+      life: 72,    // frame-units (~1.2 s @ 60fps); hard cap to prevent runaway chase
+    });
+    // Parry sparks at the projectile's current position — immediate feedback
+    // that the input registered, even before the fireball actually connects.
+    for (let k = 0; k < 10; k++) {
+      if (d.particlesRef.current.length >= PARTICLE_CAP) break;
+      d.particlesRef.current.push({
+        x: p.x, y: p.y,
+        vx: (Math.random() - 0.5) * 4, vy: (Math.random() - 0.5) * 4,
+        life: 14, maxLife: 14, size: 2.5,
+        color: p.fromBoss ? '#ffaa55' : '#ff88ff',
       });
-      // Parry sparks at the projectile's position.
-      for (let k = 0; k < 10; k++) {
-        if (d.particlesRef.current.length >= PARTICLE_CAP) break;
-        d.particlesRef.current.push({
-          x: p.x, y: p.y,
-          vx: (Math.random() - 0.5) * 4, vy: (Math.random() - 0.5) * 4,
-          life: 14, maxLife: 14, size: 2.5,
-          color: p.fromBoss ? '#ffaa55' : '#ff88ff',
-        });
-      }
-      d.projectilesRef.current.splice(i, 1);
-      deflectedCount += 1;
-      d.statsRef.current.projectilesDeflected += 1;
     }
+    deflectedCount += 1;
+    d.statsRef.current.projectilesDeflected += 1;
   }
   const deflectedAny = deflectedCount > 0;
   if (deflectedAny) {
@@ -1911,7 +2314,7 @@ function handleCharLive(d: LoopDeps, rawChar: string): void {
         }
       }
     } else {
-      const idx = words.findIndex(w => w.text.startsWith(char));
+      const idx = words.findIndex(w => !w.jessykaTarget && w.text.startsWith(char));
       if (idx !== -1) {
         const w = words[idx];
         w.typed = char;
@@ -1987,7 +2390,31 @@ function completeWord(d: LoopDeps, w: Word, idx: number, now: number): void {
     d.blessedTimeoutRef.current = window.setTimeout(() => {
       d.isBlessedRef.current = false;
       d.blessedTimeoutRef.current = null;
+      // Signal Jessyka to leave — she'll finish her current word first.
+      if (d.jessykaRef.current && (d.jessykaRef.current.state === 'active' || d.jessykaRef.current.state === 'spawning')) {
+        d.jessykaRef.current.state = 'leaving';
+      }
     }, 10000);
+
+    // Spawn / re-spawn the Jessyka companion. If she's already present (player
+    // chained a second JESSYKA), just refresh her back to active.
+    const existing = d.jessykaRef.current;
+    if (!existing || existing.state === 'despawning') {
+      d.jessykaRef.current = {
+        state: 'spawning',
+        spawnStart: now,
+        despawnStart: 0,
+        targetId: null,
+        lettersFired: 0,
+        nextKissAt: now + JESS_SPAWN_MS + 300,
+        castingUntil: 0,
+      };
+      d.setJessykaVisible(true);
+      d.setJessykaDespawning(false);
+    } else {
+      existing.state = 'active';
+      d.setJessykaDespawning(false);
+    }
   }
 
   // Lich children on death.
@@ -2000,6 +2427,7 @@ function completeWord(d: LoopDeps, w: Word, idx: number, now: number): void {
       const childText = candidates[Math.floor(Math.random() * candidates.length)];
       used.add(childText[0]);
       d.wordsRef.current.push({
+        id: nextWordId(),
         text: childText, x: w.x + (i === 0 ? -40 : 40), y: w.y + 10,
         speed: 0.3, typed: '', kind: 'normal', isSpecial: false,
         hp: 1, fireCooldown: 0, ghostPhase: 0, scrambled: false,
@@ -2080,6 +2508,9 @@ type RenderProps = {
   hudStats: HudStats;
   bossBarStats: BossBarStats | null;
   bonfireInfo: BonfireInfo | null;
+  jessykaVisible: boolean;
+  jessykaDespawning: boolean;
+  jessykaImgRef: React.RefObject<HTMLImageElement | null>;
   finalSnapshot: FinalSnapshot | null;
   highscores: HighScore[];
   isMobileFocused: boolean;
@@ -2157,6 +2588,17 @@ function renderAppTree(p: RenderProps) {
             style={{left: (PLAYER.x + SPRITE_X_NUDGE) + 'px'}}
             draggable={false}
           />
+          {p.jessykaVisible && (
+            <img
+              ref={p.jessykaImgRef}
+              src="/jessIDLE.png"
+              data-state="idle"
+              alt="Jessyka"
+              className={`absolute bottom-4 w-32 h-32 object-contain z-20 jessyka-sprite ${p.jessykaDespawning ? 'is-despawning' : ''}`}
+              style={{left: (PLAYER.x + 130) + 'px'}}
+              draggable={false}
+            />
+          )}
           <div
             ref={p.screenFlashRef}
             aria-hidden
