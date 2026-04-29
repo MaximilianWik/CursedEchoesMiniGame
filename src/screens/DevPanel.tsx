@@ -21,6 +21,13 @@ export type DevPanelProps = {
   addCombo: (n: number) => void;
   killAllWords: () => void;
   triggerLightning: () => void;
+  // 0.3.1 — AfroMan + secret-route tooling.
+  resetSaveData: () => void;
+  spawnJessyka: () => void;
+  addZooted: () => void;
+  clearZooted: () => void;
+  skipBossIntro: () => void;
+  openBossSelect: () => void;
 };
 
 export function DevPanel(props: DevPanelProps) {
@@ -92,6 +99,7 @@ export function DevPanel(props: DevPanelProps) {
           <DevBtn onClick={() => props.jumpToBoss('taurus')}>Taurus Demon</DevBtn>
           <DevBtn onClick={() => props.jumpToBoss('ornstein')}>Ornstein</DevBtn>
           <DevBtn onClick={() => props.jumpToBoss('gwyn')}>Gwyn, Lord of Cinder</DevBtn>
+          <DevBtn onClick={() => props.jumpToBoss('afroman')}>★ AfroMan (secret)</DevBtn>
           <DevBtn onClick={props.jumpToVictory}>→ Victory screen</DevBtn>
         </Section>
 
@@ -102,6 +110,15 @@ export function DevPanel(props: DevPanelProps) {
           <DevBtn onClick={() => props.addCombo(100)}>+100 Combo</DevBtn>
           <DevBtn onClick={props.killAllWords}>Despawn words</DevBtn>
           <DevBtn onClick={props.triggerLightning}>Lightning flash</DevBtn>
+          <DevBtn onClick={props.spawnJessyka}>☽ Spawn Jessyka</DevBtn>
+          <DevBtn onClick={props.skipBossIntro}>Skip boss intro</DevBtn>
+        </Section>
+
+        <Section title="AfroMan / Secret route">
+          <DevBtn onClick={props.openBossSelect}>◆ Open boss-select</DevBtn>
+          <DevBtn onClick={props.resetSaveData}>Reset save data</DevBtn>
+          <DevBtn onClick={props.addZooted}>+1 ZOOTED</DevBtn>
+          <DevBtn onClick={props.clearZooted}>Clear ZOOTED</DevBtn>
         </Section>
 
         <p className="text-emerald-900 text-[10px] italic mt-4 text-center tracking-widest uppercase">

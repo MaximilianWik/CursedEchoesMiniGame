@@ -3,7 +3,7 @@
  * Applies changes live via the settings store.
  */
 
-import {useSettings, resetSettings} from '../game/settings';
+import {useSettings, resetSettings, resetBossSelectGate, resetHighscores} from '../game/settings';
 import {APP_VERSION} from '../version';
 
 export type SettingsScreenProps = {
@@ -12,6 +12,19 @@ export type SettingsScreenProps = {
 
 export function SettingsScreen({onClose}: SettingsScreenProps) {
   const [settings, patch] = useSettings();
+
+  function handleResetSave() {
+    // Gated behind an explicit confirm — this wipes the boss-select gate,
+    // highscores, and the per-run metadata stored in localStorage. Settings
+    // themselves (audio / accessibility) are preserved.
+    const ok = typeof window !== 'undefined'
+      ? window.confirm('Reset save data? This wipes highscores and the boss-select memory. Audio + accessibility settings are preserved.')
+      : true;
+    if (!ok) return;
+    resetBossSelectGate();
+    resetHighscores();
+  }
+
   return (
     <div
       className="absolute top-0 left-0 w-full h-full bg-black/90 flex items-center justify-center z-[60] fade-in"
@@ -59,12 +72,21 @@ export function SettingsScreen({onClose}: SettingsScreenProps) {
         </section>
 
         <div className="flex items-center justify-between">
-          <button
-            onClick={resetSettings}
-            className="text-xs text-amber-600/50 hover:text-red-400 font-[Cinzel] tracking-widest"
-          >
-            RESET TO DEFAULTS
-          </button>
+          <div className="flex flex-col gap-1">
+            <button
+              onClick={resetSettings}
+              className="text-xs text-amber-600/50 hover:text-red-400 font-[Cinzel] tracking-widest text-left"
+            >
+              RESET TO DEFAULTS
+            </button>
+            <button
+              onClick={handleResetSave}
+              className="text-xs text-amber-600/50 hover:text-red-400 font-[Cinzel] tracking-widest text-left"
+              title="Wipe highscores + boss-select memory"
+            >
+              RESET SAVE DATA
+            </button>
+          </div>
           <button
             onClick={onClose}
             className="px-8 py-2 border border-amber-600 text-amber-300 font-[Cinzel] tracking-[0.3em] hover:bg-amber-900/20"

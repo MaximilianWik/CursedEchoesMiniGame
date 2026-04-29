@@ -4,6 +4,114 @@ All notable changes to Cursed Echoes. Format loosely follows [Keep a Changelog](
 
 ---
 
+## [0.3.0] — The Secret Route: AfroMan, the rhythm boss
+
+A hidden fork in the trial. After the Undead Burg, the game pauses for a single choice: Taurus Demon (canon) or **AfroMan** (secret). The choice is remembered per save file. Picking AfroMan diverts the run into a rhythm-parry fight against a tanky, music-synced boss set to the *TallCans.mp3* track. A 20-second buildup cutscene plays the song's intro while the sprite reveals from silhouette; the drop coincides with the fight beginning. Beat-matched parries grant a PERFECT window with bonus damage. A new non-lethal ZOOTED debuff replaces contact damage from the themed "munchie" words.
+
+**Patch 0.3.0a (same release)**: `Q` estus-summon now works in **zones** too — she defaults to word-targeting when there's no boss firing projectiles. The HUD's Q-availability indicator lights up during any zone frame with ≥1 estus. Dev Console gained an `AfroMan / Secret route` section (open boss-select, reset save data, ±ZOOTED) and two general tools (`Spawn Jessyka`, `Skip boss intro`).
+
+### The fork — one-time boss select
+
+When the Undead Burg timer runs out on a fresh save, the game transitions to a new **CHOOSE THY FOE** overlay instead of directly spawning Taurus. Two panels slide in from opposite edges with a gothic filigree divider between them:
+
+- **TAURUS DEMON** — the canonical beast of the ramparts. Gothic rampart silhouette, amber torches, warm dark palette.
+- **AFROMAN** — the secret fork. Psychedelic hue-cycling scene, tall-can silhouettes, rainbow-pink aesthetic. Lore: *"He wandered in from a dimension where the First Flame is a spliff and the Kiln is a house party."*
+
+Mouse or keyboard (← → / A D / Tab + Enter) selects. Hovering reveals the panel's full lore. A soft warning at the bottom: *"This choice is remembered."*
+
+**Persistence**: two keys in localStorage — `abyss_boss_select_seen` and `abyss_boss_select_choice`. First run only shows the screen; subsequent runs route straight to the remembered boss. Clearing save data (Settings → Reset save data) wipes both.
+
+Choosing AfroMan counts as the first-boss clear for progression — the bonfire that follows advances the player to Anor Londo just like beating Taurus.
+
+### AfroMan — the 20-second buildup cutscene
+
+A layered overlay component (`src/screens/AfromanIntro.tsx`) runs for exactly 20 seconds, matching the song's intro before the drop. Pause is suppressed during the cutscene; after 5 seconds any key skips to the end.
+
+- **0-5 s** — Black fade, psychedelic background emerges, *"SECRET BOSS"* small banner at the top. Music starts at gain 0 and ramps in.
+- **5-10 s** — AfroMan silhouette fades in at center-top (backlit outline only). Banner: *"IS THAT..."*. Music climbs toward 0.5.
+- **10-16 s** — Silhouette resolves to full-colour sprite. Spotlight beams swing in from the stage speakers at the edges. Banner: *"AFROMAN ENTERS THE CYPHER"*.
+- **16-20 s** — Sprite settles, banner: *"THE SET BEGINS"*. Final crash-flash at 19.6 s.
+- **20 s** — Hand-off to `enterBoss('afroman')`. First phrase + first attack spawn immediately.
+
+### Fight mechanics — built around the song
+
+- **Beat detection** — new `AnalyserNode` on the sample's audio routing (`src/game/audio.ts`, `playMusicSample`, `subscribeBeat`). Low-band bins 1-8 drive a rolling-average beat detector. Each detected bass kick flips the boss sprite to its grooving animation and fires subscribed callbacks with the timestamp.
+- **Perfect parry** — projectiles spawned on the beat carry `onBeat: true`. Deflecting within **±150 ms** of the most recent beat triggers a `PERFECT` popup, +2 combo bonus, and **1 HP of direct damage** to AfroMan. Regular parries still just destroy the projectile with no boss damage (chase-fireball semantics are otherwise unchanged).
+- **ZOOTED debuff** — contact with "munchie" words (green-auraed, slow-falling) applies a stack (max 3) instead of dealing HP damage. Each stack tilts the screen hue / adds a wobble / breaks combo. A 4th application converts to 2 HP damage as a safety cap so standing still still loses you the fight. One stack decays per correct keystroke at ≥2.5 s interval. Visual: 1-3 cannabis-leaf icons floating above the player, greener per stack.
+- **Tall-can projectiles** — AfroMan's projectiles render as amber pill-shaped cans with ridge stripes and a dark label carrying the digit. Beat-spawned cans carry a short-lived gold ring around the can that fades over 500 ms — the readable "parry me NOW" cue.
+
+### Two new attack patterns
+
+- **`munchie`** — drops one slow munchie word from the top. Slower than regular runners so the player can read them even while dodging the boss's other threats.
+- **`beat-volley`** — spawns four tall cans at 150 ms intervals matching the four-on-the-floor kick rhythm. All four are flagged `onBeat: true` for perfect-parry scoring.
+
+### AfroMan boss definition
+
+- **HP**: 45 — the highest pool in the game, intentionally tanky so the fight can last through a meaningful portion of the song.
+- **Phrase pool**: 14 newly-written goofy-gothic lines in the song's emotional neighbourhood without quoting any lyric. Samples: *"AFROMAN DEMANDS A FORTY"*, *"LIQUOR STORE IS MY CATHEDRAL"*, *"I AM THE AFROHOLIC KING"*, *"STAGGER TOWARD THE SUN"*.
+- **Munchie word pool**: 26 common individual words in thematic range: `CHICKEN`, `FORTY`, `TALLCAN`, `LIQUOR`, `KHAKIS`, `PARTY`, `BLUNT`, `VIBES`, `CRUNK`, etc.
+- **Phases**: `single` + `munchie` (100-66%) → `single` + `volley` + `munchie` + `beat-volley` (66-33%, *"CRANK IT UP"*) → `volley` + `munchie` + `beat-volley` + `word` (33-0%, *"ENCORE TIME"*). No chanter, no caster, no wave — the fight is rhythm parry + word typing over music.
+- **Projectile speed**: 0.9 (slower than the default 1.15) so the rhythm reads cleanly.
+- **Pattern interval**: 3.5 / 3.2 / 2.8 s per phase.
+- **Souls reward**: 4,200.
+
+### Presentation
+
+- **Boss sprite** — DOM `<img>` layer rendering `/AfroManIDLE.png` (resting) or `/AfroManATTACK.png` (spawn windows, 420 ms). Slow sway by default, flips to the four-on-the-floor bop on each detected beat, jerks left/right on hit, tilts forward on death. Hue-cycling drop-shadow rim-glow over 3 s.
+- **Boss bar** — rainbow-gradient fill + name text (`bossbar-afroman` skin). Otherwise identical HP ticks and phase indicator.
+- **In-fight background** — subtle psychedelic overlay (concentric conic hue-cycling + radial haze) laid above the Burg canvas scene. Keeps words legible while signalling the genre shift.
+- **Announcements** — *"CRANK IT UP"* (P2), *"ENCORE TIME"* (P3), *"THE SET IS OVER"* (defeat), *"PARTY FOUL"* (player death).
+
+### Audio routing
+
+- New sample-playback branch in `src/game/audio.ts`: `playMusicSample('afroman')` loads `/TallCans.mp3`, routes `<audio>` → `MediaElementAudioSource` → gain → analyser → `musicGain` → master. Respects existing master/music volume sliders.
+- `setMusicSampleVolume(vol, rampMs)` for the intro's linear ramp.
+- `stopMusicSample(fade)` tears down the nodes on bonfire / death / menu.
+- `subscribeBeat(fn)` returns an unsubscribe closure. Internal rAF loop reads bass energy and fires subscribed callbacks.
+
+### Stats tracked
+
+- `secretBossChosen: boolean` — set when the player commits AfroMan from the fork.
+- `secretBossDefeated: boolean` — set when AfroMan's HP reaches 0.
+- `perfectParries: number` — tally of on-beat deflections.
+
+Both GameOver and Victory screens render a pink badge: *"★ Secret Route · AfroMan challenged"* (died) or *"★ Secret Route · AfroMan felled"* (won).
+
+### Settings — Reset save data
+
+New `RESET SAVE DATA` button in the Settings panel next to `RESET TO DEFAULTS`. Confirms before wiping:
+
+- `abyss_boss_select_seen` + `abyss_boss_select_choice` — re-open the fork.
+- `abyss_highscores` — wipe the hall of records.
+
+Audio + accessibility settings (`abyss_settings_v1`) are preserved.
+
+### Copyright boundary
+
+Only the audio file plays. **No lyrics are displayed on screen.** All 14 boss phrases are newly written for this fight in a goofy-gothic voice that riffs on the song's themes (liquor-store runs, sagging khakis, proudly-self-identified Afroholic, tipping bottles) without quoting any lyric line. Individual dictionary words in the munchie pool are thematically fitting but not copyrightable. No karaoke bar, no scrolling lyrics, no lyric-styled substitute verses.
+
+### Dev panel
+
+- New boss button: **★ AfroMan (secret)** — jumps straight into the 20 s intro cutscene so the dev can QA the reveal end-to-end without playing through the burg.
+
+### Files touched
+
+- `src/game/config.ts` — `BOSSES.afroman` def, `BOSS_PHRASES_AFROMAN` + `AFROMAN_MUNCHIES` pools, `BossPattern` expanded with `'munchie'` + `'beat-volley'`, `BossDef.silhouette` extended with `'afroman'`, `secret?: boolean`.
+- `src/game/audio.ts` — sample playback + analyser + beat detection (≈180 LOC added, no removals).
+- `src/game/stats.ts` — 3 new fields: `secretBossChosen`, `secretBossDefeated`, `perfectParries`.
+- `src/graphics.ts` — `silhouette: 'afroman'` canvas no-op branch; `Projectile.isTallCan`, `onBeat`, `spawnedAt`; `Fireball.perfectParryBonus`; `drawTallCanProjectile`; `Word.isMunchie` munchie aura.
+- `src/App.tsx` — `'boss-select'` + `'boss-intro-afroman'` phases; localStorage gate + `resetBossSelectGate`; `startBossEntryFlow`; `commitBossChoice`; ZOOTED refs + helpers (`applyZootedStack`, `tryDecayZooted`); perfect-parry digit branch; munchie contact override; AfroMan sprite DOM layer; psychedelic scene overlay; dev jump override.
+- `src/screens/BossSelect.tsx` — new.
+- `src/screens/AfromanIntro.tsx` — new.
+- `src/screens/Settings.tsx` — RESET SAVE DATA button.
+- `src/screens/GameOver.tsx`, `src/screens/Victory.tsx` — secret-route badge.
+- `src/screens/DevPanel.tsx` — AfroMan jump button.
+- `src/hud/BossBar.tsx` — `skin?: 'default' | 'afroman'` variant with rainbow fill.
+- `src/index.css` — ≈400 LOC of new styles across `bs-*`, `afi-*`, afroman boss sprite, zooted overlays, and boss-bar rainbow skin.
+- `package.json` + `src/version.ts` — 0.3.0.
+
+---
+
 ## [0.2.12] — Boss-specific lore phrases, faster Jessyka, clean summon placement, Kiln 2x buff
 
 Four tuning fixes driven by playtest feedback. The three generic phrase banks (EASY/MID/HARD) are replaced with per-boss lore-accurate banks sourced from canonical Dark Souls 1 material, so each fight now reads like its own boss instead of a shared flavour pool. Jessyka's projectile cadence and flight speed both increase 40%. Boss-summoned chanters and casters spawn center-biased below the HUD so they can't hide behind the HP bar anymore. The Kiln of the First Flame grants a 2x estus buff as a final-zone survival tool.

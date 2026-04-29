@@ -103,6 +103,38 @@ export const BOSS_PHRASES_GWYN = [
   'RESIST THE COURSE OF NATURE',
 ];
 
+/** AfroMan — secret boss. Original goofy-gothic banter riffing on tall-can,
+ *  liquor-store and dance-floor motifs. No lyric quotes: every line is
+ *  newly written for this fight. Tonally in the song's neighbourhood, not
+ *  derived from it. Keep it comedic, not mean. */
+export const BOSS_PHRASES_AFROMAN = [
+  'AFROMAN DEMANDS A FORTY',
+  'THE KHAKIS SAG EVER LOWER',
+  'PRAISE THE TALLBOY',
+  'LIQUOR STORE IS MY CATHEDRAL',
+  'NO FAME NO WEALTH NO PROBLEM',
+  'DROP THE VIBE CRYSTAL',
+  'WALK IT DOWN THE BOULEVARD',
+  'THIRST IS A LANTERN',
+  'THE BOTTLE TIPS SIDEWAYS',
+  'I AM THE AFROHOLIC KING',
+  'TWO ZIGZAGS AND A DREAM',
+  'THE PARTY HAS NO END',
+  'DANCE ALONE IF YOU MUST',
+  'STAGGER TOWARD THE SUN',
+];
+
+/** Munchie word pool — single common dictionary words in the song's thematic
+ *  neighbourhood. Not copyrightable individually. Spawned by the 'munchie'
+ *  attack pattern as slow-falling non-damaging words that apply ZOOTED on
+ *  contact instead of HP damage. */
+export const AFROMAN_MUNCHIES = [
+  'CHICKEN', 'FORTY', 'TALLCAN', 'LIQUOR', 'HOMIE', 'PARTY', 'KHAKIS',
+  'AFROHOLIC', 'STAGGER', 'CRAVING', 'BOTTLE', 'MELLOW', 'AFRO', 'CYPHER',
+  'BURGER', 'CHIPS', 'PIZZA', 'BLUNT', 'BLAZE', 'VIBES', 'DANCE', 'THIRST',
+  'CRUNK', 'DIGGY', 'COLT', 'ZIGZAG',
+];
+
 // ─────────────────────────────────────────────────────────────
 // Zones
 // ─────────────────────────────────────────────────────────────
@@ -187,7 +219,7 @@ export const ZONES: ZoneDef[] = [
 // Bosses
 // ─────────────────────────────────────────────────────────────
 
-export type BossPattern = 'single' | 'volley' | 'wave' | 'word' | 'summoner' | 'caster';
+export type BossPattern = 'single' | 'volley' | 'wave' | 'word' | 'summoner' | 'caster' | 'munchie' | 'beat-volley';
 
 export type BossPhase = {
   hpPctThreshold: number;    // entered when currentHp/maxHp ≤ this
@@ -206,9 +238,13 @@ export type BossDef = {
   introLore: string;         // shown during the intro cutscene
   maxHp: number;
   phases: BossPhase[];
-  silhouette: 'taurus' | 'ornstein' | 'gwyn';
+  silhouette: 'taurus' | 'ornstein' | 'gwyn' | 'afroman';
   themeColor: string;
   soulsReward: number;
+  /** Optional — marks this boss as the secret route's fight. Used to skip
+   *  the canvas silhouette renderer (AfroMan is a DOM sprite) and to route
+   *  to the 20 s intro cutscene + sample-playback audio path. */
+  secret?: boolean;
 };
 
 export const BOSSES: Record<string, BossDef> = {
@@ -256,6 +292,26 @@ export const BOSSES: Record<string, BossDef> = {
     silhouette: 'gwyn',
     themeColor: '#ff4810',
     soulsReward: 6000,
+  },
+  // ─── Secret boss (AfroMan) ──────────────────────────────────────
+  // Chosen from the Undead Burg fork. Big HP pool so the fight lasts through
+  // the song; non-lethal munchie words (via the ZOOTED debuff) + slow tall-
+  // can projectiles keep the pressure manageable despite the visual chaos.
+  afroman: {
+    id: 'afroman',
+    name: 'AFROMAN',
+    title: 'The Afroholic King',
+    introLore: 'He slipped through a dimensional joint and now the Burg has a bassline.',
+    maxHp: 45,
+    phases: [
+      {hpPctThreshold: 1.0,  phraseBank: BOSS_PHRASES_AFROMAN, phraseSpawnCooldown: 1.4, patterns: ['single', 'munchie'],                                patternInterval: 3.5, projectileLetters: '23456'},
+      {hpPctThreshold: 0.66, phraseBank: BOSS_PHRASES_AFROMAN, phraseSpawnCooldown: 1.2, patterns: ['single', 'volley', 'munchie', 'beat-volley'],      patternInterval: 3.2, projectileLetters: '23456', announcement: 'CRANK IT UP'},
+      {hpPctThreshold: 0.33, phraseBank: BOSS_PHRASES_AFROMAN, phraseSpawnCooldown: 1.0, patterns: ['volley', 'munchie', 'beat-volley', 'word'],         patternInterval: 2.8, projectileLetters: '23456', announcement: 'ENCORE TIME'},
+    ],
+    silhouette: 'afroman',
+    themeColor: '#ff4fb3',
+    soulsReward: 4200,
+    secret: true,
   },
 };
 

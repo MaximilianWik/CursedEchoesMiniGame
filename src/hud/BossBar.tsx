@@ -1,5 +1,7 @@
 /**
  * BossBar — shown during boss fights. Large, ominous. Name, title, HP ticks.
+ * For the AfroMan secret boss (skin: 'afroman') the bar fill + name text swap
+ * to a rainbow-gradient variant via .bossbar-afroman in index.css.
  */
 
 import {memo} from 'react';
@@ -10,15 +12,18 @@ export type BossBarStats = {
   hpPct: number;          // 0..1
   themeColor: string;     // accent color for the bar fill
   phaseIdx: number;
+  skin?: 'default' | 'afroman';
 };
 
 export const BossBar = memo(function BossBar({stats}: {stats: BossBarStats}) {
+  const isAfroman = stats.skin === 'afroman';
+  const wrapperClass = isAfroman ? 'bossbar-afroman' : '';
   return (
-    <div className="absolute top-4 left-1/2 -translate-x-1/2 z-30 pointer-events-none select-none flex flex-col items-center w-[680px] max-w-[90%]">
+    <div className={`absolute top-4 left-1/2 -translate-x-1/2 z-30 pointer-events-none select-none flex flex-col items-center w-[680px] max-w-[90%] ${wrapperClass}`}>
       <div className="text-[10px] text-amber-200/70 font-[Cinzel] tracking-[0.4em] uppercase">
         {stats.title}
       </div>
-      <div className="font-[Cinzel] text-2xl font-bold tracking-[0.25em] mb-2" style={{color: stats.themeColor, textShadow: `0 0 18px ${stats.themeColor}, 0 0 4px rgba(0,0,0,0.9)`}}>
+      <div className="bossbar-name font-[Cinzel] text-2xl font-bold tracking-[0.25em] mb-2" style={{color: stats.themeColor, textShadow: `0 0 18px ${stats.themeColor}, 0 0 4px rgba(0,0,0,0.9)`}}>
         {stats.name}
       </div>
       <div
@@ -29,7 +34,7 @@ export const BossBar = memo(function BossBar({stats}: {stats: BossBarStats}) {
         }}
       >
         <div
-          className="h-full transition-all duration-300"
+          className="bossbar-fill h-full transition-all duration-300"
           style={{
             width: `${Math.max(0, Math.min(100, stats.hpPct * 100))}%`,
             background: `linear-gradient(90deg, #3a0606 0%, ${stats.themeColor} 100%)`,
