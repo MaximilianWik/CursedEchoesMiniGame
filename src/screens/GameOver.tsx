@@ -137,7 +137,7 @@ export function GameOverScreen(props: GameOverScreenProps) {
       <div className="ce-died-vignette" aria-hidden />
 
       {/* Hero — YOU DIED reveal + optional secret-route badge */}
-      <div className="relative flex flex-col items-center mt-8 mb-3">
+      <div className="relative flex flex-col items-center mt-4 mb-2">
         <div className="ce-died-smoke" aria-hidden />
         <div className="ce-died">YOU DIED</div>
         {(stats.secretBossChosen || stats.secretBossDefeated) && (
@@ -258,41 +258,43 @@ export function GameOverScreen(props: GameOverScreenProps) {
         <canvas ref={graphRef} className="go-graph-canvas" />
       </div>
 
-      {/* Secret-password gate — framed, clearly an affordance now. */}
-      <form
-        className="go-secret-gate slide-in"
-        style={{animationDelay: '2900ms'}}
-        onSubmit={(e) => {
-          e.preventDefault();
-          if (secretPassword.toUpperCase() === 'ILOVEMYGF') onUnlock();
-          else {
-            setPasswordError(true);
-            window.setTimeout(() => setPasswordError(false), 500);
-            setSecretPassword('');
-          }
-        }}
-      >
-        <span className="go-secret-gate-label">Secret Password</span>
-        <input
-          type="password"
-          value={secretPassword}
-          onChange={(e) => setSecretPassword(e.target.value)}
-          className={`go-secret-gate-input ${passwordError ? 'is-error animate-[shake_0.5s_ease-in-out]' : ''}`}
-          placeholder="..."
-          aria-label="Secret password"
-        />
-      </form>
+      {/* Actions row — secret-password gate + Try Again, side-by-side so
+          both fit inside the 768 px frame regardless of the secret-route
+          badge's presence. */}
+      <div className="go-actions-row slide-in" style={{animationDelay: '2900ms'}}>
+        <form
+          className="go-secret-gate"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (secretPassword.toUpperCase() === 'ILOVEMYGF') onUnlock();
+            else {
+              setPasswordError(true);
+              window.setTimeout(() => setPasswordError(false), 500);
+              setSecretPassword('');
+            }
+          }}
+        >
+          <span className="go-secret-gate-label">Secret</span>
+          <input
+            type="password"
+            value={secretPassword}
+            onChange={(e) => setSecretPassword(e.target.value)}
+            className={`go-secret-gate-input ${passwordError ? 'is-error animate-[shake_0.5s_ease-in-out]' : ''}`}
+            placeholder="..."
+            aria-label="Secret password"
+          />
+        </form>
 
-      {/* Primary CTA */}
-      <button
-        onClick={onTryAgain}
-        className="go-try-again opacity-0 fade-in"
-        style={{animationDelay: '3200ms'}}
-      >
-        <span className="go-try-again-sigil">◈</span>
-        Try Again
-        <span className="go-try-again-sigil">◈</span>
-      </button>
+        <button
+          onClick={onTryAgain}
+          className="go-try-again"
+          autoFocus
+        >
+          <span className="go-try-again-sigil">◈</span>
+          Try Again
+          <span className="go-try-again-sigil">◈</span>
+        </button>
+      </div>
 
       {/* Dev button — bottom-left, unchanged role */}
       <button

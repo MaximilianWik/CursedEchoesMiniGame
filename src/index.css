@@ -177,7 +177,7 @@
     position: relative;
     font-family: 'Cinzel', serif;
     font-weight: 700;
-    font-size: 92px;
+    font-size: 80px;
     line-height: 1;
     color: #8b0000;
     letter-spacing: 0.15em;
@@ -517,8 +517,8 @@
 
   /* Combo-over-time graph — banner below the columns. */
   .go-graph-frame {
-    margin-top: 14px;
-    padding: 10px 16px 6px;
+    margin-top: 10px;
+    padding: 8px 16px 6px;
     border: 1px solid rgba(180, 120, 60, 0.28);
     background: linear-gradient(180deg, rgba(20, 10, 12, 0.7), rgba(10, 4, 6, 0.75));
     box-shadow: 0 0 18px rgba(0, 0, 0, 0.5), inset 0 0 22px rgba(40, 12, 8, 0.35);
@@ -548,13 +548,24 @@
     border: 1px solid rgba(180, 120, 60, 0.15);
   }
 
-  /* Secret-password gate — framed field instead of a floating input. */
-  .go-secret-gate {
+  /* Actions row — secret-password gate + Try Again button side-by-side.
+     Anchors to the bottom of the vertical stack so both always fit inside
+     the 768 px frame regardless of whether the secret-route badge pushed
+     the layout taller. */
+  .go-actions-row {
     margin-top: 14px;
     display: flex;
     align-items: center;
-    gap: 14px;
-    padding: 6px 16px;
+    gap: 24px;
+    padding: 0 16px;
+  }
+
+  /* Secret-password gate — framed field instead of a floating input. */
+  .go-secret-gate {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 6px 14px;
     border-top: 1px solid rgba(255, 68, 68, 0.3);
     border-bottom: 1px solid rgba(255, 68, 68, 0.3);
   }
@@ -572,11 +583,11 @@
     border: 1px solid rgba(255, 68, 68, 0.5);
     color: #ffc0c0;
     font-family: "EB Garamond", serif;
-    font-size: 14px;
+    font-size: 13px;
     letter-spacing: 0.3em;
     text-align: center;
-    padding: 6px 14px;
-    width: 200px;
+    padding: 5px 12px;
+    width: 160px;
     outline: none;
     transition: border-color 180ms, box-shadow 180ms;
     box-shadow: 0 0 14px rgba(255, 40, 40, 0.2), inset 0 0 8px rgba(80, 0, 0, 0.4);
@@ -598,32 +609,38 @@
     50%      { opacity: 1;    text-shadow: 0 0 14px rgba(255, 80, 80, 0.9); }
   }
 
-  /* Try Again CTA — gothic-framed with flanking sigils. */
+  /* Try Again CTA — gothic-framed with flanking sigils. Sits in the
+     actions row next to the secret gate so no separate margin-top. */
   .go-try-again {
-    margin-top: 14px;
     display: inline-flex;
     align-items: center;
-    gap: 18px;
-    padding: 11px 40px;
+    gap: 16px;
+    padding: 9px 34px;
     border: 1px solid rgba(220, 160, 80, 0.7);
     background:
       linear-gradient(180deg, rgba(60, 26, 14, 0.7), rgba(20, 8, 6, 0.75));
     font-family: "Cinzel", serif;
     font-weight: 700;
-    font-size: 14px;
-    letter-spacing: 0.45em;
+    font-size: 13px;
+    letter-spacing: 0.4em;
     text-transform: uppercase;
     color: #ffe2a0;
     text-shadow: 0 0 10px rgba(255, 180, 80, 0.6);
     box-shadow: 0 0 22px rgba(255, 140, 60, 0.22), inset 0 0 14px rgba(255, 160, 60, 0.08);
     cursor: pointer;
-    transition: border-color 200ms ease, box-shadow 200ms ease, color 200ms ease, background 200ms ease;
+    transition: border-color 200ms ease, box-shadow 200ms ease, color 200ms ease, background 200ms ease, transform 160ms ease;
   }
   .go-try-again:hover {
     border-color: #ffc470;
     color: #fff2d0;
     background: linear-gradient(180deg, rgba(90, 44, 20, 0.75), rgba(30, 12, 8, 0.75));
     box-shadow: 0 0 36px rgba(255, 180, 80, 0.45), inset 0 0 22px rgba(255, 180, 80, 0.12);
+    transform: translateY(-1px);
+  }
+  .go-try-again:focus-visible {
+    outline: none;
+    border-color: #fff2d0;
+    box-shadow: 0 0 48px rgba(255, 200, 100, 0.55), inset 0 0 20px rgba(255, 180, 80, 0.14);
   }
   .go-try-again-sigil {
     color: #ffc470;
