@@ -295,8 +295,9 @@ export const BOSSES: Record<string, BossDef> = {
   },
   // ─── Secret boss (AfroMan) ──────────────────────────────────────
   // Chosen from the Undead Burg fork. Big HP pool so the fight lasts through
-  // the song; non-lethal munchie words (via the ZOOTED debuff) + slow tall-
-  // can projectiles keep the pressure manageable despite the visual chaos.
+  // the song; ZOOTED passively fills the smoke-soaked arena over time
+  // (10 s per stack, no decay — see applyZootedStack / zooted timer in App.tsx).
+  // Only AfroMan's themed words spawn — no generic GOTHIC_WORDS runners.
   afroman: {
     id: 'afroman',
     name: 'AFROMAN',
@@ -306,7 +307,7 @@ export const BOSSES: Record<string, BossDef> = {
     phases: [
       {hpPctThreshold: 1.0,  phraseBank: BOSS_PHRASES_AFROMAN, phraseSpawnCooldown: 1.4, patterns: ['single', 'munchie'],                                patternInterval: 3.5, projectileLetters: '23456'},
       {hpPctThreshold: 0.66, phraseBank: BOSS_PHRASES_AFROMAN, phraseSpawnCooldown: 1.2, patterns: ['single', 'volley', 'munchie', 'beat-volley'],      patternInterval: 3.2, projectileLetters: '23456', announcement: 'CRANK IT UP'},
-      {hpPctThreshold: 0.33, phraseBank: BOSS_PHRASES_AFROMAN, phraseSpawnCooldown: 1.0, patterns: ['volley', 'munchie', 'beat-volley', 'word'],         patternInterval: 2.8, projectileLetters: '23456', announcement: 'ENCORE TIME'},
+      {hpPctThreshold: 0.33, phraseBank: BOSS_PHRASES_AFROMAN, phraseSpawnCooldown: 1.0, patterns: ['volley', 'munchie', 'beat-volley'],                patternInterval: 2.8, projectileLetters: '23456', announcement: 'ENCORE TIME'},
     ],
     silhouette: 'afroman',
     themeColor: '#ff4fb3',

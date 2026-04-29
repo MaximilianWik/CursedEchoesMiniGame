@@ -50,6 +50,7 @@ import {SecretAskScreen, SecretLoveScreen, type SecretHeart} from './screens/Sec
 import {DevPanel} from './screens/DevPanel';
 import {BossSelect} from './screens/BossSelect';
 import {AfromanIntro} from './screens/AfromanIntro';
+import {AfromanArena} from './screens/AfromanArena';
 
 // ─────────────────────────────────────────────────────────────
 // Constants
@@ -187,11 +188,11 @@ const BOSS_CASTER_COOLDOWN_MS = 18000;
 const PERFECT_PARRY_WINDOW_MS = 150;
 /** AfroMan — HP damage dealt to the boss on a perfect parry. */
 const PERFECT_PARRY_BOSS_DMG = 1;
-/** Seconds between automatic ZOOTED stack decays while the player is actively
- *  typing correctly. 0 stacks = clean; 3 stacks = maximum disorientation. */
-const ZOOTED_DECAY_INTERVAL_SEC = 2.5;
-/** Max ZOOTED stacks. A 4th application (would be) converts to 2 HP damage
- *  as a safety cap so the debuff can't trivialise the fight. */
+/** AfroMan — time between automatic ZOOTED stack increments. The arena
+ *  slowly fills with smoke regardless of player action; +1 stack per
+ *  interval up to ZOOTED_CAP. Stacks are permanent — no decay. */
+const ZOOTED_TICK_INTERVAL_SEC = 10;
+/** Max ZOOTED stacks. Once at 3 the timer stops incrementing. */
 const ZOOTED_CAP = 3;
 
 type BonfireInfo = {
@@ -532,7 +533,12 @@ export default function App() {
    *   - the dev panel indirectly via jumpToBoss
    *
    *  First time: routes to the 'boss-select' phase so the player can choose.
-   *  Subsequent runs: remembered choice → enterBoss directly. */
+   *  Subsequent runs: remembered choice → replay the same cutscene/music
+   *    path the first commit went through (afroman → 20 s intro cutscene
+   *    phase, taurus → default canvas boss intro via enterBoss). The
+   *    original bug shipped in 0.3.0 routed remembered 'afroman' straight
+   *    through enterBoss, which assumes the intro already ran — players
+   *    got dropped into the fight with no music and no reveal. */
   const startBossEntryFlow = useCallback((bossIdFromZone: string) => {
     // Only the burg boss is subject to the fork. Later bosses (ornstein, gwyn)
     // go straight through.
@@ -542,7 +548,21 @@ export default function App() {
     }
     const remembered = getRememberedBossChoice();
     if (remembered) {
-      enterBoss(remembered);
+      // Replay the remembered choice with the full reveal path — same as
+      // if the player had just committed from the BossSelect screen. We
+      // inline the two branches (instead of calling commitBossChoice) so
+      // we don't have to hoist that callback's declaration above this one.
+      statsRef.current.secretBossChosen = remembered === 'afroman';
+      if (remembered === 'afroman') {
+        // 20 s intro cutscene overlay handles music fade-in + sprite reveal.
+        wordsRef.current = [];
+        projectilesRef.current = [];
+        activeWordRef.current = null;
+        phaseRef.current = 'boss-intro-afroman';
+        setPhase('boss-intro-afroman');
+      } else {
+        enterBoss('taurus');
+      }
       return;
     }
     // First encounter — clear the arena, show the fork overlay.
@@ -736,15 +756,18 @@ export default function App() {
     bossAnnouncementRef.current = {text: 'DEV · LOVE SUMMONED', life: 120, color: '#ffb8d8'};
     sfxJessykaSummon();
   }, []);
-  /** Nudge ZOOTED +1. Caps at ZOOTED_CAP — no overflow-to-HP-damage here
-   *  since this is a dev toggle, not an in-fight contact event. */
+  /** Nudge ZOOTED +1. Caps at ZOOTED_CAP. The timer reschedules so the next
+   *  passive tick follows the dev bump by the full ZOOTED_TICK_INTERVAL_SEC. */
   const devAddZooted = useCallback(() => {
     const next = Math.min(ZOOTED_CAP, zootedStacksRef.current + 1);
     zootedStacksRef.current = next;
-    zootedDecayAtRef.current = performance.now() + ZOOTED_DECAY_INTERVAL_SEC * 1000;
+    zootedDecayAtRef.current = next >= ZOOTED_CAP
+      ? 0
+      : performance.now() + ZOOTED_TICK_INTERVAL_SEC * 1000;
     setZootedLevel(next as 0 | 1 | 2 | 3);
   }, []);
-  /** Clear ZOOTED → 0. */
+  /** Clear ZOOTED → 0. Resets the timer so the next passive tick is a full
+   *  interval away (you get a fresh clean window). */
   const devClearZooted = useCallback(() => {
     zootedStacksRef.current = 0;
     zootedDecayAtRef.current = 0;
@@ -1505,6 +1528,13 @@ function updateBoss(d: LoopDeps, time: number, dt: number): void {
     }
     b.nextAttackAt = time + phase.patternInterval * 1000;
   }
+
+  // AfroMan — tick the passive ZOOTED timer. 10 s per stack, capped at 3,
+  // no decay. This runs even when the player is perfectly safe — the smoke
+  // is the environment, not a consequence of contact.
+  if (b.def.id === 'afroman') {
+    tickZooted(d, time);
+  }
 }
 
 /** Spawn a wave of boss projectiles following the given pattern. Returns
@@ -1610,7 +1640,13 @@ function spawnBossAttack(d: LoopDeps, pattern: BossPattern, _letters: string, ti
   } else if (pattern === 'word') {
     // Fire a multi-letter WORD as a single falling projectile. Damages player
     // on contact; typing it destroys it (but doesn't damage the boss).
-    const wordPool = ['DEATH', 'DOOM', 'WITHER', 'RUIN', 'ASHES', 'CURSE', 'PYRE', 'DUSK', 'ABYSS', 'BLIGHT'];
+    // AfroMan never uses this pattern in his phase config — but if a dev
+    // cheat or future config change routes it here, we fall back to his
+    // munchie pool so the generic gothic wordPool can never spawn in a
+    // rhythm fight and break the thematic vocabulary.
+    const isAfromanFallback = d.bossRef.current?.def.id === 'afroman';
+    const genericPool = ['DEATH', 'DOOM', 'WITHER', 'RUIN', 'ASHES', 'CURSE', 'PYRE', 'DUSK', 'ABYSS', 'BLIGHT'];
+    const wordPool = isAfromanFallback ? AFROMAN_MUNCHIES : genericPool;
     const existingFirstLetters = new Set(d.wordsRef.current.map(w => w.text[0]));
     const available = wordPool.filter(w => !existingFirstLetters.has(w[0]));
     if (available.length === 0) return false;
@@ -1626,6 +1662,7 @@ function spawnBossAttack(d: LoopDeps, pattern: BossPattern, _letters: string, ti
       hp: 1, fireCooldown: 0, ghostPhase: 0,
       scrambled: false, stationaryX: 0, spawnTime: time,
       isBossAttack: true,
+      isMunchie: isAfromanFallback || undefined,
     });
     // Telegraph.
     triggerLightning(d.bgStateRef.current, time);
@@ -2892,13 +2929,10 @@ function updateWords(d: LoopDeps, ctx: CanvasRenderingContext2D, textCtx: Canvas
           j.targetId = null;
           j.lettersFired = 0;
         }
-        // AfroMan munchie — contact applies ZOOTED instead of HP damage.
-        // A 4th stack (would be) converts to 2 HP damage as a safety cap so
-        // a player who just stands still can still lose the fight.
-        if (w.isMunchie) {
-          applyZootedStack(d, time);
-          continue;
-        }
+        // 0.3.1 — munchies no longer apply ZOOTED on contact. ZOOTED is
+        // purely timer-based (tickZooted in the boss loop). A munchie
+        // contact just deals regular HP damage like any other boss attack
+        // word — avoiding them is still valuable.
         const baseDmg = w.isBossAttack
           ? Math.ceil(1.5 + w.text.length * 0.2)       // word-projectile: punchy
           : (() => {
@@ -3289,47 +3323,33 @@ function tryJessykaGraceShield(d: LoopDeps, time: number): boolean {
   return true;
 }
 
-/** AfroMan — apply one ZOOTED stack. Clamped to ZOOTED_CAP; a 4th (would be)
- *  application converts to 2 HP damage instead so the debuff can't be fully
- *  soaked. Also resets the decay clock so the stack doesn't immediately start
- *  ticking down (the player needs to type a correct letter to trigger decay).
- */
-function applyZootedStack(d: LoopDeps, time: number): void {
-  const current = d.zootedStacksRef.current;
-  if (current >= ZOOTED_CAP) {
-    // Overflow safety — take real damage instead of stacking beyond 3.
-    if (!isInvulnerable(d, time)) {
-      applyDamageToPlayer(d, 2, time);
-    }
+/** AfroMan — advance the ZOOTED timer. Increments one stack every
+ *  ZOOTED_TICK_INTERVAL_SEC seconds of fight time, capped at ZOOTED_CAP.
+ *  Stacks are permanent in 0.3.1+ — the only way out of ZOOTED is ending
+ *  the fight (defeat or death).
+ *
+ *  `d.zootedDecayAtRef` is kept as the ref name for schema stability; its
+ *  semantics here are "performance.now() of the next ZOOTED tick". */
+function tickZooted(d: LoopDeps, time: number): void {
+  if (d.zootedStacksRef.current >= ZOOTED_CAP) return;
+  // On first tick after the fight starts, seed the deadline.
+  if (d.zootedDecayAtRef.current === 0) {
+    d.zootedDecayAtRef.current = time + ZOOTED_TICK_INTERVAL_SEC * 1000;
     return;
   }
-  d.zootedStacksRef.current = current + 1;
-  d.zootedDecayAtRef.current = time + ZOOTED_DECAY_INTERVAL_SEC * 1000;
-  d.setZootedLevel((current + 1) as 0 | 1 | 2 | 3);
+  if (time < d.zootedDecayAtRef.current) return;
+  const next = Math.min(ZOOTED_CAP, d.zootedStacksRef.current + 1);
+  d.zootedStacksRef.current = next;
+  d.zootedDecayAtRef.current = next >= ZOOTED_CAP
+    ? 0                                                 // halt — capped
+    : time + ZOOTED_TICK_INTERVAL_SEC * 1000;
+  d.setZootedLevel(next as 0 | 1 | 2 | 3);
   d.damageTextsRef.current.push({
     x: PLAYER.x, y: PLAYER.y - 60,
-    value: 'ZOOTED x' + (current + 1), life: 60, maxLife: 60,
+    value: 'ZOOTED x' + next, life: 80, maxLife: 80,
     color: '#9be69e',
   });
-  // Combo break on ZOOTED — the player's headspace is scrambled.
-  d.comboRef.current = 0;
-  d.bossAnnouncementRef.current = {text: 'ZOOTED', life: 80, color: '#9be69e'};
-}
-
-/** Decay one ZOOTED stack after ZOOTED_DECAY_INTERVAL_SEC of clean typing. */
-function tryDecayZooted(d: LoopDeps, time: number): void {
-  if (d.zootedStacksRef.current <= 0) return;
-  if (time < d.zootedDecayAtRef.current) return;
-  const next = Math.max(0, d.zootedStacksRef.current - 1);
-  d.zootedStacksRef.current = next;
-  d.setZootedLevel(next as 0 | 1 | 2 | 3);
-  d.zootedDecayAtRef.current = next > 0 ? time + ZOOTED_DECAY_INTERVAL_SEC * 1000 : 0;
-  if (next === 0) {
-    d.damageTextsRef.current.push({
-      x: PLAYER.x, y: PLAYER.y - 60,
-      value: 'CLEAR', life: 45, maxLife: 45, color: '#cfffcf',
-    });
-  }
+  d.bossAnnouncementRef.current = {text: 'ZOOTED', life: 100, color: '#9be69e'};
 }
 
 /** AfroMan — gold parry ring around the player that breathes with each beat.
@@ -3760,8 +3780,8 @@ function handleCharLive(d: LoopDeps, rawChar: string): void {
   if (progressed) {
     sfxCast(d.comboRef.current);
     if (d.comboRef.current > d.maxComboRef.current) d.maxComboRef.current = d.comboRef.current;
-    // Decay ZOOTED one step on any correct keystroke in an AfroMan fight.
-    tryDecayZooted(d, now);
+    // 0.3.1 — ZOOTED no longer decays on correct keystrokes. It's purely a
+    // timer-based buildup during the AfroMan fight (see tickZooted).
     // Rank up?
     let rankIdx = 0;
     for (let i = COMBO_RANKS.length - 1; i >= 0; i--) {
@@ -4059,9 +4079,11 @@ function renderAppTree(p: RenderProps) {
             visually pass OVER HUD elements instead of behind them. */}
         <div ref={p.shakeRef} className="absolute top-0 left-0 w-full h-full will-change-transform">
           <canvas ref={p.bgCanvasRef} width={DESIGN_W} height={DESIGN_H} className="absolute top-0 left-0 z-0" />
-          {/* AfroMan psychedelic scene overlay — z=1 over the canvas bg. */}
+          {/* AfroMan custom arena — replaces the generic bg during his fight. */}
           {p.afromanBossPhase !== 'hidden' && (
-            <div className="absolute inset-0 z-[1] pointer-events-none afroman-scene-overlay" aria-hidden />
+            <div className="absolute inset-0 z-[1] pointer-events-none">
+              <AfromanArena zootedLevel={p.zootedLevel} grooving={p.afromanGrooving} />
+            </div>
           )}
           <canvas ref={p.canvasRef} width={DESIGN_W} height={DESIGN_H} className="absolute top-0 left-0 z-10" />
           <img
