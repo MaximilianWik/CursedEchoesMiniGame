@@ -4,6 +4,63 @@ All notable changes to Cursed Echoes. Format loosely follows [Keep a Changelog](
 
 ---
 
+## [0.3.4] — Open dev console; Jessyka on the AfroMan stage
+
+Two small quality-of-life tweaks.
+
+### Dev Console no longer password-gated
+
+The `developer` password prompt is removed. The panel opens directly — no entry form, no shake-on-wrong, no `DEV_PASSWORD` constant. The gate was friction without real protection (anyone could read it from source), and the console is meant for QA + exploration. Still reachable the same two ways as before: the ◇ Dev sigil in the menu's bottom-left corner, or the `` ` `` keyboard shortcut. Menu tooltip updated from "Dev console (password-gated) — shortcut: `" to "Dev console — shortcut: `".
+
+### Jessyka dances on the AfroMan stage
+
+Added a purely visual Jessyka perched on top of the left speaker stack in the AfroMan arena. No hitbox, no targeting, no gameplay interaction — she's a stage-energy prop, like the Hennessy bottles and the disco ball. Rendered as an `<img src="/jessIDLE.png">` inside `AfromanArena.tsx` with `z-index: 2` (below the action canvas at `z-10` so words still render over her).
+
+Two stacked CSS animations drive her dance:
+
+- **`afarDancerBop`** (1.4 s) — up-down bob with a squash-stretch on the scaleY to read as weight-shifting.
+- **`afarDancerSway`** (2.2 s) — rotate ±5° with a small horizontal translate so she sways her hips. The two animations have deliberately different durations so the composite motion never perfectly loops, which keeps her from looking robotic.
+- **`afarDancerPop`** (0.24 s) — brightens her pink drop-shadow on each detected bass kick, fired by toggling the `.is-grooving` class (same signal the boss sprite uses). Caps out automatically after 240 ms to match the debounce on `setAfromanGrooving`.
+
+Positioned at `bottom: 46 %` / `left: 21 px` so she sits centered on top of the left speaker cabinet. The companion Jessyka (real gameplay one) spawns at `PLAYER.x + JESS_X_OFFSET` which is ~592 px from the left — no visual overlap with the dancer at the stage edge.
+
+### Files touched
+
+- `src/screens/DevPanel.tsx` — rewritten without the password branch; `useState` for `unlocked` / `input` / `error` removed; `DEV_PASSWORD` constant retired.
+- `src/screens/Menu.tsx` — tooltip on the ◇ Dev button drops the "(password-gated)" mention.
+- `src/screens/AfromanArena.tsx` — new `<div class="afar-dancer">` wrapping a `jessIDLE.png` image; wired to the same `grooving` prop as the speaker thumping.
+- `src/index.css` — new `.afar-dancer` styles + `afarDancerBop` / `afarDancerSway` / `afarDancerPop` keyframes.
+- `package.json` + `src/version.ts` — 0.3.4.
+
+---
+
+## [0.3.3] — Uncuttable intro, longer attack pose, full-frame psychedelic backdrop
+
+Three small presentation fixes from playtest.
+
+### AfroMan intro no longer skippable
+
+The 20-second cutscene is now a single uninterruptible beat — the music and the drop always land together. The skip handler + "Press any key to skip" hint are removed; stray keystrokes are swallowed by the global router (phase !== 'zone' | 'boss' → early return). The `SKIP_ALLOWED_AFTER_MS` constant is retired.
+
+### AfroMan attack pose held 3× longer
+
+`AfroManATTACK.png` previously swapped back to `AfroManIDLE.png` after 420 ms, which at typical spawn cadences (2.8–3.5 s between attacks) read as a one-frame flicker. Bumped to **1200 ms** so the pose actually registers as a visible telegraph. Matches the pacing Jessyka's idle↔kiss swap uses on the other bosses.
+
+### Rotating backdrop fully covers the frame
+
+`.afi-bg` was rotating via `transform: rotate` while sized to `inset: 0` (= parent dimensions). A rotated rectangle only covers its own axis-aligned bounding area when it's ≥ √2 ≈ 1.42× the parent — at 1.0× the corners swing out of view and triangular gaps appear, giving the "rotating square" look in the screenshot.
+
+Fix: overscaled the backdrop to **200 % × 200 % centered at -50 %, -50 %** so even the spin's worst-case rotation still covers the entire frame. No other animation needed changes — the AfroMan arena's spinning elements (`.afar-beam` anchored at top-center, `.afar-disco-ball` spinning in place, `.afar-disco-reflections` already at `inset: -200 %`) were all correctly oversized or self-contained.
+
+### Files touched
+
+- `src/screens/AfromanIntro.tsx` — skip handler + hint removed; `SKIP_ALLOWED_AFTER_MS` retired.
+- `src/App.tsx` — `spawnBossAttack`'s AfroMan attack-pose timeout bumped 420 ms → 1200 ms.
+- `src/index.css` — `.afi-bg` resized to 200 % / -50 % origin; `.afi-skip-hint` class kept (harmlessly unused) in case of rollback.
+- `package.json` + `src/version.ts` — 0.3.3.
+
+---
+
 ## [0.3.2] — Boss-select fork always shows; last pick pre-focused
 
 Follow-up fix from playtest: the fork screen at the end of Undead Burg was only appearing on the first-ever clear, then routing silently to the remembered choice on every subsequent run. That made replaying the opposite boss impossible without wiping save data through Settings / Dev. The design now respects the player's agency every run.

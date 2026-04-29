@@ -1,8 +1,12 @@
 /**
  * AfromanIntro — 20 s cutscene overlay before the secret boss fight.
  *
- * Real implementation (sprite silhouette reveal, music fade-in, text beats)
- * is wired in step 4 of the 0.3.0 plan. This file acts as the mount point.
+ * Plays the song's 20-second intro buildup over a layered reveal of the
+ * AfroMan sprite (silhouette → full colour) with staged text banners. Hands
+ * off to enterBoss('afroman') when the timer hits INTRO_MS.
+ *
+ * 0.3.3 — no skip. The cutscene is a single uninterruptible beat so the
+ * music and the drop always land together.
  */
 
 import {useEffect, useRef, useState} from 'react';
@@ -21,8 +25,6 @@ const BEATS: {at: number; text: string; small?: boolean}[] = [
 ];
 
 const INTRO_MS = 20000;
-/** After this many ms the player is allowed to skip with any key or Escape. */
-const SKIP_ALLOWED_AFTER_MS = 5000;
 
 export function AfromanIntro({onComplete}: AfromanIntroProps) {
   const startAt = useRef(performance.now());
@@ -60,32 +62,10 @@ export function AfromanIntro({onComplete}: AfromanIntroProps) {
     return () => cancelAnimationFrame(raf);
   }, [onComplete]);
 
-  // Skip handler — any key / click after SKIP_ALLOWED_AFTER_MS.
-  useEffect(() => {
-    const trySkip = () => {
-      if (completed.current) return;
-      if (performance.now() - startAt.current < SKIP_ALLOWED_AFTER_MS) return;
-      completed.current = true;
-      // Fast-forward the music by setting the sample's currentTime to the end
-      // of the buildup. The audio layer exposes this via playMusicSample's
-      // returned object; simplest: just let the sample keep playing — the
-      // fight starts at the drop naturally if we align, but skipping means we
-      // accept a small desync. Acceptable per the plan.
-      onComplete();
-    };
-    const onKey = (e: KeyboardEvent) => {
-      // Ignore purely modifier keys.
-      if (e.key === 'Shift' || e.key === 'Control' || e.key === 'Alt' || e.key === 'Meta') return;
-      e.preventDefault();
-      trySkip();
-    };
-    window.addEventListener('keydown', onKey, {capture: true});
-    window.addEventListener('click', trySkip);
-    return () => {
-      window.removeEventListener('keydown', onKey, {capture: true});
-      window.removeEventListener('click', trySkip);
-    };
-  }, [onComplete]);
+  // 0.3.3 — no skip handler. Any key/click during the cutscene is swallowed
+  // by the global keydown router (phase !== 'zone' | 'boss' → early return)
+  // so nothing leaks through to the fight. The music and the reveal land
+  // together, every time.
 
   // Phase progression — each stage enables specific visual layers.
   const phase =
@@ -100,12 +80,10 @@ export function AfromanIntro({onComplete}: AfromanIntroProps) {
   // Final intensity ramp for the psychedelic background (0..1).
   const psychT = Math.min(1, elapsed / INTRO_MS);
 
-  // Canskip flag for the hint.
-  const canSkip = elapsed >= SKIP_ALLOWED_AFTER_MS;
-
   return (
     <div className="absolute inset-0 z-[60] overflow-hidden afi-root" data-phase={phase}>
-      {/* Psychedelic background — concentric hue-cycling rings. */}
+      {/* Psychedelic background — concentric hue-cycling rings. Oversized
+          so the rotating element always covers the frame; see .afi-bg CSS. */}
       <div
         className="afi-bg"
         style={{
@@ -154,13 +132,6 @@ export function AfromanIntro({onComplete}: AfromanIntroProps) {
           className={`afi-banner ${activeBeat.small ? 'is-small' : ''}`}
         >
           {activeBeat.text}
-        </div>
-      )}
-
-      {/* Skip hint */}
-      {canSkip && phase !== 'drop' && (
-        <div className="afi-skip-hint">
-          <span>Press any key to skip</span>
         </div>
       )}
 

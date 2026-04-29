@@ -4,4 +4,4 @@
  * keep it in lock-step with the top CHANGELOG entry.
  */
 
-export const APP_VERSION = '0.3.2';
+export const APP_VERSION = '0.3.4';

@@ -79,6 +79,15 @@ export function AfromanArena({zootedLevel, grooving}: AfromanArenaProps) {
         <div className="afar-bottle afar-bottle-beer" style={{left: '92%'}} />
       </div>
 
+      {/* Background dancer — purely visual Jessyka on the left speaker stack.
+          No gameplay hook, no hitbox, no targeting — just ambient stage
+          energy. She bops with her own rhythm (independent of the beat
+          detector so she doesn't go still between detected kicks) and gets
+          a brief extra-bounce pulse when `grooving` flips true. */}
+      <div className={`afar-dancer ${grooving ? 'is-grooving' : ''}`}>
+        <img src="/jessIDLE.png" alt="" draggable={false} />
+      </div>
+
       {/* Falling confetti — 12 pieces, each with its own hue + delay */}
       <div className="afar-confetti">
         {Array.from({length: 14}).map((_, i) => (

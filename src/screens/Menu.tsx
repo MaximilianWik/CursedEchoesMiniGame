@@ -20,7 +20,7 @@ export function MenuScreen({onStart, onOpenSettings, onOpenDev}: MenuScreenProps
       <button
         onClick={onOpenDev}
         className="absolute bottom-4 left-4 px-4 py-2 border border-emerald-700/70 bg-black/60 text-emerald-300 hover:text-emerald-100 hover:border-emerald-400 hover:bg-emerald-950/50 font-[Cinzel] text-xs tracking-[0.4em] uppercase shadow-[0_0_18px_rgba(0,180,100,0.2)] transition-all"
-        title="Dev console (password-gated) — shortcut: `"
+        title="Dev console — shortcut: `"
       >
         ◇ Dev
       </button>
