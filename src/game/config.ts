@@ -145,7 +145,7 @@ export const ZONES: ZoneDef[] = [
 // Bosses
 // ─────────────────────────────────────────────────────────────
 
-export type BossPattern = 'single' | 'volley' | 'wave' | 'word';
+export type BossPattern = 'single' | 'volley' | 'wave' | 'word' | 'summoner' | 'caster';
 
 export type BossPhase = {
   hpPctThreshold: number;    // entered when currentHp/maxHp ≤ this
@@ -178,8 +178,8 @@ export const BOSSES: Record<string, BossDef> = {
     maxHp: 14,
     phases: [
       {hpPctThreshold: 1.0,  phraseBank: BOSS_PHRASES_EASY, phraseSpawnCooldown: 1.2, patterns: ['single'],              patternInterval: 3.2, projectileLetters: 'AEIOUNRST'},
-      {hpPctThreshold: 0.66, phraseBank: BOSS_PHRASES_EASY, phraseSpawnCooldown: 1.0, patterns: ['single', 'volley'],    patternInterval: 2.8, projectileLetters: 'AEIOUNRSTK'},
-      {hpPctThreshold: 0.33, phraseBank: BOSS_PHRASES_EASY, phraseSpawnCooldown: 0.9, patterns: ['volley', 'wave', 'word'], patternInterval: 2.4, projectileLetters: 'AEIOUNRSTKD', announcement: 'RAGE AWAKENS'},
+      {hpPctThreshold: 0.66, phraseBank: BOSS_PHRASES_EASY, phraseSpawnCooldown: 1.0, patterns: ['single', 'volley'],    patternInterval: 3.4, projectileLetters: 'AEIOUNRSTK'},
+      {hpPctThreshold: 0.33, phraseBank: BOSS_PHRASES_EASY, phraseSpawnCooldown: 0.9, patterns: ['volley', 'summoner', 'word'], patternInterval: 3.0, projectileLetters: 'AEIOUNRSTKD', announcement: 'RAGE AWAKENS'},
     ],
     silhouette: 'taurus',
     themeColor: '#b4501c',
@@ -192,9 +192,9 @@ export const BOSSES: Record<string, BossDef> = {
     introLore: 'Lightning clings to his spear. A captain undefeated.',
     maxHp: 22,
     phases: [
-      {hpPctThreshold: 1.0,  phraseBank: BOSS_PHRASES_MID,  phraseSpawnCooldown: 1.1, patterns: ['single'],                   patternInterval: 2.8, projectileLetters: 'LIGHTNSPEAR'},
-      {hpPctThreshold: 0.66, phraseBank: BOSS_PHRASES_MID,  phraseSpawnCooldown: 1.0, patterns: ['volley', 'single', 'word'], patternInterval: 2.5, projectileLetters: 'LIGHTNSPEARFURY'},
-      {hpPctThreshold: 0.33, phraseBank: BOSS_PHRASES_HARD, phraseSpawnCooldown: 0.9, patterns: ['wave', 'volley', 'word'],   patternInterval: 2.2, projectileLetters: 'LIGHTNSPEARFURYKX', announcement: 'THE STORM GATHERS'},
+      {hpPctThreshold: 1.0,  phraseBank: BOSS_PHRASES_MID,  phraseSpawnCooldown: 1.1, patterns: ['single', 'caster'],          patternInterval: 3.0, projectileLetters: 'LIGHTNSPEAR'},
+      {hpPctThreshold: 0.66, phraseBank: BOSS_PHRASES_MID,  phraseSpawnCooldown: 1.0, patterns: ['volley', 'caster', 'word'],  patternInterval: 3.1, projectileLetters: 'LIGHTNSPEARFURY'},
+      {hpPctThreshold: 0.33, phraseBank: BOSS_PHRASES_HARD, phraseSpawnCooldown: 0.9, patterns: ['wave', 'volley', 'summoner', 'word'],   patternInterval: 2.6, projectileLetters: 'LIGHTNSPEARFURYKX', announcement: 'THE STORM GATHERS'},
     ],
     silhouette: 'ornstein',
     themeColor: '#ffd060',
@@ -207,9 +207,9 @@ export const BOSSES: Record<string, BossDef> = {
     introLore: 'He who first kindled the flame. His light wavers — do not falter.',
     maxHp: 32,
     phases: [
-      {hpPctThreshold: 1.0,  phraseBank: BOSS_PHRASES_HARD, phraseSpawnCooldown: 1.0, patterns: ['single', 'volley'],          patternInterval: 2.6, projectileLetters: 'FIREASHCINDER'},
-      {hpPctThreshold: 0.66, phraseBank: BOSS_PHRASES_HARD, phraseSpawnCooldown: 1.0, patterns: ['wave', 'single', 'word'],    patternInterval: 2.3, projectileLetters: 'FIREASHCINDERLIGHT'},
-      {hpPctThreshold: 0.33, phraseBank: BOSS_PHRASES_HARD, phraseSpawnCooldown: 0.8, patterns: ['wave', 'volley', 'word', 'single'], patternInterval: 1.9, projectileLetters: 'FIREASHCINDERLIGHTDARK', announcement: 'THE LAST EMBER BURNS'},
+      {hpPctThreshold: 1.0,  phraseBank: BOSS_PHRASES_HARD, phraseSpawnCooldown: 1.0, patterns: ['single', 'volley', 'caster'],          patternInterval: 3.0, projectileLetters: 'FIREASHCINDER'},
+      {hpPctThreshold: 0.66, phraseBank: BOSS_PHRASES_HARD, phraseSpawnCooldown: 1.0, patterns: ['wave', 'summoner', 'caster', 'word'],    patternInterval: 2.8, projectileLetters: 'FIREASHCINDERLIGHT'},
+      {hpPctThreshold: 0.33, phraseBank: BOSS_PHRASES_HARD, phraseSpawnCooldown: 0.8, patterns: ['wave', 'volley', 'summoner', 'caster', 'word'], patternInterval: 2.3, projectileLetters: 'FIREASHCINDERLIGHTDARK', announcement: 'THE LAST EMBER BURNS'},
     ],
     silhouette: 'gwyn',
     themeColor: '#ff4810',
