@@ -37,28 +37,70 @@ export const ENEMY_KINDS: Record<EnemyKind, EnemyKindDef> = {
 /** Special word texts that are guaranteed-caster when they spawn as caster kind. */
 export const CASTER_WORDS = ['SORCERY', 'PYROMANCY', 'LIGHTNING', 'MIRACLE', 'DARKMOON', 'CHAOS'];
 
-/** Phrase-words used as "combo tanks". Typed without spaces; spaces are auto-skipped. */
-export const BOSS_PHRASES_EASY = [
-  'THOU ART WEAK', 'FIRE FADES', 'THE FLAME DIES', 'EMBER AND ASH',
-  'BOW AND BREAK', 'FLESH TO DUST', 'DARK SHALL RISE',
-  'UNDEAD ONE COME', 'THE BELL HAS TOLLED', 'BURNT OFFERING',
-  'RING THE BELL', 'HOLLOW UNKINDLED',
+/**
+ * Phrase banks — one per boss, so each fight's damage phrases reflect that
+ * boss's canonical lore (Bed of Chaos for Taurus, Four Knights / lightning
+ * for Ornstein, First Flame / cinder for Gwyn). Every phrase is typed with
+ * spaces auto-skipped; damage = ceil(typedLetters / 7) per completion.
+ *
+ * Gothic-evocative and distinct vocabulary across the three banks so the
+ * fights stop feeling repetitive between phases.
+ */
+
+/** Taurus Demon — chaos-born, bone-carved, ramparts of the Undead Burg. */
+export const BOSS_PHRASES_TAURUS = [
+  'CARVED FROM THE FALLEN',
+  'BONE BECOMES A WEAPON',
+  'CHAOS BIRTHED ME',
+  'IZALITHS BROKEN CHILD',
+  'THE WITCHS FAILURE',
+  'THE RAMPART IS MINE',
+  'FLED THE SILVER PURGE',
+  'NO LIGHTNING HERE',
+  'BEAT THE FLESH TO PULP',
+  'LESSER BY NAME',
+  'THE BURG REMEMBERS FIRE',
+  'DEMONSPAWN UNGODLY',
+  'GREATAXE OF BROTHERS BONE',
+  'THE BED OF CHAOS COILS',
 ];
-export const BOSS_PHRASES_MID = [
-  'FEAR THE OLD BLOOD', 'THE FIRST FLAME FADES', 'HOLLOW UNTIL THE END',
-  'BEHOLD MY TRUE POWER', 'GWYNS LIGHT WAVERS', 'A SOUL SHATTERED',
-  'LIGHTNING CROWNS THE KING', 'THE DEEP CLAIMS ALL',
-  'BOWED TO KINGS OF OLD', 'CINDER OF THE ABYSS',
-  'THE SUN HAS FALLEN', 'STORMS OF ANOR LONDO',
+
+/** Dragon Slayer Ornstein — Captain of the Four, lion-visaged, lightning-spear. */
+export const BOSS_PHRASES_ORNSTEIN = [
+  'LIGHTNING CLINGS TO THE SPEAR',
+  'CAPTAIN OF THE FOUR KNIGHTS',
+  'HIS GOLDEN LION ROARS',
+  'DRAGONS FELL TO MY CROSS',
+  'ANOR LONDO IS FORSAKEN',
+  'I GUARD THE HOLLOW CATHEDRAL',
+  'THE CROSS BURIES DEEP',
+  'SWORN TO THE LORD OF SUNLIGHT',
+  'THE SPEAR NEVER WEARIES',
+  'LEONINE IN MAJESTY',
+  'SCALES PART BEFORE LIGHTNING',
+  'THE KEEPER ABIDES',
+  'GWYNS OATH BINDS ME',
+  'OLD WAR ECHOES STILL',
 ];
-export const BOSS_PHRASES_HARD = [
-  'THE ABYSS CONSUMES ALL', 'BEYOND THE FADING FIRE', 'A NEW AGE OF DARK',
-  'I AM THE LORD OF CINDER', 'BEARER OF THE CURSE ENDETH HERE',
-  'THE FLAME OF THE FIRST SHALL CONSUME YOU',
-  'THE DEEP AWAITS YOUR DESCENT',
-  'KINDLE NO MORE THE DYING EMBER',
-  'A CURSED ECHO ACROSS THE EONS',
-  'WITHER IN THE WAKE OF MY SPEAR',
+
+/** Gwyn, Lord of Cinder — First Lord, kindler of the Flame, feared the Dark. */
+export const BOSS_PHRASES_GWYN = [
+  'I LINKED THE FIRST FLAME',
+  'LORD OF SUNLIGHT AND CINDER',
+  'A THOUSAND YEARS OF FEAR',
+  'I TREMBLED AT THE DARK',
+  'SUNLIGHT YET FADES',
+  'RAYS OF SUNLIGHT FIERCE',
+  'I WAGED WAR ON DRAGONS',
+  'THE AGE OF FIRE LINGERS',
+  'BEQUEATHED THE WANING FLAME',
+  'NITO AND IZALITH REMEMBER',
+  'I FEARED THE DARK LORD',
+  'THE KILN REMEMBERS ME',
+  'HOLLOW AT THE FIRST FLAME',
+  'THE EMBER WILL NOT DIE',
+  'MY CROWN IS OF CINDER',
+  'RESIST THE COURSE OF NATURE',
 ];
 
 // ─────────────────────────────────────────────────────────────
@@ -177,9 +219,9 @@ export const BOSSES: Record<string, BossDef> = {
     introLore: 'Long-stirred in the rubble. The stones yet remember its charge.',
     maxHp: 14,
     phases: [
-      {hpPctThreshold: 1.0,  phraseBank: BOSS_PHRASES_EASY, phraseSpawnCooldown: 1.2, patterns: ['single'],              patternInterval: 3.2, projectileLetters: 'AEIOUNRST'},
-      {hpPctThreshold: 0.66, phraseBank: BOSS_PHRASES_EASY, phraseSpawnCooldown: 1.0, patterns: ['single', 'volley'],    patternInterval: 3.4, projectileLetters: 'AEIOUNRSTK'},
-      {hpPctThreshold: 0.33, phraseBank: BOSS_PHRASES_EASY, phraseSpawnCooldown: 0.9, patterns: ['volley', 'summoner', 'word'], patternInterval: 3.0, projectileLetters: 'AEIOUNRSTKD', announcement: 'RAGE AWAKENS'},
+      {hpPctThreshold: 1.0,  phraseBank: BOSS_PHRASES_TAURUS, phraseSpawnCooldown: 1.2, patterns: ['single'],              patternInterval: 3.2, projectileLetters: 'AEIOUNRST'},
+      {hpPctThreshold: 0.66, phraseBank: BOSS_PHRASES_TAURUS, phraseSpawnCooldown: 1.0, patterns: ['single', 'volley'],    patternInterval: 3.4, projectileLetters: 'AEIOUNRSTK'},
+      {hpPctThreshold: 0.33, phraseBank: BOSS_PHRASES_TAURUS, phraseSpawnCooldown: 0.9, patterns: ['volley', 'summoner', 'word'], patternInterval: 3.0, projectileLetters: 'AEIOUNRSTKD', announcement: 'RAGE AWAKENS'},
     ],
     silhouette: 'taurus',
     themeColor: '#b4501c',
@@ -192,9 +234,9 @@ export const BOSSES: Record<string, BossDef> = {
     introLore: 'Lightning clings to his spear. A captain undefeated.',
     maxHp: 22,
     phases: [
-      {hpPctThreshold: 1.0,  phraseBank: BOSS_PHRASES_MID,  phraseSpawnCooldown: 1.1, patterns: ['single', 'caster'],          patternInterval: 3.0, projectileLetters: 'LIGHTNSPEAR'},
-      {hpPctThreshold: 0.66, phraseBank: BOSS_PHRASES_MID,  phraseSpawnCooldown: 1.0, patterns: ['volley', 'caster', 'word'],  patternInterval: 3.1, projectileLetters: 'LIGHTNSPEARFURY'},
-      {hpPctThreshold: 0.33, phraseBank: BOSS_PHRASES_HARD, phraseSpawnCooldown: 0.9, patterns: ['wave', 'volley', 'summoner', 'word'],   patternInterval: 2.6, projectileLetters: 'LIGHTNSPEARFURYKX', announcement: 'THE STORM GATHERS'},
+      {hpPctThreshold: 1.0,  phraseBank: BOSS_PHRASES_ORNSTEIN,  phraseSpawnCooldown: 1.1, patterns: ['single', 'caster'],          patternInterval: 3.0, projectileLetters: 'LIGHTNSPEAR'},
+      {hpPctThreshold: 0.66, phraseBank: BOSS_PHRASES_ORNSTEIN,  phraseSpawnCooldown: 1.0, patterns: ['volley', 'caster', 'word'],  patternInterval: 3.1, projectileLetters: 'LIGHTNSPEARFURY'},
+      {hpPctThreshold: 0.33, phraseBank: BOSS_PHRASES_ORNSTEIN, phraseSpawnCooldown: 0.9, patterns: ['wave', 'volley', 'summoner', 'word'],   patternInterval: 2.6, projectileLetters: 'LIGHTNSPEARFURYKX', announcement: 'THE STORM GATHERS'},
     ],
     silhouette: 'ornstein',
     themeColor: '#ffd060',
@@ -207,9 +249,9 @@ export const BOSSES: Record<string, BossDef> = {
     introLore: 'He who first kindled the flame. His light wavers — do not falter.',
     maxHp: 32,
     phases: [
-      {hpPctThreshold: 1.0,  phraseBank: BOSS_PHRASES_HARD, phraseSpawnCooldown: 1.0, patterns: ['single', 'volley', 'caster'],          patternInterval: 3.0, projectileLetters: 'FIREASHCINDER'},
-      {hpPctThreshold: 0.66, phraseBank: BOSS_PHRASES_HARD, phraseSpawnCooldown: 1.0, patterns: ['wave', 'summoner', 'caster', 'word'],    patternInterval: 2.8, projectileLetters: 'FIREASHCINDERLIGHT'},
-      {hpPctThreshold: 0.33, phraseBank: BOSS_PHRASES_HARD, phraseSpawnCooldown: 0.8, patterns: ['wave', 'volley', 'summoner', 'caster', 'word'], patternInterval: 2.3, projectileLetters: 'FIREASHCINDERLIGHTDARK', announcement: 'THE LAST EMBER BURNS'},
+      {hpPctThreshold: 1.0,  phraseBank: BOSS_PHRASES_GWYN, phraseSpawnCooldown: 1.0, patterns: ['single', 'volley', 'caster'],          patternInterval: 3.0, projectileLetters: 'FIREASHCINDER'},
+      {hpPctThreshold: 0.66, phraseBank: BOSS_PHRASES_GWYN, phraseSpawnCooldown: 1.0, patterns: ['wave', 'summoner', 'caster', 'word'],    patternInterval: 2.8, projectileLetters: 'FIREASHCINDERLIGHT'},
+      {hpPctThreshold: 0.33, phraseBank: BOSS_PHRASES_GWYN, phraseSpawnCooldown: 0.8, patterns: ['wave', 'volley', 'summoner', 'caster', 'word'], patternInterval: 2.3, projectileLetters: 'FIREASHCINDERLIGHTDARK', announcement: 'THE LAST EMBER BURNS'},
     ],
     silhouette: 'gwyn',
     themeColor: '#ff4810',

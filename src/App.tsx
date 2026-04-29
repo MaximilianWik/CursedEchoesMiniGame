@@ -81,11 +81,11 @@ const nextProjectileId = (): number => _projectileIdCounter++;
 
 const JESS_SPAWN_MS = 1300;
 const JESS_DESPAWN_MS = 1600;
-const JESS_KISS_INTERVAL_MS = 750;       // time between kiss fires (was 550 — less spammy)
-const JESS_KISS_FLIGHT_MS = 1100;        // how long a kiss is in-flight (slower, reads as a visible projectile)
+const JESS_KISS_INTERVAL_MS = 450;       // 0.2.12: 40% faster (was 750)
+const JESS_KISS_FLIGHT_MS = 660;         // 0.2.12: 40% faster (was 1100)
 const JESS_X_OFFSET = 80;                // how far right of the player she stands (was 130 — closer)
 const JESS_ESTUS_ACTIVE_MS = 25000;      // boss-fight estus summon active duration (0.2.9: was 15s)
-const JESS_ESTUS_PROJECTILE_CHASE_SPEED = 6;   // px/frame homing speed in projectile-chase mode (slower too)
+const JESS_ESTUS_PROJECTILE_CHASE_SPEED = 10;  // 0.2.12: 40% faster (was 6) — matches the faster kiss flight
 
 /** Offset from the Jessyka sprite's JSX anchor (PLAYER.x + JESS_X_OFFSET, with
  *  `bottom: 4` in a 768-tall play area) to her visual mouth. Kisses emanate
@@ -164,7 +164,13 @@ type BossRuntime = {
   // that's on cooldown is skipped (scheduler advances) just like a capped one.
   summonerCooldownUntil: number;
   casterCooldownUntil: number;
+  // Rolling list of the last few phrases used in this fight, so the phrase
+  // picker can avoid repeating the same line back-to-back (even across
+  // phase transitions). Length is capped at BOSS_PHRASE_MEMORY in the picker.
+  recentPhrases: string[];
 };
+
+const BOSS_PHRASE_MEMORY = 3;
 
 const BOSS_INTRO_MS = 4500;
 /** How long after spawning a summoner/caster before the boss may spawn another
@@ -432,6 +438,7 @@ export default function App() {
       introStart: nowMs,
       summonerCooldownUntil: 0,
       casterCooldownUntil: 0,
+      recentPhrases: [],
     };
     wordsRef.current = [];
     activeWordRef.current = null;
@@ -617,10 +624,13 @@ export default function App() {
     // setTimeout. This makes the godmode window frame-perfect: exactly at
     // `now + ESTUS_CHUG_MS` the isInvulnerable helper starts returning true,
     // regardless of setTimeout drift (browser throttling, main-thread jank).
-    // The window is (chug-end, chug-end + ESTUS_GODMODE_MS) — vulnerability
-    // during the chug itself is preserved because isInvulnerable requires
-    // `time >= estusActiveUntilRef.current` to consider godmode active.
-    estusGodmodeUntilRef.current = now + ESTUS_CHUG_MS + ESTUS_GODMODE_MS;
+    // The window is (chug-end, chug-end + ESTUS_GODMODE_MS * kilnMul) —
+    // vulnerability during the chug itself is preserved because
+    // isInvulnerable requires `time >= estusActiveUntilRef.current` to
+    // consider godmode active. Kiln doubles the godmode window as a
+    // final-zone survival buff (0.2.12).
+    const kilnMul = ZONES[zoneIdxRef.current]?.id === 'kiln' ? 2 : 1;
+    estusGodmodeUntilRef.current = now + ESTUS_CHUG_MS + ESTUS_GODMODE_MS * kilnMul;
     statsRef.current.estusDrunk += 1;
     sfxEstus();
     // Heal + FX at end of chug. The setTimeout drives ONLY the visuals and
@@ -633,14 +643,15 @@ export default function App() {
       sfxEstusGodmode();
       const img = playerImgRef.current;
       if (img) {
+        // Reflow + re-add so the @keyframes pulse animation visibly restarts
+        // on chained drinks. The class REMOVAL is handled per-frame by
+        // updateEstusGodmodeVisual, which polls estusGodmodeUntilRef — that
+        // way the glow ends exactly when the invulnerability window ends,
+        // even when Kiln doubles the window (no stale setTimeout unmounting
+        // the class at the fixed 4 s mark while godmode is still active).
         img.classList.remove('is-estus-godmode');
-        void img.offsetWidth;                  // reflow so animation restarts
+        void img.offsetWidth;
         img.classList.add('is-estus-godmode');
-        window.setTimeout(() => {
-          if (playerImgRef.current) {
-            playerImgRef.current.classList.remove('is-estus-godmode');
-          }
-        }, ESTUS_GODMODE_MS);
       }
       // Small green pop up + celebratory particle burst.
       pushDamageText('+' + ESTUS_HEAL, PLAYER.x, PLAYER.y - 50, '#6dffaa');
@@ -1222,8 +1233,15 @@ function updateBoss(d: LoopDeps, time: number, dt: number): void {
   //    singular, and attack-words (isBossAttack) don't count toward phraseExists.
   const phraseExists = d.wordsRef.current.some(w => w.isBossPhrase);
   if (!phraseExists && time >= b.nextPhraseAt) {
+    // Anti-repeat: filter the pool against the last few phrases used in this
+    // fight. Keeps the three bosses' lore-specific banks from feeling like a
+    // 3-line loop when the player gets stuck on a phase for a while.
     const pool = phase.phraseBank;
-    const text = pool[Math.floor(Math.random() * pool.length)];
+    const availablePool = pool.filter(p => !b.recentPhrases.includes(p));
+    const pickFrom = availablePool.length > 0 ? availablePool : pool;
+    const text = pickFrom[Math.floor(Math.random() * pickFrom.length)];
+    b.recentPhrases.push(text);
+    if (b.recentPhrases.length > BOSS_PHRASE_MEMORY) b.recentPhrases.shift();
     const widthEst = text.length * 14;
     const xPos = (DESIGN_W - widthEst) / 2;     // dead center
     d.wordsRef.current.push({
@@ -1373,10 +1391,14 @@ function spawnBossAttack(d: LoopDeps, pattern: BossPattern, _letters: string, ti
     );
     if (candidates.length === 0) return false;
     const text = candidates[Math.floor(Math.random() * candidates.length)];
-    // Stationary: middle two-thirds of the screen.
-    const margin = DESIGN_W / 6;
-    const xPos = margin + Math.random() * (DESIGN_W - margin * 2 - text.length * 14);
-    const yPos = 100 + Math.random() * 40;
+    // Position: center-biased, comfortably below the top-left HUD block.
+    // The old spawn bounds (margin=DESIGN_W/6 ≈ 170, y=100-140) collided with
+    // the HUD's HP/stamina/souls/zone-progress panel which extends to ~x=370
+    // and y~240. Summoned words drew behind that panel and were unreadable.
+    // New bounds: x centered around DESIGN_W/2 with ±120 px jitter, y=170-210.
+    const wordW = text.length * 14;
+    const xPos = (DESIGN_W - wordW) / 2 + (Math.random() - 0.5) * 240;
+    const yPos = 170 + Math.random() * 40;
     d.wordsRef.current.push({
       id: nextWordId(),
       text, x: xPos, y: yPos,
@@ -1407,9 +1429,12 @@ function spawnBossAttack(d: LoopDeps, pattern: BossPattern, _letters: string, ti
     );
     if (casterPool.length === 0) return false;
     const text = casterPool[Math.floor(Math.random() * casterPool.length)];
-    const margin = DESIGN_W / 6;
-    const xPos = margin + Math.random() * (DESIGN_W - margin * 2 - text.length * 14);
-    const yPos = 110 + Math.random() * 30;
+    // Center-biased spawn, below the HUD — same reasoning as the summoner
+    // branch above. Casters are slightly lower (y=180-210) so a stacked
+    // summoner+caster pair doesn't overlap.
+    const wordW = text.length * 14;
+    const xPos = (DESIGN_W - wordW) / 2 + (Math.random() - 0.5) * 240;
+    const yPos = 180 + Math.random() * 30;
     d.wordsRef.current.push({
       id: nextWordId(),
       text, x: xPos, y: yPos,
@@ -3043,7 +3068,11 @@ function trySummonEstusJessyka(d: LoopDeps, now: number): boolean {
     castingUntil: 0,
     summonSource: 'estus',
     projectileTargetId: null,
-    autoDespawnAt: now + JESS_SPAWN_MS + JESS_ESTUS_ACTIVE_MS,
+    // Kiln doubles the Q-summon duration as a final-zone buff (0.2.12) —
+    // 50 s instead of 25 s on the standard bosses. The 2x multiplier matches
+    // the estus godmode doubling in handleTab for consistency.
+    autoDespawnAt: now + JESS_SPAWN_MS + JESS_ESTUS_ACTIVE_MS
+      * (ZONES[d.zoneIdxRef.current]?.id === 'kiln' ? 2 : 1),
     graceUsed: false,
   };
   d.setJessykaVisible(true);
