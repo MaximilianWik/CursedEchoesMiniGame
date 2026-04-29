@@ -4,6 +4,63 @@ All notable changes to Cursed Echoes. Format loosely follows [Keep a Changelog](
 
 ---
 
+## [0.2.9] — Digits 2-6, slower projectiles, Tab priority, summon cooldowns, minion damage fix
+
+Four player-reported issues, five targeted fixes. The digit `1` is off the parry grid (too letter-like in Cinzel); every projectile is slower across the board; Tab now always fires the heal when the game is active; boss summons have real cooldowns; chanter-summoned minions actually damage during boss fights.
+
+### Projectiles — digits 2-6 and ~30% slower overall
+
+- **`PROJECTILE_DIGITS` `['1','2','3','4','5']` → `['2','3','4','5','6']`** — `1` in the Cinzel font at projectile size reads too close to a lowercase `l` or a capital `I`, causing the player to hesitate and lose parries. Handle-char range check updated to `'2'..'6'` as well.
+- **Projectile speeds cut across all patterns:**
+  - `single` vy 1.6 → 1.15
+  - `volley` vy 1.55 → 1.15
+  - `wave` spiralRadVel 0.55 → 0.42, spiralAngVel range 0.008..0.013 → 0.006..0.010
+  - caster fire vy 2.2..3.0 → 1.5..2.1
+- Digits now have ~500ms more travel time before reaching the player — ample room to read the char and press the key. Projectiles no longer feel like instant "you lose" reactions.
+
+### Jessyka grace shield — robust push on close/overlapping words
+
+The 0.2.8 grace shield pushed words outward by `(dx/dist) * mag`, which NaN'd when a word was sitting directly on the player (`dist ≈ 0`). Stacked runner/minion words on the player would just wiggle in place instead of being ejected.
+
+- **Close-word fallback (`dist < 20`)** — pick a direction deterministically spread around the circle (`ejectAngle` rotates 72° per stacked word), so N words on top of the player fly outward in N different directions instead of all the same way.
+- **Upward bias bumped** from -20 → -40 so pushed words visibly lift off the player.
+- **Horizontal arena clamp** so boss-attack runners don't get shoved to negative x or past the right edge, immediately re-contacting.
+- **Boss-summoned words (`isBossSummoned`)** now get the full `PUSH_BASE * 1.2` magnitude (was: idle tier), matching their threat.
+
+### Tab heal — always fires during combat
+
+- **Listener registered with `{capture: true}`** so our handler runs before any sub-widget's bubble-phase keydown could consume Tab.
+- **Tab check moved BEFORE the `isOtherInput` guard** when the game is in `zone` or `boss` phase — `e.preventDefault()` + `e.stopPropagation()` fire immediately so the browser can't steal focus mid-combat, even if focus has drifted into the dev-password input or the mobile relay.
+- **Feedback for "silent" fails** — `NO ESTUS` flashes red, `ALREADY FULL` flashes green in the announcement slot, so the player always sees that Tab registered. Mid-chug presses stay silent (the heal is already in flight).
+
+### Boss summons — real cooldowns between spawns
+
+Summoner/caster used to re-spawn every rotation cycle as soon as the previous one died — so they came up every 6-9 seconds in late phases and felt like constant pressure instead of interrupt events.
+
+- **New `BossRuntime.summonerCooldownUntil` + `casterCooldownUntil` fields**, initialised to 0 in `enterBoss`.
+- **`BOSS_SUMMONER_COOLDOWN_MS = 18000` / `BOSS_CASTER_COOLDOWN_MS = 18000`** — a fresh summoner or caster can't spawn for 18 s after the previous one, even if the prior one was killed in 2 s.
+- **On-cooldown patterns return false from `spawnBossAttack`** — the scheduler's existing cap-retry loop then advances to the next pattern in the rotation, so the boss still makes some threat this tick instead of idling.
+
+### Bug — chanter-summoned minions deal no damage in boss fights
+
+During boss phase, the contact check requires `w.isBossAttack === true` (see `updateWords`: `canHitPlayer = ... || (phase === 'boss' && w.isBossAttack)`). The chanter's minion-spawn code never set this flag, so minions would home toward the player, pile up on the hitbox, and do absolutely nothing.
+
+- **Chanter-spawned minions now flagged `isBossAttack: d.phaseRef.current === 'boss'`** — they deal contact damage in boss fights, remain as normal echoes in zones (where the non-chanter branch of `canHitPlayer` already catches them).
+
+### Jessyka estus summon — 25 s (was 15)
+
+- `JESS_ESTUS_ACTIVE_MS` 15000 → 25000. Chained with the 1300 ms spawn-in animation, she's on-screen for ~26.3 s total. A much more meaningful trade for 1 estus.
+- Menu "How to Play" + README controls table updated.
+
+### Files
+
+- `src/App.tsx` — `PROJECTILE_DIGITS` 2-6, slower pattern speeds (`single`/`volley`/`wave`/caster-fire). `isDigit` range check 2-6. `JESS_ESTUS_ACTIVE_MS` 25000. `BossRuntime` cooldown fields + `BOSS_SUMMONER_COOLDOWN_MS`/`BOSS_CASTER_COOLDOWN_MS` constants + cooldown gates in summoner/caster branches. `enterBoss` initialises cooldowns. Chanter minion spawn flagged `isBossAttack`. Global keydown listener switched to capture-phase; Tab now checked before `isOtherInput` with stopPropagation during combat. `handleTab` flashes `NO ESTUS`/`ALREADY FULL` on silent-fail paths. `tryJessykaGraceShield` push logic rewritten with close-word fallback + upward bias bump + horizontal arena clamp.
+- `src/screens/Menu.tsx` — digits 2-6, Jessyka 25s.
+- `README.md` — controls updated, current-version line bumped.
+- `src/version.ts`, `package.json` — 0.2.9.
+
+---
+
 ## [0.2.8] — Grace shield, phrase-resume, wider SFX, visible version badges
 
 Four targeted fixes and one major new mechanic: Jessyka's grace shield — a once-per-spawn defensive explosion that veils the player from damage, scours projectiles from the air, and pushes hostile words outward in a screen-wide wave of pink. Boss phrases no longer reset mid-type on mismatched keystrokes. Seven new dedicated SFX fill out the game's new moments. Version badges on all screens upgraded from "easy to miss" to "clearly legible".

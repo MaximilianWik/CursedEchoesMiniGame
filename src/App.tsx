@@ -84,7 +84,7 @@ const JESS_DESPAWN_MS = 1600;
 const JESS_KISS_INTERVAL_MS = 750;       // time between kiss fires (was 550 — less spammy)
 const JESS_KISS_FLIGHT_MS = 1100;        // how long a kiss is in-flight (slower, reads as a visible projectile)
 const JESS_X_OFFSET = 80;                // how far right of the player she stands (was 130 — closer)
-const JESS_ESTUS_ACTIVE_MS = 15000;      // boss-fight estus summon active duration
+const JESS_ESTUS_ACTIVE_MS = 25000;      // boss-fight estus summon active duration (0.2.9: was 15s)
 const JESS_ESTUS_PROJECTILE_CHASE_SPEED = 6;   // px/frame homing speed in projectile-chase mode (slower too)
 
 /** Offset from the Jessyka sprite's JSX anchor (PLAYER.x + JESS_X_OFFSET, with
@@ -95,9 +95,11 @@ const JESS_ESTUS_PROJECTILE_CHASE_SPEED = 6;   // px/frame homing speed in proje
 const JESS_MOUTH_DX = 55;
 const JESS_MOUTH_DY = -35;
 
-/** Projectile chars — digits 1-5. Deliberately disjoint from A-Z so typing a
- *  letter can never accidentally parry a projectile (and vice versa). */
-const PROJECTILE_DIGITS = ['1', '2', '3', '4', '5'];
+/** Projectile chars — digits 2-6. Deliberately disjoint from A-Z so typing a
+ *  letter can never accidentally parry a projectile (and vice versa). `1` is
+ *  deliberately excluded — its lowercase-l / capital-I lookalike reads as a
+ *  letter in the Cinzel font at projectile-size, causing hesitation reads. */
+const PROJECTILE_DIGITS = ['2', '3', '4', '5', '6'];
 const ESTUS_GODMODE_MS = 4000;            // post-chug i-frames to reward the vulnerable sip window
 
 type JessykaState = 'spawning' | 'active' | 'leaving' | 'despawning';
@@ -157,9 +159,19 @@ type BossRuntime = {
   defeated: boolean;
   deathStart: number;
   introStart: number;          // performance.now at intro start; 0 once intro finishes
+  // Cooldowns for the expensive summoner/caster patterns — prevents them from
+  // back-to-back spawning whenever they come up in the rotation. A pattern
+  // that's on cooldown is skipped (scheduler advances) just like a capped one.
+  summonerCooldownUntil: number;
+  casterCooldownUntil: number;
 };
 
 const BOSS_INTRO_MS = 4500;
+/** How long after spawning a summoner/caster before the boss may spawn another
+ *  of the same type. Keeps these pattern-interrupt moments meaningful instead
+ *  of continuous. */
+const BOSS_SUMMONER_COOLDOWN_MS = 18000;
+const BOSS_CASTER_COOLDOWN_MS = 18000;
 
 type BonfireInfo = {
   reason: BonfireReason;
@@ -411,6 +423,8 @@ export default function App() {
       defeated: false,
       deathStart: 0,
       introStart: nowMs,
+      summonerCooldownUntil: 0,
+      casterCooldownUntil: 0,
     };
     wordsRef.current = [];
     activeWordRef.current = null;
@@ -578,9 +592,18 @@ export default function App() {
     if (phaseRef.current !== 'zone' && phaseRef.current !== 'boss') return;
     if (pausedRef.current) return;
     const now = performance.now();
-    if (estusActiveUntilRef.current > now) return;      // already drinking
-    if (estusChargesRef.current <= 0) return;
-    if (healthRef.current >= MAX_HEALTH) return;
+    if (estusActiveUntilRef.current > now) return;      // already drinking — silent no-op (input is still draining)
+    // Surface-level feedback so the player knows the keystroke DID register
+    // even when it can't actually heal. Silent failures got misread as
+    // "Tab didn't work" when the real reason was full HP or no estus.
+    if (estusChargesRef.current <= 0) {
+      bossAnnouncementRef.current = {text: 'NO ESTUS', life: 60, color: '#ff8080'};
+      return;
+    }
+    if (healthRef.current >= MAX_HEALTH) {
+      bossAnnouncementRef.current = {text: 'ALREADY FULL', life: 60, color: '#9dff7a'};
+      return;
+    }
     estusChargesRef.current -= 1;
     estusActiveUntilRef.current = now + ESTUS_CHUG_MS;
     statsRef.current.estusDrunk += 1;
@@ -658,21 +681,44 @@ export default function App() {
     setPaused(p => !p);
   }, []);
 
-  // Global keydown router.
+  // Global keydown router. Registered in the CAPTURE phase with explicit
+  // preventDefault on the game-control keys so the browser can't steal focus
+  // (Tab) or scroll (Space) before our handlers see them. Tab is also checked
+  // FIRST — even before the isOtherInput guard — because heal-on-Tab is a
+  // reflex action during combat and must not fail just because focus drifted
+  // into a stray input element.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
       const isMobileRelay = target?.dataset?.gameRelay !== undefined;
       const isOtherInput = !isMobileRelay && target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA');
+      // ── Tab: absolute priority during gameplay. preventDefault runs before
+      //    the isOtherInput guard so the browser's focus-change never fires
+      //    during a zone or boss. stopPropagation too, so any sub-widget's
+      //    own keydown can't eat it. Outside gameplay the normal guard still
+      //    applies (the dev password input needs Tab to leave the field).
+      if (e.code === 'Tab' || e.key === 'Tab') {
+        const inCombat = phaseRef.current === 'zone' || phaseRef.current === 'boss';
+        if (inCombat) {
+          e.preventDefault();
+          e.stopPropagation();
+          handleTab();
+          return;
+        }
+        if (isOtherInput) return;    // let the browser handle Tab normally in other inputs
+        e.preventDefault();
+        handleTab();
+        return;
+      }
       if (isOtherInput) return;
-      if (e.code === 'Tab') { e.preventDefault(); handleTab(); return; }
       if (e.code === 'Space') { e.preventDefault(); handleSpace(); return; }
       if (e.key === 'Escape') { e.preventDefault(); handleEsc(); return; }
       if (isMobileRelay) return;           // onChange handles letters for the mobile input
       if (e.key.length === 1) handleChar(e.key);
     };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    // capture: true — runs before any bubble-phase listener could consume it.
+    window.addEventListener('keydown', onKey, {capture: true});
+    return () => window.removeEventListener('keydown', onKey, {capture: true});
   }, [handleChar, handleTab, handleSpace, handleEsc]);
 
   // ─── Game loop ───────────────────────────────────────────────
@@ -1225,7 +1271,7 @@ function spawnBossAttack(d: LoopDeps, pattern: BossPattern, _letters: string, ti
       x: BOSS_AIM.x + (Math.random() - 0.5) * 40,
       y: BOSS_BODY_Y,
       vx: (PLAYER.x - BOSS_AIM.x) * 0.0012 + (Math.random() - 0.5) * 0.3,
-      vy: 1.6,
+      vy: 1.15,   // slowed from 1.6 — projectiles now tracks clearer on screen
       char: pick(),
       fromBoss: true,
       life: 520,
@@ -1241,7 +1287,7 @@ function spawnBossAttack(d: LoopDeps, pattern: BossPattern, _letters: string, ti
         id: nextProjectileId(),
         x, y: BOSS_BODY_Y + (Math.random() - 0.5) * 20,
         vx: 0,
-        vy: 1.55,
+        vy: 1.15,   // slowed from 1.55 — volley reads as telegraph not instant kill
         char: pick(),
         fromBoss: true,
         life: 500,
@@ -1257,8 +1303,8 @@ function spawnBossAttack(d: LoopDeps, pattern: BossPattern, _letters: string, ti
     // readable — waves no longer overlap each other.
     const count = phaseIdx >= 2 ? 12 : 10;
     const direction = Math.random() > 0.5 ? 1 : -1;
-    const angVel = direction * (0.008 + Math.random() * 0.005);  // was 0.012..0.020
-    const radVel = 0.55;                                          // was 0.9
+    const angVel = direction * (0.006 + Math.random() * 0.004);  // slowed again for 0.2.9
+    const radVel = 0.42;                                          // slowed for 0.2.9 (was 0.55)
     for (let i = 0; i < count; i++) {
       const startAng = (i / count) * Math.PI * 2;
       d.projectilesRef.current.push({
@@ -1302,10 +1348,12 @@ function spawnBossAttack(d: LoopDeps, pattern: BossPattern, _letters: string, ti
     return true;
   } else if (pattern === 'summoner') {
     // Spawn ONE stationary chanter word as the boss's conjured minion. Cap:
-    // ≤ 1 boss-summoned chanter alive at a time. The chanter's existing
-    // "emit minion echoes every ~3.5s" logic in updateWords handles its
-    // behaviour — no new runtime code, just a new spawn path with a boss
-    // silhouette overlay.
+    // ≤ 1 boss-summoned chanter alive at a time. A hard post-spawn cooldown
+    // (BOSS_SUMMONER_COOLDOWN_MS) also prevents back-to-back summons even
+    // after the previous chanter is killed, so the pattern stays a rare
+    // interrupt instead of constant pressure.
+    const b = d.bossRef.current;
+    if (b && time < b.summonerCooldownUntil) return false;
     const alreadySummoned = d.wordsRef.current.some(w => w.isBossSummoned && w.kind === 'chanter');
     if (alreadySummoned) return false;
     const firstLettersUsed = new Set(d.wordsRef.current.map(w => w.text[0]));
@@ -1328,14 +1376,17 @@ function spawnBossAttack(d: LoopDeps, pattern: BossPattern, _letters: string, ti
       isBossSummoned: true,
       spawnAnim: {start: time, duration: 900},
     });
+    if (b) b.summonerCooldownUntil = time + BOSS_SUMMONER_COOLDOWN_MS;
     d.bossAnnouncementRef.current = {text: 'A CHANTER RISES', life: 140};
     sfxBossSummonChanter();
     triggerLightning(d.bgStateRef.current, time);
     return true;
   } else if (pattern === 'caster') {
     // Spawn ONE stationary caster word from the boss's repertoire. Cap:
-    // ≤ 1 boss-summoned caster alive at a time. It fires projectile-letters
-    // via the existing caster cooldown logic in updateWords.
+    // ≤ 1 boss-summoned caster alive at a time + BOSS_CASTER_COOLDOWN_MS
+    // post-spawn cooldown so the boss doesn't chain caster after caster.
+    const b = d.bossRef.current;
+    if (b && time < b.casterCooldownUntil) return false;
     const alreadySummoned = d.wordsRef.current.some(w => w.isBossSummoned && w.kind === 'caster');
     if (alreadySummoned) return false;
     const onScreen = new Set(d.wordsRef.current.map(w => w.text));
@@ -1360,6 +1411,7 @@ function spawnBossAttack(d: LoopDeps, pattern: BossPattern, _letters: string, ti
       isBossSummoned: true,
       spawnAnim: {start: time, duration: 900},
     });
+    if (b) b.casterCooldownUntil = time + BOSS_CASTER_COOLDOWN_MS;
     d.bossAnnouncementRef.current = {text: 'A CASTER EMERGES', life: 140};
     sfxBossSummonCaster();
     triggerLightning(d.bgStateRef.current, time);
@@ -2261,7 +2313,7 @@ function updateWords(d: LoopDeps, ctx: CanvasRenderingContext2D, textCtx: Canvas
           id: nextProjectileId(),
           x: spawnX, y: spawnY,
           vx: (PLAYER.x - spawnX) * 0.004,
-          vy: 2.2 + Math.random() * 0.8,
+          vy: 1.5 + Math.random() * 0.6,   // slowed from 2.2+0.8*rand so digits are readable
           char: PROJECTILE_DIGITS[Math.floor(Math.random() * PROJECTILE_DIGITS.length)],
           fromBoss: false, life: 280,
           trail: [],
@@ -2298,6 +2350,10 @@ function updateWords(d: LoopDeps, ctx: CanvasRenderingContext2D, textCtx: Canvas
             speed: 0.32, typed: '', kind: 'normal', isSpecial: false,
             hp: 1, fireCooldown: 0, ghostPhase: 0, scrambled: false,
             stationaryX: 0, spawnTime: time,
+            // Marked as boss-attack so the contact check in the boss phase
+            // actually damages the player. Without this flag the minion would
+            // reach the player and silently stack — fixed in 0.2.9.
+            isBossAttack: d.phaseRef.current === 'boss',
           });
         }
       }
@@ -2658,22 +2714,42 @@ function tryJessykaGraceShield(d: LoopDeps, time: number): boolean {
   //    explosion's outward motion. Boss-attack runners get pushed hardest;
   //    idle words get a gentler nudge; boss phrase / Jessyka targets / any
   //    spawn-anim'd words are left alone to avoid weird visual snaps.
+  //
+  //    Close/overlapping words (dist < 20) get a radial direction picked
+  //    evenly around the player + a firm bias upward, so a word sitting on
+  //    top of the player doesn't just wiggle in place — it gets physically
+  //    ejected in a clear direction.
   const PUSH_BASE = 160;      // px pushed along the direction vector
+  const CLOSE_DIST = 20;      // below this we fall back to a radial angle
+  let ejectAngle = 0;
+  const eligibleForPush = (w: Word) =>
+    !w.isBossPhrase && !w.jessykaTarget && !w.spawnAnim && !w.isSpecial;
   for (const w of d.wordsRef.current) {
-    if (w.isBossPhrase || w.jessykaTarget || w.spawnAnim) continue;
-    if (w.isSpecial) continue;                          // don't yank the heart word
+    if (!eligibleForPush(w)) continue;
     const dx = w.x - PLAYER.x, dy = w.y - PLAYER.y;
-    const dist = Math.max(1, Math.sqrt(dx * dx + dy * dy));
-    const mag = w.isBossAttack ? PUSH_BASE : PUSH_BASE * 0.7;
-    w.x += (dx / dist) * mag;
-    w.y += (dy / dist) * mag - 20;                      // small upward bias so they fly "off"
-    // Stationary words (chanter/caster/boss-summoned) shouldn't be airborne
-    // afterwards — clamp to their stationaryX so they snap back over the next
-    // frames instead of drifting into walls.
-    if (w.speed === 0) {
-      // Mark a subtle fling via speed so they visibly recoil, then return to
-      // idle because speed === 0 keeps them from chasing the player anyway.
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    const isBossish = w.isBossAttack || w.isBossSummoned;
+    const mag = isBossish ? PUSH_BASE * 1.2 : PUSH_BASE * 0.7;
+    let ux: number, uy: number;
+    if (dist < CLOSE_DIST) {
+      // Word is on / inside the player. Pick a direction deterministically
+      // spread around a circle so multiple stacked words don't all fly the
+      // same way — ejectAngle rotates per word.
+      const ang = ejectAngle;
+      ejectAngle += Math.PI * 2 / 5;     // next stacked word goes ~72° over
+      ux = Math.cos(ang);
+      uy = Math.sin(ang);
+    } else {
+      ux = dx / dist;
+      uy = dy / dist;
     }
+    // Always a bit of upward bias so words visibly fly "off" the player.
+    w.x += ux * mag;
+    w.y += uy * mag - 40;
+    // Keep boss-attack runner words inside the arena horizontally so they
+    // don't get shoved to a position where they'd immediately recontact.
+    if (w.x < 20) w.x = 20;
+    if (w.x > DESIGN_W - 20 - w.text.length * 14) w.x = DESIGN_W - 20 - w.text.length * 14;
   }
   // Projectiles — splice them (grace scours the air) with bursts at each.
   for (let i = d.projectilesRef.current.length - 1; i >= 0; i--) {
@@ -2881,7 +2957,7 @@ function handleCharLive(d: LoopDeps, rawChar: string): void {
   if (rawChar.length !== 1) return;
   const upper = rawChar.toUpperCase();
   const isLetter = upper >= 'A' && upper <= 'Z';
-  const isDigit = upper >= '1' && upper <= '5';
+  const isDigit = upper >= '2' && upper <= '6';
   if (!isLetter && !isDigit) return;
   const char = upper;
 
