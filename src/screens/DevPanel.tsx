@@ -1,15 +1,14 @@
 /**
- * DevPanel — hidden testing tools, unlocked with the password 'developer'.
- * Lets you jump straight to any zone or boss, heal, fill estus, +combo, etc.
+ * DevPanel — testing tools, freely accessible from the menu / pause /
+ * game-over / victory screens.
  *
- * The panel is opened via a nearly-invisible sigil in the bottom-left of the
- * menu screen. Enter 'developer' → panel shows. Password wrong → shake + reset.
+ * 0.3.4 — the `developer` password gate was retired. The panel was always
+ * meant as a safety hatch for QA, not a secret, and the gate just added
+ * friction without adding any real protection. Open the panel via the
+ * bottom-left sigil on the menu or the `` ` `` keyboard shortcut.
  */
 
-import {useState} from 'react';
 import type {ReactNode} from 'react';
-
-const DEV_PASSWORD = 'developer';
 
 export type DevPanelProps = {
   onClose: () => void;
@@ -31,52 +30,6 @@ export type DevPanelProps = {
 };
 
 export function DevPanel(props: DevPanelProps) {
-  const [unlocked, setUnlocked] = useState(false);
-  const [input, setInput] = useState('');
-  const [error, setError] = useState(false);
-
-  if (!unlocked) {
-    return (
-      <div
-        className="absolute top-0 left-0 w-full h-full bg-black/90 flex items-center justify-center z-[90] fade-in"
-        onClick={(e) => { if (e.target === e.currentTarget) props.onClose(); }}
-      >
-        <div className="bg-[#0a0608] border border-emerald-900/70 p-8 w-[360px] shadow-[0_0_40px_rgba(0,0,0,0.9)]">
-          <h2 className="font-[Cinzel] text-emerald-400 text-xl tracking-[0.3em] text-center mb-4 uppercase">Dev Gate</h2>
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              if (input === DEV_PASSWORD) {
-                setUnlocked(true);
-                setInput('');
-              } else {
-                setError(true);
-                window.setTimeout(() => setError(false), 500);
-                setInput('');
-              }
-            }}
-            className="flex flex-col gap-3"
-          >
-            <input
-              autoFocus
-              type="password"
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              className={`bg-black border text-emerald-100 font-mono text-center px-4 py-2 outline-none transition-all tracking-[0.2em] w-full ${
-                error ? 'border-red-500 animate-[shake_0.5s_ease-in-out]' : 'border-emerald-700/60 focus:border-emerald-400'
-              }`}
-              placeholder="password"
-            />
-            <div className="flex gap-2">
-              <button type="button" onClick={props.onClose} className="flex-1 px-4 py-2 border border-emerald-900/40 text-emerald-600/70 hover:text-emerald-200 font-[Cinzel] text-xs tracking-widest uppercase">Cancel</button>
-              <button type="submit" className="flex-1 px-4 py-2 border border-emerald-700 text-emerald-300 hover:bg-emerald-950 font-[Cinzel] text-xs tracking-widest uppercase">Enter</button>
-            </div>
-          </form>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div
       className="absolute top-0 left-0 w-full h-full bg-black/85 flex items-center justify-center z-[90] fade-in"

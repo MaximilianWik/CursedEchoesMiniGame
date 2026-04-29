@@ -1527,13 +1527,15 @@ function spawnBossAttack(d: LoopDeps, pattern: BossPattern, _letters: string, ti
   const isAfroman = d.bossRef.current?.def.id === 'afroman';
   // Flash the AfroMan sprite to its attack pose briefly whenever he spawns
   // anything — matches Jessyka's idle↔kiss swap for the other bosses.
+  // 0.3.3: held for ~1.2 s (was 420 ms) so the attack pose actually reads on
+  // screen instead of being a one-frame flicker.
   if (isAfroman) {
     d.setAfromanBossPhase('attack');
     window.setTimeout(() => {
       if (d.bossRef.current && !d.bossRef.current.defeated && d.bossRef.current.def.id === 'afroman') {
         d.setAfromanBossPhase('idle');
       }
-    }, 420);
+    }, 1200);
   }
   // Track letters present in the current boss phrase so summoner/caster word
   // spawns don't pick a first letter that conflicts with what the player is

@@ -976,7 +976,14 @@
     animation: afiBackdropFade 1500ms ease-out both;
   }
   .afi-bg {
-    position: absolute; inset: 0;
+    /* Oversize the element to 200% of the frame centered on the parent's
+       midpoint. A rotated rectangle only fully covers its axis-aligned
+       bounding area when it's at least sqrt(2) ≈ 1.42x the parent size —
+       200% gives a safe margin so the backdrop keeps filling the frame
+       through the full spin (no visible corner triangles). */
+    position: absolute;
+    top: -50%; left: -50%;
+    width: 200%; height: 200%;
     background:
       radial-gradient(circle at 50% 58%, rgba(255, 100, 200, 0.55) 0%, rgba(255, 140, 80, 0.35) 18%, rgba(120, 30, 180, 0.3) 38%, rgba(10, 0, 20, 1) 80%),
       repeating-conic-gradient(from 0deg at 50% 58%,
@@ -987,6 +994,7 @@
     filter: hue-rotate(0deg) saturate(0.6);
     animation: afiBgSpin 40s linear infinite;
     transition: filter 800ms ease-out;
+    transform-origin: 50% 50%;
   }
   .afi-rings {
     position: absolute; inset: 0;
@@ -1638,5 +1646,58 @@
   @keyframes afarSmokeDrift {
     0%, 100% { transform: translateX(0) scale(1, 1); }
     50%      { transform: translateX(30px) scale(1.05, 1.02); }
+  }
+
+  /* Background dancer — purely visual Jessyka bobbing on the left speaker.
+     No interaction, no hitbox, no targeting; she's a stage-energy prop.
+     Positioned to perch on top of the left speaker stack (which sits at
+     bottom: 8%, height: 280px → speaker top is ~45%). Her feet meet the
+     speaker's top edge at roughly bottom: 44%. */
+  .afar-dancer {
+    position: absolute;
+    bottom: 46%;                /* speaker top ≈ 44.5% → feet meet the cabinet */
+    left: 21px;                 /* centered on the speaker (left: 24px, width: 90px → cx ≈ 69px) */
+    width: 96px;
+    height: 120px;
+    pointer-events: none;
+    z-index: 2;
+    filter:
+      drop-shadow(0 0 18px rgba(255, 128, 204, 0.75))
+      drop-shadow(0 0 36px rgba(255, 80, 180, 0.4));
+    animation: afarDancerBop 1.4s ease-in-out infinite;
+    transform-origin: 50% 100%;
+  }
+  .afar-dancer img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    display: block;
+    animation: afarDancerSway 2.2s ease-in-out infinite;
+  }
+  /* Extra pop on the detected bass kick — scales + rotates briefly above
+     the idle dance. The grooving class is already debounced to a ~240 ms
+     window in App.tsx, matching the length of this one-shot animation. */
+  .afar-dancer.is-grooving {
+    animation: afarDancerBop 1.4s ease-in-out infinite, afarDancerPop 0.24s ease-out;
+  }
+
+  @keyframes afarDancerBop {
+    0%   { transform: translateY(0) scaleY(1); }
+    25%  { transform: translateY(-6px) scaleY(0.98); }
+    50%  { transform: translateY(0) scaleY(1.03); }
+    75%  { transform: translateY(-4px) scaleY(0.99); }
+    100% { transform: translateY(0) scaleY(1); }
+  }
+  @keyframes afarDancerSway {
+    0%   { transform: rotate(-5deg) translateX(0); }
+    25%  { transform: rotate(3deg)  translateX(3px); }
+    50%  { transform: rotate(-2deg) translateX(-2px); }
+    75%  { transform: rotate(5deg)  translateX(4px); }
+    100% { transform: rotate(-5deg) translateX(0); }
+  }
+  @keyframes afarDancerPop {
+    0%   { filter: drop-shadow(0 0 18px rgba(255, 128, 204, 0.75)) drop-shadow(0 0 36px rgba(255, 80, 180, 0.4)); }
+    50%  { filter: drop-shadow(0 0 32px rgba(255, 200, 240, 1)) drop-shadow(0 0 56px rgba(255, 100, 200, 0.8)); }
+    100% { filter: drop-shadow(0 0 18px rgba(255, 128, 204, 0.75)) drop-shadow(0 0 36px rgba(255, 80, 180, 0.4)); }
   }
 }
