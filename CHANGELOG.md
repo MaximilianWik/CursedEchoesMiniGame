@@ -4,6 +4,30 @@ All notable changes to Cursed Echoes. Format loosely follows [Keep a Changelog](
 
 ---
 
+## [0.3.7] — Death-screen fits the frame (Try Again visible, secret gate not clipped)
+
+0.3.5's revamp had a vertical-overflow bug: when the secret-route badge was showing, the total stack (YOU DIED + badge + columns + graph + password gate + Try Again) summed to ~780 px inside a 768 px frame, so the Try Again button fell off the bottom and the password gate's lower border clipped.
+
+### Fixes
+
+- **Actions row** — the secret-password gate and the Try Again button are now in a single horizontal flex row (`.go-actions-row`, `gap: 24px`) anchored at the bottom of the stack. Saves ~55 px of vertical space vs. stacking them. Gate label abbreviated *"Secret Password"* → *"Secret"* to fit alongside the CTA on one line; the input shrinks from `200 × 14 px` → `160 × 13 px` with matching padding.
+- **YOU DIED title** — 92 px → 80 px. Still hero-sized, just not hogging the budget.
+- **Hero margins** — `mt-8 mb-3` → `mt-4 mb-2` (-16 px combined).
+- **Graph frame** — top padding 10 → 8, margin-top 14 → 10.
+- **Try Again gets focus** — `autoFocus` on the button so Enter-to-retry works the moment the fade-in completes. `:focus-visible` style added with a stronger amber glow so the focus state reads.
+
+### Budget after fixes
+
+With the secret-route badge present: `16 (mt-4) + ~96 (title + glow) + 26 (badge) + 8 (mb-2) + 340 (columns) + 138 (graph block) + 56 (actions row)` = **~680 px** inside the 768 px frame — roughly **88 px of breathing room**. Without the badge, ~115 px of room. No more clipping.
+
+### Files touched
+
+- `src/screens/GameOver.tsx` — secret gate + Try Again combined into a `.go-actions-row`; `mt-8 mb-3` on hero → `mt-4 mb-2`; `autoFocus` on the Try Again button; secret-gate label shortened.
+- `src/index.css` — `.ce-died` 92 → 80 px; `.go-graph-frame` top padding / margin-top tightened; new `.go-actions-row` rule; `.go-secret-gate` margin-top removed (row handles spacing); `.go-try-again` margin-top removed + gets a `:focus-visible` state.
+- `package.json` + `src/version.ts` — 0.3.7.
+
+---
+
 ## [0.3.6] — Bigger dancer; rotating backdrops no longer drag dark corners
 
 Two presentation follow-ups from the AfroMan playtest.
