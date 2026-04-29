@@ -1076,13 +1076,16 @@
     transform: translateX(-50%);
     font-family: "Cinzel", serif;
     font-weight: 700;
-    font-size: 56px;
-    letter-spacing: 0.22em;
+    font-size: 40px;
+    letter-spacing: 0.12em;
     color: #fff;
     text-shadow:
       0 0 40px rgba(255, 100, 200, 0.9),
       0 0 12px rgba(0, 0, 0, 0.9);
     white-space: nowrap;
+    max-width: 94%;
+    text-align: center;
+    padding: 0 12px;
     animation: afiBannerIn 900ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
   }
   .afi-banner.is-small {
@@ -1276,27 +1279,364 @@
     to   { background-position: 300% 0; }
   }
 
-  /* In-fight psychedelic background overlay — subtle so the words + boss
-     remain legible. Hue-cycles through the entire spectrum over ~6s. */
+  /* In-fight psychedelic background overlay — legacy generic variant, kept
+     in case anything still references the class. The dedicated AfroMan arena
+     layer (AfromanArena.tsx) replaces it for the secret boss fight. */
   .afroman-scene-overlay {
     background:
-      radial-gradient(ellipse at 50% 45%, rgba(255, 100, 200, 0.22) 0%, transparent 45%),
-      radial-gradient(ellipse at 25% 80%, rgba(120, 220, 255, 0.14) 0%, transparent 40%),
-      radial-gradient(ellipse at 75% 82%, rgba(255, 220, 100, 0.14) 0%, transparent 40%),
-      repeating-conic-gradient(from 0deg at 50% 45%,
-        rgba(255, 100, 200, 0.06) 0deg 12deg,
-        rgba(120, 220, 255, 0.05) 12deg 24deg,
-        rgba(255, 220, 100, 0.05) 24deg 36deg);
+      radial-gradient(ellipse at 50% 45%, rgba(255, 100, 200, 0.22) 0%, transparent 45%);
     mix-blend-mode: screen;
-    animation: afroBgHue 6s linear infinite, afroBgSpin 60s linear infinite;
-    opacity: 0.75;
+    opacity: 0.5;
   }
-  @keyframes afroBgHue {
-    0%   { filter: hue-rotate(0deg); }
-    100% { filter: hue-rotate(360deg); }
+
+  /* ═══════════════════════════════════════════════════════════ */
+  /* AfroMan arena — disco stage, lights, pyro, smoke, props    */
+  /* ═══════════════════════════════════════════════════════════ */
+  .afar-root {
+    position: absolute; inset: 0;
+    overflow: hidden;
+    pointer-events: none;
   }
-  @keyframes afroBgSpin {
-    0%   { background-position: 0% 0%, 0% 0%, 0% 0%, 0% 0%; transform: rotate(0deg); }
-    100% { transform: rotate(360deg); }
+
+  /* Base stage backdrop — deep purple vanishing-point with amber floor. */
+  .afar-backdrop {
+    position: absolute; inset: 0;
+    background:
+      radial-gradient(ellipse 120% 55% at 50% 100%, rgba(180, 80, 30, 0.35) 0%, rgba(30, 10, 30, 0.0) 60%),
+      radial-gradient(ellipse 80% 65% at 50% 40%, rgba(100, 40, 140, 0.55) 0%, transparent 70%),
+      linear-gradient(180deg, #0a0410 0%, #1a0820 40%, #2a0a28 78%, #3a0e1e 100%);
+  }
+  .afar-backdrop::after {
+    content: '';
+    position: absolute; left: 0; right: 0; bottom: 0;
+    height: 18%;
+    background:
+      repeating-linear-gradient(90deg,
+        rgba(255, 180, 90, 0.12) 0 60px,
+        rgba(0, 0, 0, 0.1) 60px 62px);
+    mix-blend-mode: screen;
+  }
+
+  /* Rear-wall neon bars — vertical glowing strips in rotating hues. */
+  .afar-neon-wall {
+    position: absolute; inset: 0;
+  }
+  .afar-neon-bar {
+    position: absolute;
+    top: 5%;
+    bottom: 30%;
+    width: 4px;
+    background: hsl(var(--neonHue), 90%, 60%);
+    box-shadow:
+      0 0 14px hsl(var(--neonHue), 90%, 60%),
+      0 0 32px hsl(var(--neonHue), 90%, 55%),
+      0 0 64px hsl(var(--neonHue), 90%, 50%);
+    animation: afarNeonFlicker 2.4s ease-in-out infinite, afarNeonHue 8s linear infinite;
+    opacity: 0.7;
+  }
+  .afar-neon-bar:nth-child(odd)  { animation-delay: 0s, -1.2s; }
+  .afar-neon-bar:nth-child(even) { animation-delay: -0.6s, 0s; }
+
+  /* Disco ball + spinning reflection pattern */
+  .afar-disco {
+    position: absolute;
+    top: 4%; left: 50%;
+    transform: translateX(-50%);
+    width: 80px; height: 80px;
+    pointer-events: none;
+  }
+  .afar-disco-ball {
+    position: absolute; inset: 0;
+    border-radius: 50%;
+    background:
+      radial-gradient(circle at 30% 30%, #fff 0%, #ffd6ec 6%, #aaa 30%, #444 70%, #111 100%),
+      repeating-conic-gradient(from 0deg at 50% 50%,
+        rgba(255, 255, 255, 0.25) 0deg 6deg,
+        rgba(0, 0, 0, 0.2) 6deg 12deg);
+    box-shadow:
+      0 0 32px rgba(255, 200, 220, 0.6),
+      0 0 64px rgba(180, 80, 180, 0.4),
+      inset 0 0 24px rgba(0, 0, 0, 0.8);
+    animation: afarDiscoSpin 4s linear infinite;
+  }
+  .afar-disco-reflections {
+    position: absolute; inset: -200%;
+    background:
+      repeating-conic-gradient(from 0deg at 50% 0%,
+        rgba(255, 200, 240, 0.08) 0deg 4deg,
+        transparent 4deg 20deg);
+    animation: afarDiscoSpin 10s linear infinite reverse;
+    mix-blend-mode: screen;
+    opacity: 0.8;
+  }
+
+  /* Rotating stage beams — four wedges emanating from just behind the disco ball */
+  .afar-beam {
+    position: absolute;
+    top: 8%; left: 50%;
+    width: 180px;
+    height: 720px;
+    transform-origin: top center;
+    background: linear-gradient(to bottom,
+      rgba(255, 120, 210, 0.42) 0%,
+      rgba(120, 220, 255, 0.14) 60%,
+      transparent 100%);
+    mix-blend-mode: screen;
+    filter: blur(2px);
+    pointer-events: none;
+    animation: afarBeamSweep 9s ease-in-out infinite;
+  }
+  .afar-beam-1 { margin-left: -90px; animation-delay: 0s; --beamTilt: 24deg; background: linear-gradient(to bottom, rgba(255, 80, 180, 0.45), rgba(255, 80, 180, 0.05) 70%, transparent); }
+  .afar-beam-2 { margin-left: -90px; animation-delay: -2.2s; --beamTilt: 32deg; background: linear-gradient(to bottom, rgba(80, 220, 255, 0.45), rgba(80, 220, 255, 0.05) 70%, transparent); }
+  .afar-beam-3 { margin-left: -90px; animation-delay: -4.5s; --beamTilt: 28deg; background: linear-gradient(to bottom, rgba(255, 220, 120, 0.45), rgba(255, 220, 120, 0.05) 70%, transparent); }
+  .afar-beam-4 { margin-left: -90px; animation-delay: -6.8s; --beamTilt: 36deg; background: linear-gradient(to bottom, rgba(120, 255, 160, 0.42), rgba(120, 255, 160, 0.05) 70%, transparent); }
+
+  /* Laser lines — thin bright rays that sweep across */
+  .afar-laser {
+    position: absolute;
+    left: -20%; right: -20%;
+    height: 2px;
+    background: linear-gradient(90deg, transparent, #ff3cd2 30%, #ff3cd2 70%, transparent);
+    box-shadow: 0 0 10px #ff3cd2, 0 0 22px #ff3cd2;
+    transform-origin: center;
+    mix-blend-mode: screen;
+  }
+  .afar-laser-a { top: 42%; animation: afarLaserA 5s linear infinite; background: linear-gradient(90deg, transparent, #ff3cd2 30%, #ff3cd2 70%, transparent); box-shadow: 0 0 10px #ff3cd2, 0 0 22px #ff3cd2; }
+  .afar-laser-b { top: 50%; animation: afarLaserB 6s linear infinite; background: linear-gradient(90deg, transparent, #3cd2ff 30%, #3cd2ff 70%, transparent); box-shadow: 0 0 10px #3cd2ff, 0 0 22px #3cd2ff; }
+  .afar-laser-c { top: 58%; animation: afarLaserC 7s linear infinite; background: linear-gradient(90deg, transparent, #ffd23c 30%, #ffd23c 70%, transparent); box-shadow: 0 0 10px #ffd23c, 0 0 22px #ffd23c; }
+
+  /* Speaker stacks — bigger than the intro version; tall + thick. */
+  .afar-speaker {
+    position: absolute;
+    bottom: 8%;
+    width: 90px;
+    height: 280px;
+    background: linear-gradient(180deg, #181018 0%, #2a1a28 50%, #0a0608 100%);
+    border: 3px solid rgba(255, 100, 200, 0.35);
+    border-radius: 4px;
+    box-shadow:
+      0 0 28px rgba(0, 0, 0, 0.8),
+      inset 0 0 32px rgba(255, 100, 200, 0.18);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: space-around;
+    padding: 12px 0;
+  }
+  .afar-speaker-left  { left: 24px; }
+  .afar-speaker-right { right: 24px; }
+  .afar-speaker-cone {
+    width: 64px;
+    height: 64px;
+    border-radius: 50%;
+    background:
+      radial-gradient(circle at 35% 35%, #5a1a38 0%, #2a0818 60%, #000 100%);
+    border: 2px solid rgba(255, 100, 200, 0.4);
+    box-shadow: inset 0 0 16px rgba(255, 80, 160, 0.3);
+  }
+  .afar-speaker-cone-bot { width: 72px; height: 72px; }
+  .afar-speaker.is-thumping {
+    animation: afarSpeakerThump 0.22s ease-out;
+  }
+  .afar-speaker.is-thumping .afar-speaker-cone {
+    animation: afarConeThump 0.32s ease-out;
+  }
+
+  /* Pyrotechnic shooters — 5 spark particles each, exploded via delayed
+     keyframes so they "shoot up + fade". Staggered across 4 shooters so the
+     stage never goes silent for long. */
+  .afar-pyro {
+    position: absolute;
+    bottom: 10%;
+    width: 2px; height: 2px;
+    pointer-events: none;
+  }
+  .afar-pyro-1 { left: 12%; --pyroHue: 340deg; animation: afarPyroFire 6s ease-out infinite; animation-delay: 0.5s; }
+  .afar-pyro-2 { left: 34%; --pyroHue: 50deg;  animation: afarPyroFire 6s ease-out infinite; animation-delay: 2s; }
+  .afar-pyro-3 { left: 64%; --pyroHue: 190deg; animation: afarPyroFire 6s ease-out infinite; animation-delay: 3.5s; }
+  .afar-pyro-4 { left: 86%; --pyroHue: 280deg; animation: afarPyroFire 6s ease-out infinite; animation-delay: 5s; }
+  .afar-pyro span {
+    position: absolute;
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: hsl(var(--pyroHue), 90%, 65%);
+    box-shadow: 0 0 10px hsl(var(--pyroHue), 90%, 60%), 0 0 22px hsl(var(--pyroHue), 90%, 55%);
+    animation: afarPyroSpark 1.6s ease-out infinite;
+    opacity: 0;
+  }
+  .afar-pyro span:nth-child(1) { --sparkAng: -30deg; animation-delay: inherit; }
+  .afar-pyro span:nth-child(2) { --sparkAng: -15deg; animation-delay: 0.04s; }
+  .afar-pyro span:nth-child(3) { --sparkAng: 0deg;   animation-delay: 0.08s; }
+  .afar-pyro span:nth-child(4) { --sparkAng: 15deg;  animation-delay: 0.12s; }
+  .afar-pyro span:nth-child(5) { --sparkAng: 30deg;  animation-delay: 0.16s; }
+
+  /* Floor props — Hennessy + beer + tall cans */
+  .afar-floor-props {
+    position: absolute;
+    bottom: 6%;
+    left: 0; right: 0;
+    height: 60px;
+    pointer-events: none;
+  }
+  .afar-bottle {
+    position: absolute;
+    bottom: 0;
+    width: 16px;
+    height: 56px;
+    filter: drop-shadow(0 4px 6px rgba(0, 0, 0, 0.6));
+  }
+  .afar-bottle-henn {
+    /* Hennessy — dark-amber glass, long neck, flared body, white label band */
+    background:
+      linear-gradient(180deg, #2a0a04 0 6px, #1a0603 6px 18px, #52170a 18px 100%);
+    border-radius: 4px 4px 3px 3px;
+    box-shadow: inset -3px 0 6px rgba(0, 0, 0, 0.6), inset 2px 0 4px rgba(255, 180, 120, 0.2);
+  }
+  .afar-bottle-henn::before {
+    /* Label stripe */
+    content: '';
+    position: absolute;
+    top: 32px; left: 1px; right: 1px;
+    height: 10px;
+    background: linear-gradient(180deg, #f0e0c0, #d4a878);
+    box-shadow: 0 0 6px rgba(255, 220, 160, 0.4);
+  }
+  .afar-bottle-beer {
+    /* Amber beer bottle */
+    background:
+      linear-gradient(180deg, #1a0f08 0 5px, #3a2410 5px 16px, #8a5a18 16px 100%);
+    border-radius: 3px 3px 2px 2px;
+    width: 14px; height: 48px;
+    box-shadow: inset -2px 0 4px rgba(0, 0, 0, 0.6), inset 2px 0 3px rgba(255, 200, 80, 0.25);
+  }
+  .afar-bottle-beer::before {
+    content: '';
+    position: absolute;
+    top: 22px; left: 1px; right: 1px;
+    height: 6px;
+    background: rgba(255, 220, 80, 0.8);
+  }
+  .afar-bottle-tall {
+    /* Tall can — pill silhouette */
+    background:
+      linear-gradient(180deg, #1a0a08 0 3px, #d2721a 3px 10px, #c2580a 10px 90%, #82320a 90% 100%);
+    border-radius: 6px;
+    width: 20px; height: 58px;
+    box-shadow: inset -3px 0 4px rgba(0, 0, 0, 0.5), inset 2px 0 3px rgba(255, 200, 120, 0.3);
+  }
+
+  /* Confetti — small falling squares, each with its own animation-delay */
+  .afar-confetti {
+    position: absolute; inset: 0;
+    pointer-events: none;
+  }
+  .afar-confetti-piece {
+    position: absolute;
+    top: -20px;
+    width: 8px; height: 12px;
+    background: hsl(var(--confHue), 90%, 65%);
+    animation: afarConfettiFall linear infinite;
+  }
+
+  /* Smoke layer — three stacked floor-huggers. Each appears one ZOOTED level
+     sooner than the last. Level 3 = all three visible, full opacity. */
+  .afar-smoke {
+    position: absolute;
+    left: 0; right: 0; bottom: 0;
+    pointer-events: none;
+    opacity: 0;
+    mix-blend-mode: screen;
+    transition: opacity 2000ms ease-out, height 2000ms ease-out;
+  }
+  .afar-smoke-1 {
+    height: 30%;
+    background: radial-gradient(ellipse 140% 100% at 50% 100%, rgba(160, 230, 180, 0.38) 0%, rgba(80, 160, 110, 0.18) 40%, transparent 80%);
+    animation: afarSmokeDrift 9s ease-in-out infinite;
+  }
+  .afar-smoke-2 {
+    height: 55%;
+    background: radial-gradient(ellipse 160% 120% at 50% 100%, rgba(180, 255, 190, 0.42) 0%, rgba(110, 190, 130, 0.22) 50%, transparent 85%);
+    animation: afarSmokeDrift 11s ease-in-out 1s infinite reverse;
+  }
+  .afar-smoke-3 {
+    height: 88%;
+    background:
+      radial-gradient(ellipse 180% 130% at 50% 100%, rgba(210, 255, 220, 0.55) 0%, rgba(140, 220, 160, 0.28) 55%, transparent 90%),
+      radial-gradient(circle 40% at 30% 78%, rgba(180, 240, 200, 0.25) 0%, transparent 70%);
+    animation: afarSmokeDrift 13s ease-in-out 0.5s infinite;
+  }
+  .afar-root[data-zooted="1"] .afar-smoke-1 { opacity: 0.6; }
+  .afar-root[data-zooted="2"] .afar-smoke-1 { opacity: 0.75; }
+  .afar-root[data-zooted="2"] .afar-smoke-2 { opacity: 0.7; }
+  .afar-root[data-zooted="3"] .afar-smoke-1 { opacity: 0.85; }
+  .afar-root[data-zooted="3"] .afar-smoke-2 { opacity: 0.82; }
+  .afar-root[data-zooted="3"] .afar-smoke-3 { opacity: 0.78; }
+
+  /* Extra disco pulse when a beat fires (is-grooving on the root). */
+  .afar-root[data-grooving="1"] .afar-disco-ball { box-shadow: 0 0 54px rgba(255, 220, 240, 0.9), 0 0 96px rgba(255, 80, 200, 0.7), inset 0 0 24px rgba(0, 0, 0, 0.6); }
+
+  @keyframes afarNeonFlicker {
+    0%, 100% { opacity: 0.7; filter: brightness(1); }
+    40%      { opacity: 1;   filter: brightness(1.35); }
+    45%      { opacity: 0.35; }
+    47%      { opacity: 1; }
+    60%      { opacity: 0.7; }
+  }
+  @keyframes afarNeonHue {
+    from { filter: hue-rotate(0deg); }
+    to   { filter: hue-rotate(360deg); }
+  }
+  @keyframes afarDiscoSpin {
+    from { transform: rotate(0deg); }
+    to   { transform: rotate(360deg); }
+  }
+  @keyframes afarBeamSweep {
+    0%   { transform: rotate(calc(-1 * var(--beamTilt, 30deg))); opacity: 0.75; }
+    50%  { transform: rotate(var(--beamTilt, 30deg)); opacity: 0.9; }
+    100% { transform: rotate(calc(-1 * var(--beamTilt, 30deg))); opacity: 0.75; }
+  }
+  @keyframes afarLaserA {
+    0%   { transform: rotate(-14deg) translateY(0); }
+    50%  { transform: rotate(14deg) translateY(6%); }
+    100% { transform: rotate(-14deg) translateY(0); }
+  }
+  @keyframes afarLaserB {
+    0%   { transform: rotate(12deg) translateY(0); }
+    50%  { transform: rotate(-12deg) translateY(-4%); }
+    100% { transform: rotate(12deg) translateY(0); }
+  }
+  @keyframes afarLaserC {
+    0%   { transform: rotate(-8deg) translateY(-2%); }
+    50%  { transform: rotate(8deg) translateY(3%); }
+    100% { transform: rotate(-8deg) translateY(-2%); }
+  }
+  @keyframes afarSpeakerThump {
+    0%   { transform: scale(1); }
+    40%  { transform: scale(1.06); box-shadow: 0 0 36px rgba(255, 100, 200, 0.55), inset 0 0 40px rgba(255, 100, 200, 0.3); }
+    100% { transform: scale(1); }
+  }
+  @keyframes afarConeThump {
+    0%   { transform: scale(1); }
+    40%  { transform: scale(1.12); box-shadow: inset 0 0 32px rgba(255, 100, 200, 0.55); }
+    100% { transform: scale(1); }
+  }
+  @keyframes afarPyroFire {
+    /* The shooter itself does nothing — the child <span> sparks each play
+       on the inner keyframe. This outer animation just acts as a heartbeat. */
+    0%, 100% { opacity: 1; }
+  }
+  @keyframes afarPyroSpark {
+    0%   { opacity: 0; transform: translate(0, 0) scale(0.4); }
+    5%   { opacity: 1; transform: translate(0, 0) scale(1); }
+    100% { opacity: 0; transform: rotate(var(--sparkAng)) translateY(-320px) scale(0.4); }
+  }
+  @keyframes afarConfettiFall {
+    0%   { transform: translateY(0) rotate(0deg); opacity: 0; }
+    5%   { opacity: 1; }
+    100% { transform: translateY(800px) rotate(720deg); opacity: 0; }
+  }
+  @keyframes afarSmokeDrift {
+    0%, 100% { transform: translateX(0) scale(1, 1); }
+    50%      { transform: translateX(30px) scale(1.05, 1.02); }
   }
 }

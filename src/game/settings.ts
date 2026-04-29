@@ -65,17 +65,24 @@ export function resetSettings(): void {
 // ─────────────────────────────────────────────────────────────
 // Save-data keys (not settings, but kept here so one file owns
 // the full inventory of keys we persist into localStorage).
+//
+// 0.3.2: the BossSelect fork now appears on every Undead Burg clear
+// (not just the first). We no longer track a "seen" flag; only the
+// last pick is remembered, purely for pre-focusing the matching
+// panel on the next appearance. `resetBossSelectGate` still exists
+// so the dev console / Settings → Reset save data can forget the
+// last pick — nothing else reads the flag anymore.
 // ─────────────────────────────────────────────────────────────
 
-const BOSS_SELECT_SEEN_KEY = 'abyss_boss_select_seen';
 const BOSS_SELECT_CHOICE_KEY = 'abyss_boss_select_choice';
 const HIGHSCORES_KEY = 'abyss_highscores';
 
 export type BossSelectChoice = 'taurus' | 'afroman';
 
+/** Last boss picked from the fork, or null if the player has never chosen.
+ *  Used to pre-focus that panel when the fork re-appears next run. */
 export function getRememberedBossChoice(): BossSelectChoice | null {
   try {
-    if (localStorage.getItem(BOSS_SELECT_SEEN_KEY) !== '1') return null;
     const v = localStorage.getItem(BOSS_SELECT_CHOICE_KEY);
     if (v === 'taurus' || v === 'afroman') return v;
     return null;
@@ -86,17 +93,19 @@ export function getRememberedBossChoice(): BossSelectChoice | null {
 
 export function persistBossChoice(choice: BossSelectChoice): void {
   try {
-    localStorage.setItem(BOSS_SELECT_SEEN_KEY, '1');
     localStorage.setItem(BOSS_SELECT_CHOICE_KEY, choice);
   } catch { /* ignore */ }
 }
 
-/** Wipe the boss-select memory so the fork re-appears on the next run.
- *  Invoked from Settings → Reset save data. */
+/** Wipe the remembered pick so the next BossSelect appearance has no
+ *  pre-selected panel. Does not suppress the screen — as of 0.3.2 the
+ *  fork always shows on every Burg clear. */
 export function resetBossSelectGate(): void {
   try {
-    localStorage.removeItem(BOSS_SELECT_SEEN_KEY);
     localStorage.removeItem(BOSS_SELECT_CHOICE_KEY);
+    // Legacy 0.3.0/0.3.1 key — clear it too so upgraded saves don't leave
+    // orphaned flags lying around. No current code reads it.
+    localStorage.removeItem('abyss_boss_select_seen');
   } catch { /* ignore */ }
 }
 

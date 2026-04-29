@@ -4,11 +4,131 @@ All notable changes to Cursed Echoes. Format loosely follows [Keep a Changelog](
 
 ---
 
+## [0.3.2] — Boss-select fork always shows; last pick pre-focused
+
+Follow-up fix from playtest: the fork screen at the end of Undead Burg was only appearing on the first-ever clear, then routing silently to the remembered choice on every subsequent run. That made replaying the opposite boss impossible without wiping save data through Settings / Dev. The design now respects the player's agency every run.
+
+### Behaviour change
+
+- **Every Undead Burg clear** transitions through the `'boss-select'` phase. `startBossEntryFlow` no longer short-circuits when a remembered choice exists.
+- The remembered pick is still persisted — it's just used now to **pre-focus the matching panel** when the fork mounts, so repeating your last pick is a single Enter press. Switching to the other side is arrow-key / click as always.
+- A small *Last chosen: …* hint appears under the keyboard instructions when a remembered pick exists, replacing the old "This choice is remembered." warning. First-ever clears (no remembered pick) show no hint.
+
+### Storage
+
+- The `abyss_boss_select_seen` localStorage flag is retired — no code reads it anymore. `resetBossSelectGate()` still clears it defensively on upgraded saves so no orphaned keys linger.
+- `abyss_boss_select_choice` stays as the single source of truth for the pre-focus default. Reset save data still wipes it.
+
+### Files touched
+
+- `src/game/settings.ts` — retired `BOSS_SELECT_SEEN_KEY`; `getRememberedBossChoice` no longer depends on the `_seen` flag; `persistBossChoice` writes only the choice; `resetBossSelectGate` clears both keys defensively.
+- `src/App.tsx` — `startBossEntryFlow`'s remembered-choice fast-path deleted; `renderAppTree` passes `initialChoice={getRememberedBossChoice()}` to `BossSelect`.
+- `src/screens/BossSelect.tsx` — new `initialChoice?: BossSelectChoice` prop maps onto the initial focused panel; "This choice is remembered" warning replaced with a conditional *Last chosen* hint.
+- `package.json` + `src/version.ts` — 0.3.2.
+
+---
+
+## [0.3.1] — AfroMan polish pass: custom stage, passive ZOOTED, zone Jessyka, select-replay fix
+
+A focused follow-up on the 0.3.0 secret-route release — most of this is AfroMan-fight presentation and tuning based on playtest notes. The fight now renders on a dedicated stage (disco ball, rotating light beams, pyrotechnic sparks, speaker stacks thumping on every detected beat, falling confetti, Hennessy / beer / tall-can bottle silhouettes on the floor) with a smoke layer that fills progressively as the passive ZOOTED timer ticks up. Jessyka's Q-summon is no longer boss-only — she can be called in zones too and will auto-target falling words. A critical bug where replaying Undead Burg after picking AfroMan once skipped the 20-second intro cutscene is fixed. The dev console gained six new actions for QA-ing all of this.
+
+### AfroMan stage — `AfromanArena.tsx` (new)
+
+The generic psychedelic overlay is replaced by a dedicated arena component rendering nine stacked layers below the action canvas:
+
+- **Stage backdrop** — deep-purple vanishing-point gradient with an amber stage-lip stripe at the floor.
+- **Neon wall** — seven vertical neon bars along the rear wall, each in a different hue, independently flickering + cycling through the spectrum over 8 s.
+- **Disco ball** — center-top, spinning on a 4 s loop with a conic reflection mask and its own halo that punches up on every detected beat.
+- **Stage beams** — four rotating wedge-shaped beams radiating from behind the disco ball (hot pink / cyan / gold / green), each on a 9 s staggered sweep.
+- **Lasers** — three crossing laser lines (magenta / blue / gold) with independent pan animations.
+- **Speaker stacks** — two tall stacks at the stage edges, each with dual cones. Both scale up briefly when the `grooving` prop flips true (fired by each detected bass kick from `subscribeBeat`).
+- **Pyrotechnics** — four shooter anchors at stage floor positions, each with five spark particles that launch upward in a fan pattern on a 6 s staggered loop across all four shooters.
+- **Confetti** — 14 falling coloured squares at rainbow hues, independent animation delays + durations.
+- **Floor props** — six CSS-shaped bottles strewn across the stage: Hennessy silhouettes (dark-amber glass with a white-label band), amber beer bottles, and tall-can pills with ridge-stripe highlights.
+
+### ZOOTED reworked — passive timer, permanent stacks
+
+ZOOTED is no longer a contact debuff. It now ticks up **+1 stack every 10 seconds** of fight time, capped at 3, with **no decay**. The arena's smoke floor swells to match:
+
+- **Stack 0** — stage fully visible, no smoke.
+- **Stack 1** — thin haze at the bottom 30 %, `afar-smoke-1` at 0.60 opacity.
+- **Stack 2** — `-1` climbs to 0.75, `-2` layer appears covering up to 55 %.
+- **Stack 3** — all three layers live, ~0.78–0.85 opacity, consuming ~88 % of the arena.
+
+Transitions between levels are 2 s ease-out so the smoke "rolls in" rather than popping.
+
+Constants: `ZOOTED_DECAY_INTERVAL_SEC` → `ZOOTED_TICK_INTERVAL_SEC = 10`. `applyZootedStack` + `tryDecayZooted` removed; replaced by `tickZooted(d, time)` called every frame from `updateBoss` only when `b.def.id === 'afroman'`. Munchie words no longer apply ZOOTED on contact — they now deal standard HP damage like any other `isBossAttack` word-projectile, so avoiding them still matters. The `devAddZooted` / `devClearZooted` buttons still work with the new timer semantics (the +1 bump reseeds the next tick deadline, the clear fully resets).
+
+### Q-summon Jessyka now works in zones (0.3.0a)
+
+`Q` with ≥1 estus charge summons Jessyka in both zones and boss fights. The `summonSource: 'estus'` branch in `updateJessyka` splits sub-behaviour by phase:
+
+- **Boss fight with a live boss** → chase boss projectiles (original 0.2.6 behaviour).
+- **Zone or boss without projectiles** → auto-target falling words the player isn't typing, same code path as the word-summon variant but honouring the 25 s (or 50 s in Kiln) auto-despawn timer.
+
+`trySummonEstusJessyka` drops the hard "must have a live boss" precondition; the intro/defeat guards now only apply when the phase is actually `boss`. The HUD's Q-availability indicator lights up during any zone frame with ≥1 estus and no existing Jessyka. Menu help updated: *"Q burns 1 estus to summon Jessyka for 25 s — she targets words in zones and parries projectiles in boss fights."*
+
+### AfroMan only spawns his own pools
+
+The generic `word` pattern (which fires a `DEATH / DOOM / RUIN / ASHES / …` runner) was removed from AfroMan's phase-3 pattern list. His phases are now:
+
+- **P1 (100-66 %)**: `single`, `munchie`
+- **P2 (66-33 %, "CRANK IT UP")**: `single`, `volley`, `munchie`, `beat-volley`
+- **P3 (33-0 %, "ENCORE TIME")**: `volley`, `munchie`, `beat-volley`
+
+The `word` branch in `spawnBossAttack` also gained a defense-in-depth fallback: if any future config or dev cheat routes it through during an AfroMan fight, the generic `GOTHIC_WORDS`-derived pool is swapped out for `AFROMAN_MUNCHIES` (with `isMunchie: true` set on the spawned word) so the gothic vocabulary can never appear in a rhythm fight.
+
+### Intro cutscene banner fix
+
+*"AFROMAN ENTERS THE CYPHER"* was clipped on the left edge at 56 px / 0.22 em tracking (~1200 px wide inside a 1024 px frame). Reduced to **40 px / 0.12 em** tracking with `max-width: 94 %` and centered alignment; the full text now lands at ~620 px and fits comfortably.
+
+### Boss-select replay — intro cutscene no longer skipped
+
+Critical fix: on the second+ time the player cleared Undead Burg with AfroMan as the remembered choice, they were dropped straight into the fight with no music and no reveal. `startBossEntryFlow`'s remembered-choice branch was calling `enterBoss('afroman')` directly — but that assumes the 20 s cutscene already ran (it sets `introStart = 0` and skips `sfxBossAppear` / `playMusic`). The cutscene + music fade-in only live in the `'boss-intro-afroman'` phase, which was never entered on replays.
+
+The fix mirrors `commitBossChoice`'s branching inside `startBossEntryFlow`'s remembered path:
+- remembered = `'afroman'` → clear the arena, set `statsRef.current.secretBossChosen = true`, jump to `'boss-intro-afroman'` (the AfromanIntro component handles music + reveal beats, then calls `enterBoss('afroman')` itself on completion).
+- remembered = `'taurus'` → `enterBoss('taurus')` as before (his 4.5 s canvas-silhouette intro is baked into `enterBoss` itself, so no extra wiring needed).
+
+All five paths to AfroMan (first-ever commit, replay-after-commit, dev Open boss-select, dev ★ AfroMan, and the forced commit from BossSelect) now hit the full 20 s intro cutscene.
+
+### Dev Console expansion
+
+New `AfroMan / Secret route` section:
+
+- **◆ Open boss-select** — wipes the gate and routes straight to the fork overlay (for QA of the choice UX without replaying Undead Burg).
+- **Reset save data** — clears the boss-select gate + highscores + the in-memory `highscores` state. Audio + accessibility settings are preserved.
+- **+1 ZOOTED** — bumps the passive stack counter; reseeds the next tick deadline.
+- **Clear ZOOTED** — drops stacks to 0 and resets the timer seed.
+
+Two general tools added to the `Cheats` section:
+
+- **☽ Spawn Jessyka** — force-spawn her with no estus cost. Mirrors the Q-summon path but bypasses the charge / intro / already-here guards. Honours Kiln's 2× duration.
+- **Skip boss intro** — sets `bossRef.current.introStart = 0` and kicks `nextAttackAt` / `nextPhraseAt` forward so attacks start immediately on the canonical canvas-intro bosses. (AfroMan's 20 s React overlay skips itself from 5 s in.)
+
+### Settings — Reset save data button
+
+A second reset button was added in 0.3.0; it now calls the centralised `resetBossSelectGate` + `resetHighscores` helpers from `settings.ts`. An explicit confirm dialog gates the wipe. Audio / accessibility settings are untouched. The in-memory `highscores` state on the App component was also re-rendered via `setHighscores([])` so the Hall of Records reflects the wipe without a remount.
+
+### Files touched in 0.3.1
+
+- `src/App.tsx` — Q-summon phase split, zone word-targeting fallback in `updateJessyka`, `tickZooted` replaces `applyZootedStack` + `tryDecayZooted`, `AfromanArena` integration, six new dev callbacks, `startBossEntryFlow` remembered-path intro fix.
+- `src/screens/AfromanArena.tsx` — new.
+- `src/screens/AfromanIntro.tsx` — banner CSS only.
+- `src/screens/DevPanel.tsx` — new buttons + section.
+- `src/screens/Menu.tsx` — Q help line rewrite.
+- `src/screens/Settings.tsx` — moved `resetBossSelectGate` import from App → `game/settings.ts`.
+- `src/game/settings.ts` — hosts all localStorage key helpers (`getRememberedBossChoice`, `persistBossChoice`, `resetBossSelectGate`, `resetHighscores`).
+- `src/game/config.ts` — AfroMan phase-3 pattern list cleaned, comment updated for passive ZOOTED semantics.
+- `src/hud/BossBar.tsx` — unchanged (already had afroman skin).
+- `src/index.css` — ≈320 LOC of new arena styles (`afar-*`), banner font-size reduction, zooted CSS untouched.
+- `package.json` + `src/version.ts` — 0.3.1.
+
+---
+
 ## [0.3.0] — The Secret Route: AfroMan, the rhythm boss
 
 A hidden fork in the trial. After the Undead Burg, the game pauses for a single choice: Taurus Demon (canon) or **AfroMan** (secret). The choice is remembered per save file. Picking AfroMan diverts the run into a rhythm-parry fight against a tanky, music-synced boss set to the *TallCans.mp3* track. A 20-second buildup cutscene plays the song's intro while the sprite reveals from silhouette; the drop coincides with the fight beginning. Beat-matched parries grant a PERFECT window with bonus damage. A new non-lethal ZOOTED debuff replaces contact damage from the themed "munchie" words.
-
-**Patch 0.3.0a (same release)**: `Q` estus-summon now works in **zones** too — she defaults to word-targeting when there's no boss firing projectiles. The HUD's Q-availability indicator lights up during any zone frame with ≥1 estus. Dev Console gained an `AfroMan / Secret route` section (open boss-select, reset save data, ±ZOOTED) and two general tools (`Spawn Jessyka`, `Skip boss intro`).
 
 ### The fork — one-time boss select
 
