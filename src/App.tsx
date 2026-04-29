@@ -528,44 +528,19 @@ export default function App() {
     setPhase('boss');
   }, [beginBonfire]);
 
-  /** Pick a boss for the Undead Burg fork. Called from:
-   *   - updateZoneTimer when the burg timer elapses (intercepts zone.bossId = 'taurus')
-   *   - the dev panel indirectly via jumpToBoss
+  /** Pick a boss for the Undead Burg fork. Called from updateZoneTimer
+   *  when the burg timer elapses (intercepts zone.bossId = 'taurus').
    *
-   *  First time: routes to the 'boss-select' phase so the player can choose.
-   *  Subsequent runs: remembered choice → replay the same cutscene/music
-   *    path the first commit went through (afroman → 20 s intro cutscene
-   *    phase, taurus → default canvas boss intro via enterBoss). The
-   *    original bug shipped in 0.3.0 routed remembered 'afroman' straight
-   *    through enterBoss, which assumes the intro already ran — players
-   *    got dropped into the fight with no music and no reveal. */
+   *  0.3.2: the fork screen ALWAYS appears. The last pick is still
+   *  remembered, but only to pre-focus the matching panel — the player
+   *  gets to commit fresh every run. */
   const startBossEntryFlow = useCallback((bossIdFromZone: string) => {
-    // Only the burg boss is subject to the fork. Later bosses (ornstein, gwyn)
-    // go straight through.
+    // Later bosses (ornstein, gwyn) go straight through — no fork there.
     if (bossIdFromZone !== 'taurus') {
       enterBoss(bossIdFromZone);
       return;
     }
-    const remembered = getRememberedBossChoice();
-    if (remembered) {
-      // Replay the remembered choice with the full reveal path — same as
-      // if the player had just committed from the BossSelect screen. We
-      // inline the two branches (instead of calling commitBossChoice) so
-      // we don't have to hoist that callback's declaration above this one.
-      statsRef.current.secretBossChosen = remembered === 'afroman';
-      if (remembered === 'afroman') {
-        // 20 s intro cutscene overlay handles music fade-in + sprite reveal.
-        wordsRef.current = [];
-        projectilesRef.current = [];
-        activeWordRef.current = null;
-        phaseRef.current = 'boss-intro-afroman';
-        setPhase('boss-intro-afroman');
-      } else {
-        enterBoss('taurus');
-      }
-      return;
-    }
-    // First encounter — clear the arena, show the fork overlay.
+    // Clear the arena, then surface the fork overlay.
     wordsRef.current = [];
     projectilesRef.current = [];
     activeWordRef.current = null;
@@ -4174,9 +4149,13 @@ function renderAppTree(p: RenderProps) {
           />
         )}
 
-        {/* Boss-select fork (Undead Burg, first-time only) */}
+        {/* Boss-select fork (Undead Burg — always shown on clear, last pick
+            pre-focused as a convenience so Enter = replay). */}
         {p.phase === 'boss-select' && (
-          <BossSelect onPick={p.commitBossChoice} />
+          <BossSelect
+            onPick={p.commitBossChoice}
+            initialChoice={getRememberedBossChoice() ?? undefined}
+          />
         )}
 
         {/* AfroMan 20s intro cutscene — sprite reveal + music fade-in */}

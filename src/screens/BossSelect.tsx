@@ -22,6 +22,9 @@ export type {BossSelectChoice};
 
 export type BossSelectProps = {
   onPick: (choice: BossSelectChoice) => void;
+  /** Which panel to focus on mount. Used to pre-select the player's last
+   *  pick when the fork re-appears on a replay. Omit for default (Taurus). */
+  initialChoice?: BossSelectChoice;
 };
 
 const PANELS: {
@@ -55,8 +58,14 @@ const PANELS: {
   },
 ];
 
-export function BossSelect({onPick}: BossSelectProps) {
-  const [focus, setFocus] = useState<0 | 1>(0);
+export function BossSelect({onPick, initialChoice}: BossSelectProps) {
+  // Match `initialChoice` against the PANELS order so the pre-focus is
+  // schema-stable even if the array gets reordered later. Falls back to 0
+  // (Taurus) when initialChoice is missing / unrecognized.
+  const initialFocus: 0 | 1 = initialChoice
+    ? (PANELS.findIndex(p => p.id === initialChoice) === 1 ? 1 : 0)
+    : 0;
+  const [focus, setFocus] = useState<0 | 1>(initialFocus);
   const [committing, setCommitting] = useState<BossSelectChoice | null>(null);
   const mountedAt = useRef(performance.now());
 
@@ -151,9 +160,11 @@ export function BossSelect({onPick}: BossSelectProps) {
           <span>to commit</span>
         </div>
 
-        <div className="bs-warn">
-          <span>This choice is remembered.</span>
-        </div>
+        {initialChoice && (
+          <div className="bs-warn">
+            <span>Last chosen: <strong>{initialChoice === 'afroman' ? 'AfroMan' : 'Taurus Demon'}</strong></span>
+          </div>
+        )}
       </div>
     </div>
   );

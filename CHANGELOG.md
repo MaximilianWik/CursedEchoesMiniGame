@@ -4,6 +4,30 @@ All notable changes to Cursed Echoes. Format loosely follows [Keep a Changelog](
 
 ---
 
+## [0.3.2] — Boss-select fork always shows; last pick pre-focused
+
+Follow-up fix from playtest: the fork screen at the end of Undead Burg was only appearing on the first-ever clear, then routing silently to the remembered choice on every subsequent run. That made replaying the opposite boss impossible without wiping save data through Settings / Dev. The design now respects the player's agency every run.
+
+### Behaviour change
+
+- **Every Undead Burg clear** transitions through the `'boss-select'` phase. `startBossEntryFlow` no longer short-circuits when a remembered choice exists.
+- The remembered pick is still persisted — it's just used now to **pre-focus the matching panel** when the fork mounts, so repeating your last pick is a single Enter press. Switching to the other side is arrow-key / click as always.
+- A small *Last chosen: …* hint appears under the keyboard instructions when a remembered pick exists, replacing the old "This choice is remembered." warning. First-ever clears (no remembered pick) show no hint.
+
+### Storage
+
+- The `abyss_boss_select_seen` localStorage flag is retired — no code reads it anymore. `resetBossSelectGate()` still clears it defensively on upgraded saves so no orphaned keys linger.
+- `abyss_boss_select_choice` stays as the single source of truth for the pre-focus default. Reset save data still wipes it.
+
+### Files touched
+
+- `src/game/settings.ts` — retired `BOSS_SELECT_SEEN_KEY`; `getRememberedBossChoice` no longer depends on the `_seen` flag; `persistBossChoice` writes only the choice; `resetBossSelectGate` clears both keys defensively.
+- `src/App.tsx` — `startBossEntryFlow`'s remembered-choice fast-path deleted; `renderAppTree` passes `initialChoice={getRememberedBossChoice()}` to `BossSelect`.
+- `src/screens/BossSelect.tsx` — new `initialChoice?: BossSelectChoice` prop maps onto the initial focused panel; "This choice is remembered" warning replaced with a conditional *Last chosen* hint.
+- `package.json` + `src/version.ts` — 0.3.2.
+
+---
+
 ## [0.3.1] — AfroMan polish pass: custom stage, passive ZOOTED, zone Jessyka, select-replay fix
 
 A focused follow-up on the 0.3.0 secret-route release — most of this is AfroMan-fight presentation and tuning based on playtest notes. The fight now renders on a dedicated stage (disco ball, rotating light beams, pyrotechnic sparks, speaker stacks thumping on every detected beat, falling confetti, Hennessy / beer / tall-can bottle silhouettes on the floor) with a smoke layer that fills progressively as the passive ZOOTED timer ticks up. Jessyka's Q-summon is no longer boss-only — she can be called in zones too and will auto-target falling words. A critical bug where replaying Undead Burg after picking AfroMan once skipped the 20-second intro cutscene is fixed. The dev console gained six new actions for QA-ing all of this.
