@@ -261,6 +261,12 @@ export default function App() {
   // Estus
   const estusChargesRef = useRef(MAX_ESTUS);
   const estusActiveUntilRef = useRef(0);
+  // Post-chug godmode window. Set AT Tab press (not inside the chug timeout)
+  // so there's zero delay between the heal moment and i-frames kicking in —
+  // setTimeout can drift when the tab is throttled or the event loop is busy,
+  // which produced the "godmode doesn't always start immediately" bug.
+  // Godmode is live when: estusActiveUntilRef <= time < estusGodmodeUntilRef.
+  const estusGodmodeUntilRef = useRef(0);
 
   // Zone / boss
   const zoneIdxRef = useRef(0);
@@ -347,6 +353,7 @@ export default function App() {
     staminaRef.current = MAX_STAMINA;
     estusChargesRef.current = MAX_ESTUS;
     estusActiveUntilRef.current = 0;
+    estusGodmodeUntilRef.current = 0;
     zoneIdxRef.current = 0;
     bossRef.current = null;
     statsRef.current = createStats();
@@ -606,21 +613,23 @@ export default function App() {
     }
     estusChargesRef.current -= 1;
     estusActiveUntilRef.current = now + ESTUS_CHUG_MS;
+    // Grant the post-chug i-frame window AT PRESS TIME, not inside the heal
+    // setTimeout. This makes the godmode window frame-perfect: exactly at
+    // `now + ESTUS_CHUG_MS` the isInvulnerable helper starts returning true,
+    // regardless of setTimeout drift (browser throttling, main-thread jank).
+    // The window is (chug-end, chug-end + ESTUS_GODMODE_MS) — vulnerability
+    // during the chug itself is preserved because isInvulnerable requires
+    // `time >= estusActiveUntilRef.current` to consider godmode active.
+    estusGodmodeUntilRef.current = now + ESTUS_CHUG_MS + ESTUS_GODMODE_MS;
     statsRef.current.estusDrunk += 1;
     sfxEstus();
-    // Heal at end of chug. The 4-second post-chug i-frame window is granted
-    // here (not at chug start) so the player is still vulnerable while
-    // sipping — the reward for committing to the animation is a brief
-    // invincibility window on the other side.
+    // Heal + FX at end of chug. The setTimeout drives ONLY the visuals and
+    // particles — i-frames above are already scheduled, so this timeout
+    // firing a few frames late (throttled tab, GC pause) cannot cause
+    // invulnerability gaps anymore.
     window.setTimeout(() => {
       if (phaseRef.current === 'gameover' || phaseRef.current === 'victory') return;
       healthRef.current = Math.min(MAX_HEALTH, healthRef.current + ESTUS_HEAL);
-      // 4-second godmode window — extends iFrames and tags the sprite with a
-      // golden-pulse class so it's visually obvious. The class is removed on
-      // a timer so the glow fades out naturally even if the player gets hit
-      // or drinks another estus mid-window (second drink refreshes the class).
-      const godEnd = performance.now() + ESTUS_GODMODE_MS;
-      iFramesUntilRef.current = Math.max(iFramesUntilRef.current, godEnd);
       sfxEstusGodmode();
       const img = playerImgRef.current;
       if (img) {
@@ -735,7 +744,7 @@ export default function App() {
       bgStateRef, activeWordRef, lastWordsRef, totalWordsSpawnedRef, charWidthsRef,
       shakeUntilRef, shakeMagRef, castingUntilRef, hitFlashUntilRef, damageTextsRef, ghostMessageRef,
       dodgeUntilRef, iFramesUntilRef, dodgeDirectionRef, staminaRef,
-      estusChargesRef, estusActiveUntilRef,
+      estusChargesRef, estusActiveUntilRef, estusGodmodeUntilRef,
       zoneIdxRef, zoneStartTimeRef, zoneElapsedRef, bossRef, bossAnnouncementRef,
       statsRef,
       jessykaRef, jessykaKissesRef, jessykaImgRef,
@@ -838,6 +847,7 @@ type LoopDeps = {
   staminaRef: React.RefObject<number>;
   estusChargesRef: React.RefObject<number>;
   estusActiveUntilRef: React.RefObject<number>;
+  estusGodmodeUntilRef: React.RefObject<number>;
   zoneIdxRef: React.RefObject<number>;
   zoneStartTimeRef: React.RefObject<number>;
   zoneElapsedRef: React.RefObject<number>;
@@ -978,6 +988,7 @@ function runGameLoop(d: LoopDeps): () => void {
 
     // ── Hit flash overlay ────────────────────────────────────────
     updateHitFlash(d, time, s.reduceMotion);
+    updateEstusGodmodeVisual(d, time);
 
     // ── HUD tick (10 Hz) ──────────────────────────────────────
     if (time - lastHudBump > 100) {
@@ -1680,7 +1691,7 @@ function updateProjectiles(d: LoopDeps, ctx: CanvasRenderingContext2D, time: num
     const dxp = PLAYER.x - p.x, dyp = PLAYER.y - p.y;
     const distP = Math.sqrt(dxp * dxp + dyp * dyp);
     if (distP < 45 && !p.deflected) {
-      if (time < d.iFramesUntilRef.current) {
+      if (isInvulnerable(d, time)) {
         d.statsRef.current.dodgesSuccessful += 1;
         d.damageTextsRef.current.push({
           x: PLAYER.x, y: PLAYER.y - 40,
@@ -2292,8 +2303,35 @@ function updateWords(d: LoopDeps, ctx: CanvasRenderingContext2D, textCtx: Canvas
     // (drawShockwave does the ALPHA->number interpolation per frame — the
     // colour string above uses the same 'ALPHA' placeholder convention.)
 
-    // Movement. Suppressed during spawn animations — position is authoritative.
-    if (!inSpawn && w.kind !== 'chanter' && w.speed > 0) {
+    // ── Grace-push drift. While Jessyka's veil is pushing this word outward,
+    //    the homing-toward-player logic below is overridden with a damped
+    //    linear drift along (graceVx, graceVy). Damping ~6% per frame so the
+    //    push decays over ~800ms. Chanter words obey too so the visual push
+    //    reads across all kinds.
+    const inGracePush = w.graceUntil !== undefined && w.graceUntil > time;
+    if (inGracePush && !inSpawn) {
+      const gx = w.graceVx ?? 0, gy = w.graceVy ?? 0;
+      w.x += gx * dt;
+      w.y += gy * dt;
+      const decay = Math.pow(0.94, dt);
+      w.graceVx = gx * decay;
+      w.graceVy = gy * decay;
+      // Clamp to arena so fast-pushed words don't escape the playfield.
+      if (w.x < 20) w.x = 20;
+      if (w.x > DESIGN_W - 20 - w.text.length * 14) w.x = DESIGN_W - 20 - w.text.length * 14;
+      if (w.y < 20) w.y = 20;
+      if (w.y > DESIGN_H - 40) w.y = DESIGN_H - 40;
+    } else if (inGracePush === false && w.graceUntil !== undefined && w.graceUntil <= time) {
+      // Grace expired — clear the fields so other code (e.g. chanter movement
+      // suppression below) doesn't see stale values.
+      w.graceUntil = undefined;
+      w.graceVx = undefined;
+      w.graceVy = undefined;
+    }
+
+    // Movement. Suppressed during spawn animations AND while the grace push
+    // is active — position is authoritative in both cases.
+    if (!inSpawn && !inGracePush && w.kind !== 'chanter' && w.speed > 0) {
       const dx = PLAYER.x - w.x, dy = PLAYER.y - w.y;
       const dist = Math.sqrt(dx * dx + dy * dy);
       if (dist > 0.001) {
@@ -2471,7 +2509,7 @@ function updateWords(d: LoopDeps, ctx: CanvasRenderingContext2D, textCtx: Canvas
               const diff = Math.min(d.zoneElapsedRef.current / zone.duration, 1) * 5;
               return Math.ceil(1.5 + diff * 0.4 + w.text.length * 0.1);
             })();
-        if (time >= d.iFramesUntilRef.current) {
+        if (!isInvulnerable(d, time)) {
           applyDamageToPlayer(d, baseDmg, time);
         } else {
           d.statsRef.current.dodgesSuccessful += 1;
@@ -2613,6 +2651,17 @@ function drawDamageTexts(d: LoopDeps, textCtx: CanvasRenderingContext2D, dt: num
   textCtx.restore();
 }
 
+/** Returns true if the player should be unharmed by any incoming damage.
+ *  Combines dodge/hit i-frames with the new estus post-chug godmode window.
+ *  The godmode branch is only live when the chug has actually ended — during
+ *  the sip itself, the player remains vulnerable. */
+function isInvulnerable(d: LoopDeps, time: number): boolean {
+  if (time < d.iFramesUntilRef.current) return true;
+  const chugDone = time >= d.estusActiveUntilRef.current;
+  if (chugDone && time < d.estusGodmodeUntilRef.current) return true;
+  return false;
+}
+
 /** Jessyka grace shield — a once-per-spawn defensive ability. When damage is
  *  about to land on the player, if she is active AND hasn't spent her grace
  *  yet, she veils the player in a love-explosion: cancels the hit, pushes all
@@ -2624,169 +2673,222 @@ function tryJessykaGraceShield(d: LoopDeps, time: number): boolean {
   if (!j || j.state !== 'active' || j.graceUsed) return false;
   j.graceUsed = true;
 
-  // 1.2 s of i-frames after the shield so the player can't take a second hit
-  // the same frame some other projectile lands.
-  d.iFramesUntilRef.current = Math.max(d.iFramesUntilRef.current, time + 1200);
+  // 1.4 s of i-frames after the shield — the extra 200ms beyond 0.2.8 keeps
+  // the player safe while the veil is still visibly expanding.
+  d.iFramesUntilRef.current = Math.max(d.iFramesUntilRef.current, time + 1400);
 
-  // ── Sound: big major-chord love chord with sub impact + shimmer tail.
+  // ── Audio: layered chord. Primary grace chord fires now; a second shimmer
+  //    layer fires at 220ms to match the outer ring reaching the arena edges.
   sfxJessykaGrace();
+  window.setTimeout(() => {
+    sfxJessykaKissImpact();
+    sfxJessykaKissImpact();
+  }, 220);
+  window.setTimeout(() => sfxJessykaSummon(), 460);
 
-  // ── Visual: massive pink shockwave, almost screen-wide.
-  d.shockwavesRef.current.push({
-    x: PLAYER.x, y: PLAYER.y - 20,
-    radius: 10, maxRadius: DESIGN_W * 0.6,
-    color: 'rgba(255, 120, 200, ALPHA)',
-  });
-  // Secondary inner ring — tighter, brighter, offset in time via radius diff.
-  d.shockwavesRef.current.push({
-    x: PLAYER.x, y: PLAYER.y - 20,
-    radius: 4, maxRadius: 260,
-    color: 'rgba(255, 220, 240, ALPHA)',
-  });
-  // Third outer ring — biggest, softest, the enveloping grace aura.
-  d.shockwavesRef.current.push({
-    x: PLAYER.x, y: PLAYER.y - 20,
-    radius: 16, maxRadius: DESIGN_W * 0.75,
-    color: 'rgba(255, 160, 220, ALPHA)',
-  });
-
-  // ── Particles: 120-ish radial burst. Mix of hearts, petals, and cream sparks.
+  // ── Visual: FIVE expanding rings at staggered sizes. Each draws over a
+  //    different lifespan (smaller maxRadius fades faster), giving a layered
+  //    "wave of love rippling outward" rather than a single flat circle.
   const cx = PLAYER.x, cy = PLAYER.y - 20;
-  for (let i = 0; i < 120; i++) {
+  const ringSpecs: {delay: number; maxRadius: number; color: string}[] = [
+    {delay: 0,    maxRadius: 160,           color: 'rgba(255, 245, 252, ALPHA)'},  // inner white flare
+    {delay: 60,   maxRadius: 340,           color: 'rgba(255, 210, 236, ALPHA)'},  // bright pink
+    {delay: 140,  maxRadius: DESIGN_W * 0.55, color: 'rgba(255, 120, 205, ALPHA)'}, // main pink
+    {delay: 240,  maxRadius: DESIGN_W * 0.8,  color: 'rgba(255, 150, 220, ALPHA)'}, // outer magenta
+    {delay: 360,  maxRadius: DESIGN_W * 1.0,  color: 'rgba(255, 190, 235, ALPHA)'}, // full-arena haze halo
+  ];
+  for (const spec of ringSpecs) {
+    const push = () => {
+      d.shockwavesRef.current.push({
+        x: cx, y: cy,
+        radius: 4, maxRadius: spec.maxRadius,
+        color: spec.color,
+      });
+    };
+    if (spec.delay === 0) push();
+    else window.setTimeout(push, spec.delay);
+  }
+
+  // ── Particles — 320+ across four layers.
+  // Layer 1: dense fast radial burst (180 hearts/petals).
+  for (let i = 0; i < 180; i++) {
     if (d.particlesRef.current.length >= PARTICLE_CAP) break;
-    const ang = (i / 120) * Math.PI * 2 + Math.random() * 0.12;
-    const spd = 4 + Math.random() * 9;
+    const ang = (i / 180) * Math.PI * 2 + Math.random() * 0.1;
+    const spd = 5 + Math.random() * 11;
     d.particlesRef.current.push({
-      x: cx + Math.cos(ang) * 18,
-      y: cy + Math.sin(ang) * 18,
+      x: cx + Math.cos(ang) * 16,
+      y: cy + Math.sin(ang) * 16,
       vx: Math.cos(ang) * spd,
       vy: Math.sin(ang) * spd - 1.5,
-      life: 46, maxLife: 46, size: 3 + Math.random() * 2,
-      color: i % 3 === 0 ? '#ffd6ec' : (i % 3 === 1 ? '#ff80cc' : '#ff3d96'),
+      life: 52, maxLife: 52, size: 3 + Math.random() * 2.5,
+      color: i % 4 === 0 ? '#ffe0ee' : (i % 4 === 1 ? '#ff9dd0' : (i % 4 === 2 ? '#ff4d9e' : '#ffd6ec')),
       isHeart: Math.random() < 0.55,
     });
   }
-  // A secondary slow "petal drift" layer — lingers for 2s.
-  for (let i = 0; i < 40; i++) {
+  // Layer 2: slow drifting petals lingering ~3 s afterward.
+  for (let i = 0; i < 60; i++) {
     if (d.particlesRef.current.length >= PARTICLE_CAP) break;
     const ang = Math.random() * Math.PI * 2;
-    const spd = 0.8 + Math.random() * 2;
+    const spd = 0.6 + Math.random() * 2.2;
     d.particlesRef.current.push({
-      x: cx + (Math.random() - 0.5) * 60,
-      y: cy + (Math.random() - 0.5) * 40,
+      x: cx + (Math.random() - 0.5) * 70,
+      y: cy + (Math.random() - 0.5) * 45,
       vx: Math.cos(ang) * spd,
       vy: Math.sin(ang) * spd - 0.4,
-      life: 120, maxLife: 120, size: 2.5 + Math.random() * 1.5,
+      life: 160, maxLife: 160, size: 2.5 + Math.random() * 1.8,
       color: Math.random() < 0.5 ? '#ffe0ee' : '#ffb0d4',
-      isHeart: Math.random() < 0.35,
+      isHeart: Math.random() < 0.5,
     });
   }
-  // Overhead cream-angelic flecks above the player (veil imagery).
-  for (let i = 0; i < 30; i++) {
+  // Layer 3: overhead cream-angelic flecks drifting up (the "veil" imagery).
+  for (let i = 0; i < 50; i++) {
     if (d.particlesRef.current.length >= PARTICLE_CAP) break;
-    const ang = -Math.PI / 2 + (Math.random() - 0.5) * 1.4;
-    const spd = 2 + Math.random() * 3;
+    const ang = -Math.PI / 2 + (Math.random() - 0.5) * 1.6;
+    const spd = 2 + Math.random() * 3.5;
     d.particlesRef.current.push({
-      x: cx + (Math.random() - 0.5) * 80,
-      y: cy - 30,
+      x: cx + (Math.random() - 0.5) * 100,
+      y: cy - 40,
       vx: Math.cos(ang) * spd * 0.4,
       vy: Math.sin(ang) * spd,
-      life: 68, maxLife: 68, size: 2 + Math.random() * 1.5,
-      color: Math.random() < 0.6 ? '#fff5e0' : '#ffe0c0',
+      life: 84, maxLife: 84, size: 2 + Math.random() * 1.8,
+      color: Math.random() < 0.55 ? '#fff5e0' : '#ffe0c0',
     });
   }
+  // Layer 4: large "heart rune" burst — giant pink hearts lazy-floating up.
+  for (let i = 0; i < 30; i++) {
+    if (d.particlesRef.current.length >= PARTICLE_CAP) break;
+    const ang = -Math.PI / 2 + (Math.random() - 0.5) * 1.1;
+    const spd = 1 + Math.random() * 2;
+    d.particlesRef.current.push({
+      x: cx + (Math.random() - 0.5) * 160,
+      y: cy + (Math.random() - 0.5) * 30,
+      vx: Math.cos(ang) * spd,
+      vy: Math.sin(ang) * spd,
+      life: 180, maxLife: 180, size: 5 + Math.random() * 3,
+      color: Math.random() < 0.5 ? '#ff7fbf' : '#ff4da0',
+      isHeart: true,
+    });
+  }
+  // Delayed secondary burst at 400ms — matches the 3rd ring peaking, 60 more
+  // fast sparks emanate from the player position for a second "pulse" feel.
+  window.setTimeout(() => {
+    for (let i = 0; i < 60; i++) {
+      if (d.particlesRef.current.length >= PARTICLE_CAP) break;
+      const ang = Math.random() * Math.PI * 2;
+      const spd = 3 + Math.random() * 7;
+      d.particlesRef.current.push({
+        x: cx + (Math.random() - 0.5) * 30,
+        y: cy + (Math.random() - 0.5) * 30,
+        vx: Math.cos(ang) * spd,
+        vy: Math.sin(ang) * spd - 0.8,
+        life: 42, maxLife: 42, size: 2.5 + Math.random() * 2,
+        color: '#ffc0e0',
+        isHeart: Math.random() < 0.4,
+      });
+    }
+  }, 380);
 
-  // ── Screen flash (pink heart-hued).
-  d.hitFlashUntilRef.current = Math.max(d.hitFlashUntilRef.current, time + 360);
+  // ── Screen flash (heart-pink), wider + longer than 0.2.8.
+  d.hitFlashUntilRef.current = Math.max(d.hitFlashUntilRef.current, time + 520);
   if (d.screenFlashRef.current) {
     d.screenFlashRef.current.style.background =
-      'radial-gradient(ellipse at 50% 75%, rgba(255,150,210,0.85) 0%, rgba(255,80,180,0.45) 45%, rgba(0,0,0,0) 85%)';
-    // Revert to the default red after the flash so ordinary hits look right.
+      'radial-gradient(ellipse at 50% 75%, rgba(255,150,210,0.95) 0%, rgba(255,80,180,0.55) 45%, rgba(0,0,0,0) 85%)';
     window.setTimeout(() => {
       if (d.screenFlashRef.current) {
         d.screenFlashRef.current.style.background =
           'radial-gradient(ellipse at 50% 90%, rgba(220,20,20,0.75) 0%, rgba(120,0,0,0.4) 40%, rgba(0,0,0,0) 80%)';
       }
-    }, 700);
+    }, 900);
   }
 
-  // ── Push all hostile words outward from the player, in sync with the
-  //    explosion's outward motion. Boss-attack runners get pushed hardest;
-  //    idle words get a gentler nudge; boss phrase / Jessyka targets / any
-  //    spawn-anim'd words are left alone to avoid weird visual snaps.
-  //
-  //    Close/overlapping words (dist < 20) get a radial direction picked
-  //    evenly around the player + a firm bias upward, so a word sitting on
-  //    top of the player doesn't just wiggle in place — it gets physically
-  //    ejected in a clear direction.
-  const PUSH_BASE = 160;      // px pushed along the direction vector
-  const CLOSE_DIST = 20;      // below this we fall back to a radial angle
+  // ── Push EVERY word present on screen outward from the player, synced with
+  //    the veil's expanding motion. Instead of an instant teleport-style
+  //    reposition, each word receives a (graceVx, graceVy) velocity and a
+  //    graceUntil timestamp — the updateWords loop then drifts them outward
+  //    with damping over ~800ms, so they visibly ride the wave. Even Jessyka's
+  //    own target is released (she'll pick a new one) so nothing is missed.
+  //    The boss phrase is the ONLY exclusion — its centered frame would look
+  //    broken off-axis, and preserving phrase typing progress is important.
+  const CLOSE_DIST = 24;
   let ejectAngle = 0;
-  const eligibleForPush = (w: Word) =>
-    !w.isBossPhrase && !w.jessykaTarget && !w.spawnAnim && !w.isSpecial;
+  // Release Jessyka's current target so the word it's on isn't exempt from
+  // the push — she'll re-pick after grace expires anyway.
+  if (j.targetId !== null) {
+    const targetIdx = d.wordsRef.current.findIndex(w => w.id === j.targetId);
+    if (targetIdx !== -1) d.wordsRef.current[targetIdx].jessykaTarget = false;
+    j.targetId = null;
+    j.lettersFired = 0;
+  }
   for (const w of d.wordsRef.current) {
-    if (!eligibleForPush(w)) continue;
+    // Skip only the boss phrase (central frame stays legible) and any word
+    // still playing its spawn-in animation.
+    if (w.isBossPhrase || w.spawnAnim) continue;
     const dx = w.x - PLAYER.x, dy = w.y - PLAYER.y;
     const dist = Math.sqrt(dx * dx + dy * dy);
-    const isBossish = w.isBossAttack || w.isBossSummoned;
-    const mag = isBossish ? PUSH_BASE * 1.2 : PUSH_BASE * 0.7;
     let ux: number, uy: number;
     if (dist < CLOSE_DIST) {
-      // Word is on / inside the player. Pick a direction deterministically
-      // spread around a circle so multiple stacked words don't all fly the
-      // same way — ejectAngle rotates per word.
       const ang = ejectAngle;
-      ejectAngle += Math.PI * 2 / 5;     // next stacked word goes ~72° over
+      ejectAngle += Math.PI * 2 / 7;   // ~51° per stacked word — 7-point spread
       ux = Math.cos(ang);
       uy = Math.sin(ang);
     } else {
       ux = dx / dist;
       uy = dy / dist;
     }
-    // Always a bit of upward bias so words visibly fly "off" the player.
-    w.x += ux * mag;
-    w.y += uy * mag - 40;
-    // Keep boss-attack runner words inside the arena horizontally so they
-    // don't get shoved to a position where they'd immediately recontact.
-    if (w.x < 20) w.x = 20;
-    if (w.x > DESIGN_W - 20 - w.text.length * 14) w.x = DESIGN_W - 20 - w.text.length * 14;
+    // Magnitude scales with threat — bossish words get the strongest kick so
+    // they clearly ride the veil outward; idle zone words get a softer push.
+    const isBossish = w.isBossAttack || w.isBossSummoned;
+    const baseSpeed = isBossish ? 16 : 11;         // px/frame initial velocity
+    const upwardBias = 5;                          // every word lifts a little
+    w.graceVx = ux * baseSpeed;
+    w.graceVy = uy * baseSpeed - upwardBias;
+    w.graceUntil = time + 900;                     // ~14 frames of active drift then decay ends
   }
-  // Projectiles — splice them (grace scours the air) with bursts at each.
-  for (let i = d.projectilesRef.current.length - 1; i >= 0; i--) {
-    const p = d.projectilesRef.current[i];
+
+  // ── Projectiles: EVERY un-deflected boss projectile gets flung back (vy
+  //    reversed with a bump, vx kicked radially outward from the player).
+  //    Marked deflected so they pass through harmlessly. Leave them on-screen
+  //    so the player SEES them ride the veil rather than vanish instantly.
+  for (const p of d.projectilesRef.current) {
     if (!p.fromBoss || p.deflected) continue;
     p.deflected = true;
-    for (let k = 0; k < 6; k++) {
+    const dxp = p.x - PLAYER.x;
+    const absVy = Math.abs(p.vy);
+    // Reverse vertical travel and give it a firm push upward.
+    p.vy = -Math.max(absVy * 1.4, 2.4);
+    // Horizontal kick outward (sign of dx) so projectiles fan away.
+    p.vx += Math.sign(dxp || 1) * (2.5 + Math.random() * 1.5);
+    // Spiral projectiles — cancel their spiral so they just fly off.
+    p.spiralAngVel = 0;
+    p.spiralRadVel = 0;
+    // Pink trail sparks at the projectile's position so the reversal reads.
+    for (let k = 0; k < 5; k++) {
       if (d.particlesRef.current.length >= PARTICLE_CAP) break;
       d.particlesRef.current.push({
         x: p.x, y: p.y,
-        vx: (Math.random() - 0.5) * 5, vy: (Math.random() - 0.5) * 5,
-        life: 18, maxLife: 18, size: 2,
+        vx: (Math.random() - 0.5) * 4, vy: (Math.random() - 0.5) * 4 - 1,
+        life: 22, maxLife: 22, size: 2,
         color: '#ffb0d4',
       });
     }
-    d.projectilesRef.current.splice(i, 1);
+    d.statsRef.current.projectilesDeflected += 1;
   }
 
-  // ── Announcement — floating "GRACE" in the boss-announcement spot, using
-  //    the existing bossAnnouncementRef so it pops in both zone and boss.
-  d.bossAnnouncementRef.current = {text: "JESSYKA'S GRACE", life: 160, color: '#ff9ecc'};
-
-  // Damage-text-style pink popup at the player so the trigger is legible even
-  // if the screen is busy.
+  // ── Announcement + damage-text popup.
+  d.bossAnnouncementRef.current = {text: "JESSYKA'S GRACE", life: 180, color: '#ff9ecc'};
   d.damageTextsRef.current.push({
     x: PLAYER.x, y: PLAYER.y - 60,
-    value: 'VEILED', life: 70, maxLife: 70, color: '#ffb0d4',
+    value: 'VEILED', life: 90, maxLife: 90, color: '#ffb0d4',
   });
 
-  // Small screen-shake beat, capped so it doesn't compete with hit-shake.
+  // ── Screen-shake beat. Bigger and longer than 0.2.8 for dramatic weight —
+  //    we're simulating a wall of love displacing the whole battlefield.
   const s = getSettings();
   if (!s.reduceMotion) {
-    d.shakeMagRef.current = Math.max(d.shakeMagRef.current, 6);
-    d.shakeUntilRef.current = Math.max(d.shakeUntilRef.current, time + 220);
+    d.shakeMagRef.current = Math.max(d.shakeMagRef.current, 9);
+    d.shakeUntilRef.current = Math.max(d.shakeUntilRef.current, time + 420);
   }
 
-  d.statsRef.current.projectilesDeflected += 1;   // count it toward parried-air stats
   return true;
 }
 
@@ -2842,6 +2944,24 @@ function updateHitFlash(d: LoopDeps, time: number, reduceMotion: boolean): void 
     d.screenFlashRef.current.style.opacity = (t * t * 0.85).toFixed(3);
   } else if (d.screenFlashRef.current.style.opacity !== '0') {
     d.screenFlashRef.current.style.opacity = '0';
+  }
+}
+
+/** Ensure the player sprite's `.is-estus-godmode` class mirrors the actual
+ *  godmode ref window each frame. The original implementation toggled the
+ *  class from the chug-end setTimeout, which could drift; by polling the ref
+ *  directly, the golden pulse visual is always in lockstep with the real
+ *  invulnerability window, even across pause/resume or tab-throttling. */
+function updateEstusGodmodeVisual(d: LoopDeps, time: number): void {
+  const img = d.playerImgRef.current;
+  if (!img) return;
+  const chugDone = time >= d.estusActiveUntilRef.current;
+  const windowActive = chugDone && time < d.estusGodmodeUntilRef.current;
+  const hasClass = img.classList.contains('is-estus-godmode');
+  if (windowActive && !hasClass) {
+    img.classList.add('is-estus-godmode');
+  } else if (!windowActive && hasClass) {
+    img.classList.remove('is-estus-godmode');
   }
 }
 
