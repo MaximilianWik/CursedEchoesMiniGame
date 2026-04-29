@@ -4,6 +4,37 @@ All notable changes to Cursed Echoes. Format loosely follows [Keep a Changelog](
 
 ---
 
+## [0.3.6] — Bigger dancer; rotating backdrops no longer drag dark corners
+
+Two presentation follow-ups from the AfroMan playtest.
+
+### Jessyka — scaled up, now stage-front
+
+The background dancer was previously sized to perch on top of the left speaker cabinet (`width: 96px; height: 120px` at `bottom: 46%`). Per feedback she read as an afterthought at that size. Bumped to **speaker-cabinet scale** — `width: 160px; height: 340px` at `bottom: 5%; left: 12px` — standing **in front** of the left speaker rather than on it. `z-index: 3` so she paints above the speaker (which uses default stacking) but stays below the action canvas at `z-10`, so words + projectiles still render over her as before. Her three animations (`afarDancerBop`, `afarDancerSway`, `afarDancerPop`) are unchanged. Drop-shadow glow bumped slightly so the bigger silhouette still reads against the busy arena.
+
+### Rotating backdrops — static vignette, rotating pattern
+
+The earlier 0.3.3 fix sized `.afi-bg` to 200 % so the rotated rectangle would always cover the frame — but the rotation was still carrying the radial-gradient vignette with it, dragging the near-black "80 % stop" into view at the corners as the element spun. The visible effect was dark rotating wedges at the frame corners, not the static vignette the design wanted.
+
+0.3.6 splits the two:
+
+- **Static radial** — moved from `.afi-bg` to `.afi-root::before`. A full-frame pseudo-element with the radial gradient + the new deeper-stop profile (black only at 95 % now, not 80 %). Doesn't rotate, doesn't move, so the vignette stays perfectly anchored to the viewport.
+- **Rotating conic** — `.afi-bg` is still 200 % sized + centered, but now carries only the `repeating-conic-gradient`. The conic pattern is angularly-infinite, so oversizing doesn't introduce gradient-edge darkness that rotation could swing into view.
+- `mix-blend-mode: screen` on `.afi-bg` was dropped — it was correct for the combined gradient, overkill when the wedges are the only thing on that element. Conic color stops bumped slightly (0.28 / 0.24 / 0.24 / 0.22 → 0.32 / 0.28 / 0.28 / 0.26) to keep similar apparent brightness with normal blending.
+
+### Same fix applied to the BossSelect AfroMan panel
+
+`.bs-panel-afroman .bs-panel-scene` had the exact same class of bug — `inset: 0` (= 100 % of the panel) rotating on `bsAfroSpin`, so its corners swept through the clipped panel edges. The fix is the same pattern: `inset: auto; top: -50%; left: -50%; width: 200%; height: 200%;` to oversize the scene, and the radial opacity was dropped from 0.22 to 0.12 so any residual gradient-edge darkening barely registers. The taurus panel isn't affected (its scene doesn't rotate).
+
+The explicit `inset: auto` is important — the base `.bs-panel-scene` rule uses `inset: 0` shorthand which sets all four sides. Just overriding `top` + `left` would leave `right: 0; bottom: 0` pinned, distorting the 200 % box.
+
+### Files touched
+
+- `src/index.css` — `.afar-dancer` resized + repositioned; `.afi-root::before` added (static radial); `.afi-bg` slimmed down to just the rotating conic (mix-blend-mode dropped, conic opacities bumped); `.bs-panel-afroman .bs-panel-scene` oversized via `inset: auto` override.
+- `package.json` + `src/version.ts` — 0.3.6.
+
+---
+
 ## [0.3.5] — Game-over screen revamp
 
 The post-death reveal was functional but read as a raw data dump — a vertical list of label/value pairs with a tiny graph and a cramped corner Hall of Records. The YOU DIED moment itself was great; everything after it wasn't. 0.3.5 re-lays the whole screen as a gothic stat plate that matches the rest of the game's production quality. Every element from the old screen is still there — they're just dressed properly now.

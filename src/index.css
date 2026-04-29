@@ -1205,9 +1205,20 @@
     opacity: 0.6;
   }
   .bs-panel-afroman .bs-panel-scene {
+    /* 0.3.6 — oversize the rotating scene to 200% so the spin never exposes
+       the panel corners (same treatment as .afi-bg in the intro). The
+       radial-gradient is kept but at very low opacity so it doesn't drag a
+       visible dark vignette with the rotation. Explicit inset: auto +
+       top/left + width/height because the base rule used `inset: 0` as
+       shorthand — just overriding top/left would leave right/bottom pinned
+       at 0 and distort the aspect. */
+    inset: auto;
+    top: -50%; left: -50%;
+    width: 200%; height: 200%;
+    transform-origin: 50% 50%;
     background:
-      radial-gradient(circle at 50% 58%, rgba(255, 120, 200, 0.22) 0%, transparent 38%),
-      repeating-conic-gradient(from 0deg at 50% 58%,
+      radial-gradient(circle at 50% 50%, rgba(255, 120, 200, 0.12) 0%, transparent 45%),
+      repeating-conic-gradient(from 0deg at 50% 50%,
         rgba(255, 130, 210, 0.08) 0deg 20deg,
         rgba(120, 220, 255, 0.06) 20deg 40deg,
         rgba(255, 220, 100, 0.06) 40deg 60deg);
@@ -1395,22 +1406,37 @@
     user-select: none;
     animation: afiBackdropFade 1500ms ease-out both;
   }
+  /* Static radial haze on the root — fades to near-black at the edges
+     without rotating, so the vignette stays anchored to the viewport.
+     The conic wedges rotate in `.afi-bg` on top of this. */
+  .afi-root::before {
+    content: '';
+    position: absolute; inset: 0;
+    background: radial-gradient(circle at 50% 58%,
+      rgba(255, 100, 200, 0.55) 0%,
+      rgba(255, 140, 80, 0.35) 18%,
+      rgba(120, 30, 180, 0.3) 38%,
+      rgba(10, 0, 20, 1) 95%);
+    pointer-events: none;
+  }
   .afi-bg {
     /* Oversize the element to 200% of the frame centered on the parent's
        midpoint. A rotated rectangle only fully covers its axis-aligned
        bounding area when it's at least sqrt(2) ≈ 1.42x the parent size —
        200% gives a safe margin so the backdrop keeps filling the frame
-       through the full spin (no visible corner triangles). */
+       through the full spin. The conic pattern here is angularly-infinite
+       so oversizing doesn't introduce dark edges; the radial vignette
+       lives on .afi-root::before (static) so rotation can't drag the
+       dark corners of a rotating gradient into view. */
     position: absolute;
     top: -50%; left: -50%;
     width: 200%; height: 200%;
     background:
-      radial-gradient(circle at 50% 58%, rgba(255, 100, 200, 0.55) 0%, rgba(255, 140, 80, 0.35) 18%, rgba(120, 30, 180, 0.3) 38%, rgba(10, 0, 20, 1) 80%),
-      repeating-conic-gradient(from 0deg at 50% 58%,
-        rgba(255, 100, 200, 0.25) 0deg 20deg,
-        rgba(120, 220, 255, 0.22) 20deg 40deg,
-        rgba(255, 220, 100, 0.22) 40deg 60deg,
-        rgba(120, 255, 160, 0.2) 60deg 80deg);
+      repeating-conic-gradient(from 0deg at 50% 50%,
+        rgba(255, 100, 200, 0.32) 0deg 20deg,
+        rgba(120, 220, 255, 0.28) 20deg 40deg,
+        rgba(255, 220, 100, 0.28) 40deg 60deg,
+        rgba(120, 255, 160, 0.26) 60deg 80deg);
     filter: hue-rotate(0deg) saturate(0.6);
     animation: afiBgSpin 40s linear infinite;
     transition: filter 800ms ease-out;
@@ -2073,17 +2099,22 @@
      Positioned to perch on top of the left speaker stack (which sits at
      bottom: 8%, height: 280px → speaker top is ~45%). Her feet meet the
      speaker's top edge at roughly bottom: 44%. */
+  /* Background dancer — purely visual Jessyka standing in front of the left
+     speaker as a go-go dancer at show scale (roughly speaker-cabinet sized).
+     No interaction, no hitbox, no targeting. z-index: 3 so she's in front
+     of the speaker (which has no explicit z-index) without breaking the
+     action canvas (z-10) or the words + boss sprite layer. */
   .afar-dancer {
     position: absolute;
-    bottom: 46%;                /* speaker top ≈ 44.5% → feet meet the cabinet */
-    left: 21px;                 /* centered on the speaker (left: 24px, width: 90px → cx ≈ 69px) */
-    width: 96px;
-    height: 120px;
+    bottom: 5%;
+    left: 12px;
+    width: 160px;
+    height: 340px;
     pointer-events: none;
-    z-index: 2;
+    z-index: 3;
     filter:
-      drop-shadow(0 0 18px rgba(255, 128, 204, 0.75))
-      drop-shadow(0 0 36px rgba(255, 80, 180, 0.4));
+      drop-shadow(0 0 22px rgba(255, 128, 204, 0.85))
+      drop-shadow(0 0 48px rgba(255, 80, 180, 0.5));
     animation: afarDancerBop 1.4s ease-in-out infinite;
     transform-origin: 50% 100%;
   }
