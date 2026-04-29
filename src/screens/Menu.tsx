@@ -39,9 +39,11 @@ export function MenuScreen({onStart, onOpenSettings, onOpenDev}: MenuScreenProps
       <div className="relative max-w-md bg-amber-950/20 border border-amber-900/40 p-6 rounded mb-10 backdrop-blur-sm shadow-[0_0_30px_rgba(0,0,0,0.5)]">
         <h2 className="font-[Cinzel] text-amber-600 text-xl mb-4 tracking-widest uppercase border-b border-amber-900/30 pb-2">How to Play</h2>
         <ul className="text-amber-100/70 text-sm space-y-3 font-serif tracking-wide text-left list-none">
-          <li className="flex items-start gap-2"><span className="text-amber-600 mt-1">◈</span><span>Type the echoes to banish them with fire.</span></li>
-          <li className="flex items-start gap-2"><span className="text-amber-600 mt-1">◈</span><span>Drink estus with <kbd className="px-1.5 py-0.5 mx-1 border border-amber-600 text-amber-300 text-xs">TAB</kbd> — heal at the cost of a charge.</span></li>
+          <li className="flex items-start gap-2"><span className="text-amber-600 mt-1">◈</span><span>Type the echoes (letters) to banish them with fire.</span></li>
+          <li className="flex items-start gap-2"><span className="text-amber-600 mt-1">◈</span><span>Parry incoming projectiles with the matching digit — <kbd className="px-1.5 py-0.5 mx-1 border border-amber-600 text-amber-300 text-xs">1</kbd>–<kbd className="px-1.5 py-0.5 mx-1 border border-amber-600 text-amber-300 text-xs">5</kbd>.</span></li>
+          <li className="flex items-start gap-2"><span className="text-amber-600 mt-1">◈</span><span>Drink estus with <kbd className="px-1.5 py-0.5 mx-1 border border-amber-600 text-amber-300 text-xs">TAB</kbd> — heals, then grants 4 s of godmode.</span></li>
           <li className="flex items-start gap-2"><span className="text-amber-600 mt-1">◈</span><span>Dodge with <kbd className="px-1.5 py-0.5 mx-1 border border-amber-600 text-amber-300 text-xs">SPACE</kbd> — grants brief i-frames.</span></li>
+          <li className="flex items-start gap-2"><span className="text-amber-600 mt-1">◈</span><span>In boss fights, <kbd className="px-1.5 py-0.5 mx-1 border border-amber-600 text-amber-300 text-xs">Q</kbd> burns 1 estus to summon Jessyka.</span></li>
           <li className="flex items-start gap-2"><span className="text-amber-600 mt-1">◈</span><span>Pause with <kbd className="px-1.5 py-0.5 mx-1 border border-amber-600 text-amber-300 text-xs">ESC</kbd>.</span></li>
           <li className="flex items-start gap-2"><span className="text-amber-600 mt-1">◈</span><span>Four zones await. Three bosses stand in your way.</span></li>
         </ul>

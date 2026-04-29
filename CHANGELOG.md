@@ -4,6 +4,68 @@ All notable changes to Cursed Echoes. Format loosely follows [Keep a Changelog](
 
 ---
 
+## [0.2.7] — Digit projectiles, estus godmode, Jessyka polish, boss countdown
+
+Five surgical fixes to input clarity, reward framing, companion feel, and pacing information. Projectiles and word-typing no longer share an input surface; estus now actually feels like a commitment worth making; Jessyka's kisses read as blown from her lips; the zone progress bar is now a named boss countdown.
+
+### Input — projectiles use digits 1-5
+
+Previously, projectiles fired letter chars that overlapped with word first-letters and active-word next-letters. Typing a letter would sometimes parry a projectile by accident and sometimes eat a miss when the player meant to type a word. The `forbidden` pool in `spawnBossAttack` tried to mask this by excluding phrase letters from the projectile pool, but casters firing words like `SORCERY` re-exposed it.
+
+- **All projectiles (boss + caster) now fire digits from `{1, 2, 3, 4, 5}`** — a keyspace completely disjoint from A-Z.
+- **`handleCharLive` split into two mutually exclusive branches**: digits route to projectile deflection ONLY, letters route to word typing ONLY. No fall-through between the two, so a typed letter can never accidentally parry and a typed digit can never accidentally start a word. Missed deflects and missed word-starts each break combo independently.
+- **`projectileLetters` BossPhase field kept for schema continuity** but no longer influences gameplay — projectile chars come from the shared digit pool instead.
+- **Q summon check simplified**: the old `projWantsQ` fall-through branch is dead code now (Q can never be a projectile char) — removed.
+
+### Estus — 4 second godmode on the other side of the chug
+
+Drinking estus left the player still feeling vulnerable immediately after the heal landed. The 1.15 s chug stopped input, heal applied, and then you were instantly exposed again — a poor reward for a commit-window.
+
+- **4 s of post-chug i-frames** extend `iFramesUntilRef` starting at the moment the heal applies. The chug window itself remains vulnerable — this is strictly a reward for surviving the sip.
+- **Visual godmode glow** — the player sprite is tagged with `.is-estus-godmode` for the window, running a 3 Hz `estusGodmodePulse` keyframe layered over `playerFloat`. Gold outer halo + cyan highlight + 1.35× brightness at the peak. It's impossible to miss.
+- **CSS class auto-removed** on a timer, so the glow fades out even if the player gets hit or chains another estus. A second estus mid-window refreshes the class (via `void offsetWidth` reflow hack) so the animation restarts cleanly instead of just extending.
+
+### Jessyka — slower, closer, spawns from her mouth
+
+Kisses shot out of empty space 80 px to the left of her sprite at 680 ms flight — fast enough to read as teleport, offset enough to look disconnected from her.
+
+- **`JESS_KISS_FLIGHT_MS` 680 → 1100** — kisses now have a visible, readable arc. Letter-by-letter typing on words feels like support, not autofire.
+- **`JESS_ESTUS_PROJECTILE_CHASE_SPEED` 10 → 6 px/frame** for the boss-fight estus homing mode — same reason, kisses should look like projectiles, not hitscan.
+- **Kiss origin now at the sprite's mouth.** New `JESS_MOUTH_DX=55` and `JESS_MOUTH_DY=-35` constants offset from the JSX anchor (`PLAYER.x + JESS_X_OFFSET`, `bottom: 4`) to roughly the upper-third of her 128×128 sprite — where her mouth actually is. All four kiss / burst / chase spawn points use these constants for consistency.
+
+### Bug — Jessyka targeting off-screen words
+
+Words spawned at `y: -50` (50 px above the play area) to slide into view. Jessyka's target-picker took "highest y" as "highest threat" and would lock onto these pre-spawn words, firing kisses upward into empty sky for 1+ seconds before the target drifted into view.
+
+- **Word spawn y `-50` → `-20`** — enough lead-in for the "drops from above" feel, not enough to fire at invisible targets.
+- **`tryPickJessykaTarget` filters `w.y >= 10 && w.y <= DESIGN_H - 40`** — only considers words whose glyphs are actually inside the visible play area. Also filters `w.spawnAnim` so she never targets something mid-spawn-animation.
+
+### HUD — boss approach countdown
+
+Previously the HUD showed a bare "Xs" label next to an unlabeled amber progress bar, and a vague "◈ The flame calls ◈" message in the final 10 s. No indication of *who* was coming or *when* until the fight actually started.
+
+- **Zone progress bar labeled with the upcoming boss name** — "Boss in 42s — DRAGON SLAYER ORNSTEIN" for the whole run-up, so the player knows from second 1 what's coming.
+- **Two-tier severity escalation**:
+  - T-15 s to T-6 s: amber warning tier, label brightens.
+  - T-5 s to T-0: red critical tier, bar pulses, label switches to "◈ {BOSS NAME} APPROACHES · Xs ◈" with a red drop-shadow.
+- **New `HudStats.upcomingBossName` field** resolves from `zone.bossId` via the `BOSSES` lookup. `null` on the no-boss Firelink intro zone, so the warning UI stays silent there.
+
+### Docs / misc
+
+- README controls table updated for digits + Q + godmode.
+- Menu `How to Play` block updated with the new keys.
+
+### Files
+
+- `src/App.tsx` — `PROJECTILE_DIGITS` + `ESTUS_GODMODE_MS` + `JESS_MOUTH_DX/DY` constants. `spawnBossAttack` pool → digits (keeps `forbidden` for word-spawn first-letter conflict avoidance). Caster fire char → digit. `handleCharLive` restructured into `isDigit` / letter branches with no cross-over. `handleTab` post-chug heal now extends `iFramesUntilRef` and toggles `is-estus-godmode` class. Jessyka kiss origins all use mouth constants. Word spawn y `-50` → `-20`. `tryPickJessykaTarget` filters by y + spawnAnim. `HudStats.upcomingBossName` plumbed from `zone.bossId`.
+- `src/index.css` — `.player-sprite.is-estus-godmode` class + `estusGodmodePulse` keyframe.
+- `src/hud/Hud.tsx` — `HudStats.upcomingBossName` field. Zone progress section rewritten with severity tiers, named countdown, red-tier pulse for T-5.
+- `src/screens/Menu.tsx` — `How to Play` block updated with digit parry + Q summon + godmode lines.
+- `src/version.ts`, `package.json` — bumped to `0.2.7`.
+- `README.md` — controls table + current-version line updated.
+
+---
+
 ## [0.2.6] — Boss rebalance, summoner/caster, Jessyka summon
 
 Three boss-combat fixes, two new boss-attack patterns, a reworked lich death, and a brand-new Q-bind that lets you burn 1 estus to summon Jessyka in projectile-intercept mode. Docs are now emoji-free across the board.
