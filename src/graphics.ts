@@ -1351,7 +1351,13 @@ export function drawWordAura(
   const cy = word.y - 8;
   const r = Math.max(60, wordWidth * 0.7) * pulse;
   const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
-  if (word.isSpecial) {
+  if (word.jessykaTarget) {
+    // Jessyka's claim — heart-pink aura overrides the per-kind colour so it's
+    // unmistakably HER target at a glance, before the first letter even lands.
+    g.addColorStop(0, 'rgba(255, 140, 215, 0.42)');
+    g.addColorStop(0.55, 'rgba(255, 80, 180, 0.16)');
+    g.addColorStop(1, 'rgba(220, 60, 160, 0)');
+  } else if (word.isSpecial) {
     g.addColorStop(0, 'rgba(255, 120, 200, 0.35)');
     g.addColorStop(0.5, 'rgba(220, 60, 160, 0.12)');
     g.addColorStop(1, 'rgba(220, 60, 160, 0)');
@@ -1364,6 +1370,20 @@ export function drawWordAura(
   ctx.fillStyle = g;
   ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
   ctx.restore();
+  // Thin pulsing heart-pink ring around Jessyka's current target — a second
+  // visual cue on top of the aura so the claim is legible even when the
+  // aura overlaps other effects.
+  if (word.jessykaTarget) {
+    const ringPulse = 0.6 + Math.sin(time * 0.012) * 0.35;
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.strokeStyle = 'rgba(255, 128, 204, ' + (0.55 * ringPulse).toFixed(3) + ')';
+    ctx.lineWidth = 1.8;
+    ctx.beginPath();
+    ctx.ellipse(cx, cy, wordWidth * 0.65 + 6, 22, 0, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+  }
 }
 
 /**
@@ -1463,13 +1483,23 @@ export function drawWordText(
     }
 
     ctx.globalAlpha = typed ? 1 : baseAlpha;
+    // Typed-letter palette differs by OWNER so player vs Jessyka is
+    // immediately legible on any multi-word screen:
+    //   - Jessyka's target → heart-pink fill + pink glow (matches her kisses)
+    //   - JESSYKA special word (heart) → pearl-pink fill + pink glow
+    //   - Player-typed everywhere else → fire-orange fill + amber glow
+    const jessykaClaim = word.jessykaTarget === true && !word.isSpecial;
     ctx.fillStyle = typed
-      ? (word.isSpecial ? '#ffe4f1' : '#ff6a20')
+      ? (jessykaClaim ? '#ff80cc'
+         : word.isSpecial ? '#ffe4f1'
+         : '#ff6a20')
       : wordColor(word.kind, word.isSpecial);
 
     if (typed) {
       ctx.shadowBlur = 12;
-      ctx.shadowColor = word.isSpecial ? '#ff80cc' : '#ff4500';
+      ctx.shadowColor = jessykaClaim ? '#ff40a0'
+        : word.isSpecial ? '#ff80cc'
+        : '#ff4500';
     } else {
       ctx.shadowBlur = 4;
       ctx.shadowColor = 'rgba(0,0,0,0.9)';
