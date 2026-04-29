@@ -6,6 +6,7 @@
 import type {ReactNode} from 'react';
 import type {Rank} from '../graphics';
 import type {RunStats, DerivedStats} from '../game/stats';
+import {APP_VERSION} from '../version';
 
 export type VictoryScreenProps = {
   finalScore: number;
@@ -54,6 +55,11 @@ export function VictoryScreen(props: VictoryScreenProps) {
       >
         ◇ DEV
       </button>
+
+      {/* Version badge — bottom-right corner, gold-tinted to match the victory frame. */}
+      <div className="absolute bottom-6 right-6 z-[65] font-[Cinzel] text-[10px] tracking-[0.4em] uppercase text-amber-500/60 select-none">
+        v{APP_VERSION}
+      </div>
     </div>
   );
 }

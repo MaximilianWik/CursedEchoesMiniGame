@@ -6,6 +6,7 @@ import {useEffect, useRef} from 'react';
 import type {ReactNode} from 'react';
 import type {Rank} from '../graphics';
 import type {RunStats, DerivedStats} from '../game/stats';
+import {APP_VERSION} from '../version';
 
 export type HighScore = {souls: number; maxCombo: number};
 
@@ -143,6 +144,11 @@ export function GameOverScreen(props: GameOverScreenProps) {
             </div>
           </div>
         ))}
+      </div>
+
+      {/* Version badge — bottom-right corner. */}
+      <div className="absolute bottom-3 right-4 font-[Cinzel] text-[10px] tracking-[0.4em] uppercase text-amber-700/50 select-none">
+        v{APP_VERSION}
       </div>
     </div>
   );
