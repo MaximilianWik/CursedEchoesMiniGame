@@ -4,6 +4,7 @@
  */
 
 import {useSettings, resetSettings} from '../game/settings';
+import {APP_VERSION} from '../version';
 
 export type SettingsScreenProps = {
   onClose: () => void;
@@ -70,6 +71,11 @@ export function SettingsScreen({onClose}: SettingsScreenProps) {
           >
             DONE
           </button>
+        </div>
+
+        {/* Version footer — centered, subtle, keeps the panel anchored in time. */}
+        <div className="mt-6 pt-3 border-t border-amber-900/30 text-center font-[Cinzel] text-[10px] tracking-[0.5em] uppercase text-amber-800/60 select-none">
+          Cursed Echoes · v{APP_VERSION}
         </div>
       </div>
     </div>

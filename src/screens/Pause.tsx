@@ -3,6 +3,7 @@
  */
 
 import type {ReactNode} from 'react';
+import {APP_VERSION} from '../version';
 
 export type PauseScreenProps = {
   onResume: () => void;
@@ -27,6 +28,11 @@ export function PauseScreen({onResume, onOpenSettings, onOpenDev, onAbandon}: Pa
       <p className="mt-12 text-amber-900/50 font-[Cinzel] text-[10px] tracking-[0.4em] uppercase">
         <kbd className="px-1 py-0.5 mx-1 border border-amber-800 text-amber-500">ESC</kbd> to resume
       </p>
+
+      {/* Version badge — bottom-right corner. */}
+      <div className="absolute bottom-4 right-4 font-[Cinzel] text-xs tracking-[0.35em] uppercase text-amber-700/60 select-none">
+        v{APP_VERSION}
+      </div>
     </div>
   );
 }

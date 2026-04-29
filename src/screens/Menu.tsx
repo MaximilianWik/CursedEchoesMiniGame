@@ -3,6 +3,8 @@
  * The background canvas keeps rendering embers behind this overlay.
  */
 
+import {APP_VERSION} from '../version';
+
 export type MenuScreenProps = {
   onStart: () => void;
   onOpenSettings: () => void;
@@ -22,6 +24,11 @@ export function MenuScreen({onStart, onOpenSettings, onOpenDev}: MenuScreenProps
       >
         ◇ Dev
       </button>
+
+      {/* Version badge — bottom-right corner, low-contrast so it reads as metadata. */}
+      <div className="absolute bottom-4 right-4 font-[Cinzel] text-xs tracking-[0.35em] uppercase text-amber-700/60 select-none">
+        v{APP_VERSION}
+      </div>
 
       <h1 className="relative font-[Cinzel] text-5xl md:text-6xl text-amber-700 mb-2 tracking-[0.3em] drop-shadow-[0_0_25px_rgba(180,83,9,0.6)] ce-title">
         CURSED ECHOES

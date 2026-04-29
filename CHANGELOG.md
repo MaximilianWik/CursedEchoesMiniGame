@@ -83,6 +83,8 @@ The old system credited the combo tick but visually teleport-despawned the proje
 
 ## [0.2.4] — Jessyka companion
 
+Typing JESSYKA now summons her into the fight as a support AI. She stands beside you, picks the highest-threat word on screen, and blows kiss projectiles at it while you focus on everything else. Lasts for the full 10 s *Blessed by Godess* window; finishes her current word before ascending.
+
 ### New entity — Jessyka companion
 
 - **Spawns to the right of the player** (x = player + 130) whenever you complete a `JESSYKA` special word and the *Blessed by Godess* buff activates. A dedicated `<img>` element alternates between `/jessIDLE.png` and `/jessKISS.png` via a ref-driven sprite-switch (same pattern as the player sprite).
