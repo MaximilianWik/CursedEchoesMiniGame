@@ -27,6 +27,7 @@ export type HudStats = {
   zoneTimeLeft: number;
   zoneDuration: number;
   bossActive: boolean;
+  upcomingBossName: string | null;   // name of the boss at zone-end (null on no-boss zones)
   jessykaSummonAvailable: boolean;   // boss fight + estus>=1 + no Jessyka present
 };
 
@@ -37,8 +38,14 @@ export const Hud = memo(function Hud({stats}: {stats: HudStats}) {
   const zonePct = stats.zoneDuration > 0
     ? Math.max(0, Math.min(100, ((stats.zoneDuration - stats.zoneTimeLeft) / stats.zoneDuration) * 100))
     : 0;
-  const flameCalls = !stats.bossActive && stats.zoneTimeLeft > 0 && stats.zoneTimeLeft <= 10;
   const showZoneProgress = !stats.bossActive && stats.zoneDuration > 0;
+  // Boss-approach countdown — shown for zones that lead to a boss. The
+  // severity tier (warn / critical) escalates the visual as T-0 nears so the
+  // player can't miss the incoming fight.
+  const bossIncoming = !stats.bossActive && stats.upcomingBossName !== null && stats.zoneTimeLeft > 0;
+  const bossTimeLabel = Math.ceil(stats.zoneTimeLeft);
+  const bossCritical = bossIncoming && bossTimeLabel <= 5;
+  const bossWarn = bossIncoming && bossTimeLabel <= 15 && !bossCritical;
 
   // Detect rank changes and trigger a one-shot animation on the rank image.
   const [rankChangeKey, setRankChangeKey] = useState(0);
@@ -94,23 +101,44 @@ export const Hud = memo(function Hud({stats}: {stats: HudStats}) {
         </div>
         <div className="text-sm opacity-60 font-[Cinzel]">Accuracy: {stats.accuracy}%</div>
 
-        {/* Zone-progress bar (hidden during boss) */}
+        {/* Zone-progress bar (hidden during boss). For zones that lead into
+            a boss, the label reads "Boss in: Xs" with the upcoming boss's
+            name alongside — so there's always a clear, named countdown to
+            the next fight. Bar colour intensifies in the last 15s. */}
         {showZoneProgress && (
-          <div className="flex items-center gap-2 mt-1">
-            <div className="relative h-1.5 w-[240px] border border-amber-900/50 bg-amber-950/40">
-              <div
-                className="h-full bg-gradient-to-r from-amber-800 to-amber-400 transition-all"
-                style={{width: `${zonePct}%`}}
-              />
+          <div className="flex flex-col gap-1 mt-1">
+            <div className="flex items-center gap-2">
+              <div className={`relative h-1.5 w-[240px] border ${
+                bossCritical ? 'border-red-500 shadow-[0_0_10px_rgba(255,60,60,0.6)]'
+                : bossWarn ? 'border-amber-500'
+                : 'border-amber-900/50'
+              } bg-amber-950/40`}>
+                <div
+                  className={`h-full transition-all ${
+                    bossCritical ? 'bg-gradient-to-r from-red-700 to-red-300 animate-pulse'
+                    : bossWarn ? 'bg-gradient-to-r from-amber-700 to-amber-300'
+                    : 'bg-gradient-to-r from-amber-800 to-amber-400'
+                  }`}
+                  style={{width: `${zonePct}%`}}
+                />
+              </div>
+              <span className={`text-[10px] font-mono tracking-widest ${
+                bossCritical ? 'text-red-300' : bossWarn ? 'text-amber-300' : 'text-amber-700/80'
+              }`}>
+                {bossTimeLabel}s
+              </span>
             </div>
-            <span className="text-[10px] text-amber-700/80 font-mono tracking-widest">
-              {Math.ceil(stats.zoneTimeLeft)}s
-            </span>
-          </div>
-        )}
-        {flameCalls && (
-          <div className="text-xs text-amber-400 font-[Cinzel] tracking-[0.4em] uppercase animate-pulse drop-shadow-[0_0_10px_rgba(255,170,60,0.6)]">
-            ◈ The flame calls ◈
+            {bossIncoming && (
+              <div className={`text-[10px] font-[Cinzel] tracking-[0.35em] uppercase ${
+                bossCritical ? 'text-red-300 animate-pulse drop-shadow-[0_0_10px_rgba(255,60,60,0.8)]'
+                : bossWarn ? 'text-amber-300 drop-shadow-[0_0_8px_rgba(255,180,60,0.5)]'
+                : 'text-amber-600/70'
+              }`}>
+                {bossCritical
+                  ? <>◈ {stats.upcomingBossName} APPROACHES · {bossTimeLabel}s ◈</>
+                  : <>Boss in {bossTimeLabel}s — {stats.upcomingBossName}</>}
+              </div>
+            )}
           </div>
         )}
 

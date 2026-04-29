@@ -3,7 +3,7 @@
 A gothic typing trial. Four zones. Three bosses. Banish the echoes, parry the spells, type the phrases, kindle the fading flame.
 
 **Live:** https://cursedechoes.vercel.app/
-**Current version:** `0.2.6` — boss rebalance, summoner/caster, Jessyka estus summon. See [CHANGELOG.md](./CHANGELOG.md) for full history. Version is shown in-game on the menu, pause, settings, game-over and victory screens.
+**Current version:** `0.2.7` — projectiles use digits 1-5, estus grants 4s godmode, Jessyka polish, boss-approach countdown. See [CHANGELOG.md](./CHANGELOG.md) for full history. Version is shown in-game on the menu, pause, settings, game-over and victory screens.
 
 https://github.com/user-attachments/assets/cc4d2332-4475-4e61-bd31-d33734f54dab
 
@@ -22,9 +22,11 @@ Vercel auto-deploys from `main`. `vercel.json` pins the install + build commands
 
 | Key | Action |
 |:--:|:--|
-| `A–Z` | type to banish words AND parry incoming projectile letters |
-| `TAB` | estus — heal 4 HP over a 1.15 s chug (vulnerable during) |
+| `A–Z` | type to banish words |
+| `1`–`5` | parry incoming projectiles — every projectile carries a digit, press the matching key to deflect |
+| `TAB` | estus — heal 4 HP over a 1.15 s chug (vulnerable during), then 4 s of godmode with a gold/cyan glow |
 | `SPACE` | dodge roll — 200 ms i-frames, costs 35 stamina |
+| `Q` | boss-fight only — burn 1 estus to summon Jessyka in projectile-intercept mode for 15 s |
 | `ESC` | pause / resume |
 | `` ` `` | open the dev gate (password-protected) on the menu |
 

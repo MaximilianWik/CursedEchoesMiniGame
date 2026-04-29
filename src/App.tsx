@@ -1,4 +1,4 @@
-/**
+﻿/**
  * @license
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -79,10 +79,23 @@ const nextProjectileId = (): number => _projectileIdCounter++;
 const JESS_SPAWN_MS = 1300;
 const JESS_DESPAWN_MS = 1600;
 const JESS_KISS_INTERVAL_MS = 750;       // time between kiss fires (was 550 — less spammy)
-const JESS_KISS_FLIGHT_MS = 680;         // how long a kiss is in-flight (was 420 — reads as projectile)
+const JESS_KISS_FLIGHT_MS = 1100;        // how long a kiss is in-flight (slower, reads as a visible projectile)
 const JESS_X_OFFSET = 80;                // how far right of the player she stands (was 130 — closer)
 const JESS_ESTUS_ACTIVE_MS = 15000;      // boss-fight estus summon active duration
-const JESS_ESTUS_PROJECTILE_CHASE_SPEED = 10;  // px/frame homing speed in projectile-chase mode
+const JESS_ESTUS_PROJECTILE_CHASE_SPEED = 6;   // px/frame homing speed in projectile-chase mode (slower too)
+
+/** Offset from the Jessyka sprite's JSX anchor (PLAYER.x + JESS_X_OFFSET, with
+ *  `bottom: 4` in a 768-tall play area) to her visual mouth. Kisses emanate
+ *  from here so they read as blown from her lips, not from empty space next
+ *  to the player. The sprite is 128×128 (`w-32 h-32`) — mouth sits roughly
+ *  (+55, -35) from that anchor in play-area coordinates. */
+const JESS_MOUTH_DX = 55;
+const JESS_MOUTH_DY = -35;
+
+/** Projectile chars — digits 1-5. Deliberately disjoint from A-Z so typing a
+ *  letter can never accidentally parry a projectile (and vice versa). */
+const PROJECTILE_DIGITS = ['1', '2', '3', '4', '5'];
+const ESTUS_GODMODE_MS = 4000;            // post-chug i-frames to reward the vulnerable sip window
 
 type JessykaState = 'spawning' | 'active' | 'leaving' | 'despawning';
 
@@ -565,10 +578,30 @@ export default function App() {
     estusActiveUntilRef.current = now + ESTUS_CHUG_MS;
     statsRef.current.estusDrunk += 1;
     sfxEstus();
-    // Heal at end of chug.
+    // Heal at end of chug. The 4-second post-chug i-frame window is granted
+    // here (not at chug start) so the player is still vulnerable while
+    // sipping — the reward for committing to the animation is a brief
+    // invincibility window on the other side.
     window.setTimeout(() => {
       if (phaseRef.current === 'gameover' || phaseRef.current === 'victory') return;
       healthRef.current = Math.min(MAX_HEALTH, healthRef.current + ESTUS_HEAL);
+      // 4-second godmode window — extends iFrames and tags the sprite with a
+      // golden-pulse class so it's visually obvious. The class is removed on
+      // a timer so the glow fades out naturally even if the player gets hit
+      // or drinks another estus mid-window (second drink refreshes the class).
+      const godEnd = performance.now() + ESTUS_GODMODE_MS;
+      iFramesUntilRef.current = Math.max(iFramesUntilRef.current, godEnd);
+      const img = playerImgRef.current;
+      if (img) {
+        img.classList.remove('is-estus-godmode');
+        void img.offsetWidth;                  // reflow so animation restarts
+        img.classList.add('is-estus-godmode');
+        window.setTimeout(() => {
+          if (playerImgRef.current) {
+            playerImgRef.current.classList.remove('is-estus-godmode');
+          }
+        }, ESTUS_GODMODE_MS);
+      }
       // Small green pop up + celebratory particle burst.
       pushDamageText('+' + ESTUS_HEAL, PLAYER.x, PLAYER.y - 50, '#6dffaa');
       for (let i = 0; i < 22; i++) {
@@ -701,6 +734,7 @@ function initialHudStats(): HudStats {
     stamina: MAX_STAMINA, maxStamina: MAX_STAMINA,
     zoneName: ZONES[0].name, zoneSubtitle: ZONES[0].subtitle,
     zoneTimeLeft: ZONES[0].duration, zoneDuration: ZONES[0].duration, bossActive: false,
+    upcomingBossName: null,
     jessykaSummonAvailable: false,
   };
 }
@@ -1020,11 +1054,16 @@ function updateZoneSpawn(d: LoopDeps, time: number, dt: number): void {
   }
 
   const newX = Math.random() * (DESIGN_W - 200);
-  if (d.wordsRef.current.some(e => Math.abs(e.x - newX) < 150 && Math.abs(e.y - -50) < 100)) return;
+  // Spawn y kept just barely above the play area so words slide into view
+  // immediately. -20 gives a ~12-frame lead before the first letter is drawn
+  // at the current fall speed — enough to *see* the spawn, not so far above
+  // that Jessyka picks an invisible target off-screen. (Was -50.)
+  const newY = -20;
+  if (d.wordsRef.current.some(e => Math.abs(e.x - newX) < 150 && Math.abs(e.y - newY) < 100)) return;
 
   d.wordsRef.current.push({
     id: nextWordId(),
-    text, x: newX, y: -50,
+    text, x: newX, y: newY,
     speed: (0.15 + Math.random() * 0.3) * speedMod * kdef.speedMul,
     typed: '', kind, isSpecial,
     hp: kind === 'tank' ? 3 : 1,
@@ -1146,11 +1185,15 @@ function updateBoss(d: LoopDeps, time: number, dt: number): void {
 /** Spawn a wave of boss projectiles following the given pattern. Returns
  *  true if the pattern actually produced a threat this tick, false when a
  *  cap/pre-condition blocked it (so the scheduler can advance). */
-function spawnBossAttack(d: LoopDeps, pattern: BossPattern, letters: string, time: number, phaseIdx: number): boolean {
-  // Build a projectile-letter pool that EXCLUDES every letter present in the
-  // current boss phrase. This guarantees typing-ambiguity can never happen:
-  // each keystroke is EITHER a phrase letter OR a projectile deflect, never
-  // both. If filtering removes every letter, fall back to the raw pool.
+function spawnBossAttack(d: LoopDeps, pattern: BossPattern, _letters: string, time: number, phaseIdx: number): boolean {
+  // Projectile chars are digits 1-5 (not letters). This prevents any ambiguity
+  // between word-typing and projectile-parrying: A-Z goes to words, 1-5 goes
+  // to projectiles, never both. The `letters` parameter is kept for schema
+  // continuity with config.ts but no longer influences projectile chars.
+  const pick = () => PROJECTILE_DIGITS[Math.floor(Math.random() * PROJECTILE_DIGITS.length)];
+  // Track letters present in the current boss phrase so summoner/caster word
+  // spawns don't pick a first letter that conflicts with what the player is
+  // currently typing.
   const activePhrase = d.wordsRef.current.find(w => w.isBossPhrase);
   const forbidden = new Set<string>();
   if (activePhrase) {
@@ -1158,9 +1201,6 @@ function spawnBossAttack(d: LoopDeps, pattern: BossPattern, letters: string, tim
       if (ch >= 'A' && ch <= 'Z') forbidden.add(ch);
     }
   }
-  const filtered = letters.split('').filter(l => !forbidden.has(l));
-  const pool = filtered.length > 0 ? filtered : letters.split('');
-  const pick = () => pool[Math.floor(Math.random() * pool.length)];
   // Boss body position — projectiles spawn here (moved up so they don't
   // appear right next to the player).
   const BOSS_BODY_Y = 360;
@@ -1768,9 +1808,16 @@ function updateJessyka(d: LoopDeps, ctx: CanvasRenderingContext2D, time: number)
 
 /** Prefer a high-up, non-boss, non-special, non-chanter word. Falls back to any. */
 function tryPickJessykaTarget(d: LoopDeps, j: JessykaCompanion): void {
+  // Only consider words that are actually on-screen — otherwise she fires
+  // kisses upward into the void at pre-spawn words at y=-20, which reads as
+  // "shooting at nothing". Lower bound of 10 matches the font baseline; the
+  // word's text is drawn ~15px above y (w.y - 14 in updateWords) so by y >= 10
+  // the glyphs are fully inside the play area.
   const candidates = d.wordsRef.current.filter(w =>
     !w.jessykaTarget && !w.isSpecial && !w.isBossPhrase && !w.isBossAttack
-    && w.kind !== 'chanter' && w.typed.length === 0,
+    && w.kind !== 'chanter' && w.typed.length === 0
+    && !w.spawnAnim                                   // never target a word mid-spawn-animation
+    && w.y >= 10 && w.y <= DESIGN_H - 40,             // must be fully on-screen
   );
   if (candidates.length === 0) return;
   // Sort by y ASC (topmost first) — "high up" preference.
@@ -1784,7 +1831,7 @@ function tryPickJessykaTarget(d: LoopDeps, j: JessykaCompanion): void {
 
 /** Fire one kiss toward the current target's current position. */
 function fireJessykaKiss(d: LoopDeps, j: JessykaCompanion, w: Word, time: number): void {
-  const origin = {x: PLAYER.x + JESS_X_OFFSET, y: PLAYER.y - 12};
+  const origin = {x: PLAYER.x + JESS_X_OFFSET + JESS_MOUTH_DX, y: PLAYER.y + JESS_MOUTH_DY};
   const letterIdx = j.lettersFired;
   d.jessykaKissesRef.current.push({
     x: origin.x, y: origin.y,
@@ -1832,7 +1879,7 @@ function fireJessykaProjectileKiss(d: LoopDeps, j: JessykaCompanion, time: numbe
   // the player even if the kiss takes a few frames to arrive.
   best.deflected = true;
 
-  const origin = {x: PLAYER.x + JESS_X_OFFSET, y: PLAYER.y - 12};
+  const origin = {x: PLAYER.x + JESS_X_OFFSET + JESS_MOUTH_DX, y: PLAYER.y + JESS_MOUTH_DY};
   d.jessykaKissesRef.current.push({
     x: origin.x, y: origin.y,
     sx: origin.x, sy: origin.y,
@@ -2083,7 +2130,7 @@ function drawKissHeart(ctx: CanvasRenderingContext2D, x: number, y: number, s: n
 
 /** Angelic ascension burst spawned when Jessyka begins despawning. */
 function spawnJessykaAngelicBurst(d: LoopDeps, _time: number): void {
-  const origin = {x: PLAYER.x + JESS_X_OFFSET, y: PLAYER.y - 20};
+  const origin = {x: PLAYER.x + JESS_X_OFFSET + JESS_MOUTH_DX, y: PLAYER.y + JESS_MOUTH_DY - 8};
   for (let i = 0; i < 40; i++) {
     if (d.particlesRef.current.length >= PARTICLE_CAP) break;
     const ang = -Math.PI / 2 + (Math.random() - 0.5) * 1.2;
@@ -2199,7 +2246,7 @@ function updateWords(d: LoopDeps, ctx: CanvasRenderingContext2D, textCtx: Canvas
           x: spawnX, y: spawnY,
           vx: (PLAYER.x - spawnX) * 0.004,
           vy: 2.2 + Math.random() * 0.8,
-          char: w.text[Math.min(w.typed.length, w.text.length - 1)],
+          char: PROJECTILE_DIGITS[Math.floor(Math.random() * PROJECTILE_DIGITS.length)],
           fromBoss: false, life: 280,
           trail: [],
         });
@@ -2574,6 +2621,10 @@ function pushHudStats(d: LoopDeps): void {
     zoneTimeLeft,
     zoneDuration: zone.duration,
     bossActive: d.phaseRef.current === 'boss',
+    // Upcoming boss name for the zone (null on the no-boss Firelink intro).
+    // Rendered in the HUD as part of the boss-approach countdown so the
+    // player always knows who — and when — they're about to fight.
+    upcomingBossName: zone.bossId ? (BOSSES[zone.bossId]?.name ?? null) : null,
     jessykaSummonAvailable: d.phaseRef.current === 'boss'
       && d.bossRef.current !== null && !d.bossRef.current.defeated
       && d.bossRef.current.currentHp > 0 && d.bossRef.current.introStart === 0
@@ -2625,7 +2676,7 @@ function trySummonEstusJessyka(d: LoopDeps, now: number): boolean {
   d.bossAnnouncementRef.current = {text: "LOVE'S EMBRACE", life: 140};
   sfxFireball();
   // Celebratory pink burst at her arrival spot.
-  const ox = PLAYER.x + JESS_X_OFFSET, oy = PLAYER.y - 20;
+  const ox = PLAYER.x + JESS_X_OFFSET + JESS_MOUTH_DX, oy = PLAYER.y + JESS_MOUTH_DY;
   for (let p = 0; p < 32; p++) {
     if (d.particlesRef.current.length >= PARTICLE_CAP) break;
     const ang = Math.random() * Math.PI * 2;
@@ -2648,22 +2699,25 @@ function handleCharLive(d: LoopDeps, rawChar: string): void {
   if (d.pausedRef.current) return;
   const now = performance.now();
   if (now < d.estusActiveUntilRef.current) return;
-  const char = rawChar.toUpperCase();
-  if (char.length !== 1 || char < 'A' || char > 'Z') return;
+  if (rawChar.length !== 1) return;
+  const upper = rawChar.toUpperCase();
+  const isLetter = upper >= 'A' && upper <= 'Z';
+  const isDigit = upper >= '1' && upper <= '5';
+  if (!isLetter && !isDigit) return;
+  const char = upper;
 
   // ── Q-binding — boss-fight Jessyka summon (0.2.6). Fall-through priority
   //    preserves typing: if any word can currently accept a Q (active word's
-  //    next letter is Q, or an idle word starts with Q) or any in-flight
-  //    projectile matches Q, the keystroke routes to normal deflection/typing
-  //    first. Only when nothing else claims Q do we attempt the summon.
+  //    next letter is Q, or an idle word starts with Q) the keystroke routes
+  //    to normal typing first. Projectiles now use digits, so Q can never
+  //    match one — the projectile fall-through check was dropped.
   //    A failed summon (no estus / already here) still consumes the keystroke
   //    so the player doesn't eat a miss for pressing Q deliberately.
   if (char === 'Q' && phase === 'boss') {
     const wordWantsQ = d.wordsRef.current.some(w =>
       !w.spawnAnim && !w.jessykaTarget && w.text.charAt(w.typed.length) === 'Q',
     );
-    const projWantsQ = d.projectilesRef.current.some(p => p.char === 'Q' && !p.deflected);
-    if (!wordWantsQ && !projWantsQ) {
+    if (!wordWantsQ) {
       if (trySummonEstusJessyka(d, now)) return;
     }
   }
@@ -2681,59 +2735,49 @@ function handleCharLive(d: LoopDeps, rawChar: string): void {
   const words = d.wordsRef.current;
   let progressed = false;
 
-  // ── Phase 1: Projectile deflection.
-  //    Any in-flight projectile whose char matches is MARKED as deflected
-  //    (no longer damages the player) and a chase-fireball is spawned from
-  //    the player that actively homes in on it. The projectile keeps moving
-  //    until the fireball physically catches up and blows it apart — which
-  //    makes cause and effect visible instead of teleport-despawn. Deflection
-  //    is ATOMIC: it credits the keystroke and a combo tick, and blocks any
-  //    "wrong key" combo reset further down. A successful parry never punishes.
-  let deflectedCount = 0;
-  for (let i = d.projectilesRef.current.length - 1; i >= 0; i--) {
-    const p = d.projectilesRef.current[i];
-    if (p.deflected || p.char !== char) continue;
-    p.deflected = true;
-    // Chase fireball — tx/ty seeded to current projectile pos, but updateFireballs
-    // re-aims every frame via chaseProjectileId. life grace caps it at ~1.2 s.
-    d.fireballsRef.current.push({
-      x: PLAYER.x, y: PLAYER.y,
-      tx: p.x, ty: p.y,
-      progress: 0,
-      isSpecial: false,
-      targetBoss: false,
-      chaseProjectileId: p.id,
-      life: 72,    // frame-units (~1.2 s @ 60fps); hard cap to prevent runaway chase
-    });
-    // Parry sparks at the projectile's current position — immediate feedback
-    // that the input registered, even before the fireball actually connects.
-    for (let k = 0; k < 10; k++) {
-      if (d.particlesRef.current.length >= PARTICLE_CAP) break;
-      d.particlesRef.current.push({
-        x: p.x, y: p.y,
-        vx: (Math.random() - 0.5) * 4, vy: (Math.random() - 0.5) * 4,
-        life: 14, maxLife: 14, size: 2.5,
-        color: p.fromBoss ? '#ffaa55' : '#ff88ff',
+  // ── Digit keystroke (1-5): projectile deflection ONLY. Never touches words.
+  //    A press that doesn't match any projectile is a miss (combo reset).
+  if (isDigit) {
+    let deflectedCount = 0;
+    for (let i = d.projectilesRef.current.length - 1; i >= 0; i--) {
+      const p = d.projectilesRef.current[i];
+      if (p.deflected || p.char !== char) continue;
+      p.deflected = true;
+      d.fireballsRef.current.push({
+        x: PLAYER.x, y: PLAYER.y,
+        tx: p.x, ty: p.y,
+        progress: 0,
+        isSpecial: false,
+        targetBoss: false,
+        chaseProjectileId: p.id,
+        life: 72,
       });
+      for (let k = 0; k < 10; k++) {
+        if (d.particlesRef.current.length >= PARTICLE_CAP) break;
+        d.particlesRef.current.push({
+          x: p.x, y: p.y,
+          vx: (Math.random() - 0.5) * 4, vy: (Math.random() - 0.5) * 4,
+          life: 14, maxLife: 14, size: 2.5,
+          color: p.fromBoss ? '#ffaa55' : '#ff88ff',
+        });
+      }
+      deflectedCount += 1;
+      d.statsRef.current.projectilesDeflected += 1;
     }
-    deflectedCount += 1;
-    d.statsRef.current.projectilesDeflected += 1;
-  }
-  const deflectedAny = deflectedCount > 0;
-  if (deflectedAny) {
-    sfxFireball();
-    d.correctKeyRef.current += 1;
-    d.statsRef.current.correctLetters += 1;
-    d.comboRef.current += 1;
-    progressed = true;
-  }
-
-  // ── Phase 2: Word typing. Skipped entirely if the keystroke was consumed
-  //    by a deflection — the player's input was for the projectile, not the
-  //    word. (The new projectile-letter filter in spawnBossAttack guarantees
-  //    phrase letters and projectile letters never overlap, so this rule
-  //    doesn't cause double-duty loss.)
-  if (!deflectedAny) {
+    if (deflectedCount > 0) {
+      sfxFireball();
+      d.correctKeyRef.current += 1;
+      d.statsRef.current.correctLetters += 1;
+      d.comboRef.current += 1;
+      progressed = true;
+    } else {
+      registerWrong(d.statsRef.current, char);
+      sfxMiss();
+      d.comboRef.current = 0;
+    }
+  } else {
+    // ── Letter keystroke (A-Z): word typing ONLY. Projectiles use digits so
+    //    a letter press can never parry.
     // Helper — skip words that can't be typed right now (claimed by Jessyka
     // or still playing a spawn-in animation).
     const typable = (w: Word) => !w.jessykaTarget && !w.spawnAnim;
@@ -2752,21 +2796,18 @@ function handleCharLive(d: LoopDeps, rawChar: string): void {
           spawnFireball(d, w);
           if (w.typed === w.text) completeWord(d, w, d.activeWordRef.current, now);
         } else {
-          // Word-switch rescue (new in 0.2.6): if the keystroke doesn't match
-          // the active word's next letter but IS the first letter of another
-          // typable non-jessyka word on screen, switch to that word. This fixes
-          // the "runner boss-word untypable" bug where the player was locked
-          // onto a boss phrase and couldn't start a falling runner word. Combo
-          // still resets as a drop penalty so the rescue isn't free.
+          // Word-switch rescue: if the keystroke doesn't match the active
+          // word's next letter but IS the first letter of another typable
+          // word on screen, switch. Combo still resets as a drop penalty.
           const switchIdx = words.findIndex(ww => ww !== w && typable(ww) && ww.text.startsWith(char));
           if (switchIdx !== -1) {
-            w.typed = '';                           // release the old active word
+            w.typed = '';
             const nw = words[switchIdx];
             nw.typed = char;
             d.activeWordRef.current = switchIdx;
             d.correctKeyRef.current += 1;
             d.statsRef.current.correctLetters += 1;
-            d.comboRef.current = 0;                 // drop penalty — combo resets, keystroke credits
+            d.comboRef.current = 0;
             progressed = true;
             spawnFireball(d, nw);
             if (nw.typed === nw.text) completeWord(d, nw, switchIdx, now);
