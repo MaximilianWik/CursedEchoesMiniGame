@@ -35,6 +35,7 @@ export function rankForCombo(combo: number): Rank {
 // ─────────────────────────────────────────────────────────────
 
 export type Word = {
+  id: number;                         // unique — stable identifier across splices
   text: string;
   x: number;
   y: number;
@@ -48,8 +49,9 @@ export type Word = {
   scrambled: boolean;                 // reserved (unused — kept for schema stability)
   stationaryX: number;                // chanter: fixed x; words keep their own
   spawnTime: number;
-  isBossAttack?: boolean;             // word-projectile fired by a boss (moves toward player, dmg on contact)
+  isBossAttack?: boolean;             // word-projectile fired by a boss
   isBossPhrase?: boolean;             // stationary phrase that damages the boss when completed
+  jessykaTarget?: boolean;            // claimed by the Jessyka companion; player cannot start typing this
 };
 
 export type Fireball = {
@@ -59,6 +61,8 @@ export type Fireball = {
   isSpecial: boolean;
   targetBoss: boolean;
   bossDamage?: number;                // amount to deduct from boss HP on impact
+  chaseProjectileId?: number;         // if set, fireball homes on this projectile until intercept
+  life?: number;                      // seconds of grace for chase fireballs before they self-detonate
 };
 
 export type Particle = {
@@ -90,11 +94,13 @@ export type Ember = {
 
 /** Single-letter projectile fired by caster words OR by bosses. Homes downward. */
 export type Projectile = {
+  id: number;                        // stable unique id so fireballs can chase across frames
   x: number; y: number;
   vx: number; vy: number;
   char: string;
   fromBoss: boolean;
   life: number;                      // seconds
+  deflected?: boolean;               // player parried — no longer damages; waits for chase-fireball intercept
   // Spiral-pattern fields — when set, position is computed from origin/ang/radius
   // each frame instead of from linear vx/vy. Used by the "wave" bullet-hell attack.
   spiralOrigin?: {x: number; y: number};
@@ -1476,35 +1482,37 @@ export function drawFireball(
   fb: Fireball,
   combo: number,
   rankId: string,
+  time: number = 0,
 ): string {
+  // JESSYKA hearts render in their own dedicated path — clean pink heart
+  // with a soft halo, gradient fill, and a white highlight. Combo scaling
+  // is *mild* so late-game hearts don't dominate the screen.
+  if (fb.isSpecial) {
+    drawJessykaHeart(ctx, fb, combo, time);
+    return '#ff80cc';
+  }
+
   const isSpear = rankId === 'S' || rankId === 'SS' || rankId === 'SSS';
   const isSSS = rankId === 'SSS';
   const spearMul = isSSS ? 1.0 : rankId === 'SS' ? 0.7 : 0.4;
   const baseSize = isSpear ? 10 * spearMul : 5;
   const scale = 1 + combo / 150;
   const size = baseSize * scale;
-  const color = fb.isSpecial ? '#ff80cc' : isSpear ? (isSSS ? '#00ddff' : '#55bbff') : 'hsl(' + (20 + combo) + ', 100%, 55%)';
+  const color = isSpear ? (isSSS ? '#00ddff' : '#55bbff') : 'hsl(' + (20 + combo) + ', 100%, 55%)';
   ctx.save();
   ctx.globalCompositeOperation = 'lighter';
   const haloR = size * (isSpear ? 4 : 3);
   const halo = ctx.createRadialGradient(fb.x, fb.y, 0, fb.x, fb.y, haloR);
-  halo.addColorStop(0, fb.isSpecial ? 'rgba(255, 128, 204, 0.6)' : isSpear ? (isSSS ? 'rgba(0, 221, 255, 0.65)' : 'rgba(85, 187, 255, 0.55)') : 'rgba(255, 90, 20, 0.6)');
+  halo.addColorStop(0, isSpear ? (isSSS ? 'rgba(0, 221, 255, 0.65)' : 'rgba(85, 187, 255, 0.55)') : 'rgba(255, 90, 20, 0.6)');
   halo.addColorStop(1, 'rgba(0,0,0,0)');
   ctx.fillStyle = halo; ctx.fillRect(fb.x - haloR, fb.y - haloR, haloR * 2, haloR * 2);
   ctx.restore();
   ctx.save();
   ctx.shadowBlur = isSpear ? 32 : 14 + combo / 6;
-  ctx.shadowColor = fb.isSpecial ? '#ff0099' : isSpear ? (isSSS ? '#00ffff' : '#0055ff') : '#ff4500';
+  ctx.shadowColor = isSpear ? (isSSS ? '#00ffff' : '#0055ff') : '#ff4500';
   ctx.fillStyle = color;
   ctx.beginPath();
-  if (fb.isSpecial) {
-    const s = size * 6;
-    ctx.moveTo(fb.x, fb.y + s / 4);
-    ctx.bezierCurveTo(fb.x, fb.y, fb.x - s / 3, fb.y - s / 4, fb.x - s / 3, fb.y + s / 4);
-    ctx.bezierCurveTo(fb.x - s / 3, fb.y + s / 2, fb.x, fb.y + s * 0.8, fb.x, fb.y + s);
-    ctx.bezierCurveTo(fb.x, fb.y + s * 0.8, fb.x + s / 3, fb.y + s / 2, fb.x + s / 3, fb.y + s / 4);
-    ctx.bezierCurveTo(fb.x + s / 3, fb.y - s / 4, fb.x, fb.y, fb.x, fb.y + s / 4);
-  } else if (isSpear) {
+  if (isSpear) {
     const ang = Math.atan2(fb.ty - fb.y, fb.tx - fb.x);
     const len = size * 3;
     ctx.moveTo(fb.x + Math.cos(ang) * len, fb.y + Math.sin(ang) * len);
@@ -1516,12 +1524,121 @@ export function drawFireball(
     ctx.arc(fb.x, fb.y, size, 0, Math.PI * 2);
   }
   ctx.fill();
-  if (isSSS && !fb.isSpecial) {
+  if (isSSS) {
     ctx.fillStyle = '#ffffff';
     ctx.beginPath(); ctx.arc(fb.x, fb.y, size * 0.7, 0, Math.PI * 2); ctx.fill();
   }
   ctx.restore();
   return color;
+}
+
+/** Clean, gradient-filled heart for JESSYKA fireballs.
+ *  Size is ~24-32 px with only a mild combo boost so it stays readable even
+ *  at SSS rank. Gentle breathing pulse via sin(time). Inner shine highlight
+ *  in the top-left lobe sells the "romance-y" pink-candy look.
+ */
+function drawJessykaHeart(ctx: CanvasRenderingContext2D, fb: Fireball, combo: number, time: number): void {
+  // Controlled scaling: 1.0x at 0 combo, max 1.3x past 120 combo.
+  const comboBoost = 1 + Math.min(0.3, combo / 400);
+  const pulse = 0.94 + Math.sin(time * 0.012) * 0.06;
+  const s = 26 * comboBoost * pulse;           // base glyph half-extent
+  const cx = fb.x, cy = fb.y;
+
+  // ── Outer halo — soft pink radial glow.
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  const haloR = s * 2.4;
+  const halo = ctx.createRadialGradient(cx, cy, 0, cx, cy, haloR);
+  halo.addColorStop(0,   'rgba(255, 150, 210, 0.55)');
+  halo.addColorStop(0.4, 'rgba(255,  80, 170, 0.28)');
+  halo.addColorStop(1,   'rgba(200,  40, 140, 0)');
+  ctx.fillStyle = halo;
+  ctx.fillRect(cx - haloR, cy - haloR, haloR * 2, haloR * 2);
+  ctx.restore();
+
+  // ── Heart body path — classic two-lobe bezier. Built once, reused for
+  //    fill and for the highlight clip.
+  const pathHeart = (scale: number) => {
+    const S = s * scale;
+    const topDip = S * 0.22;
+    ctx.beginPath();
+    ctx.moveTo(cx, cy - S * 0.15 + topDip);
+    // Left lobe up and over
+    ctx.bezierCurveTo(
+      cx,           cy - S * 0.55,
+      cx - S * 0.95, cy - S * 0.55,
+      cx - S * 0.95, cy - S * 0.05,
+    );
+    // Left side down to bottom point
+    ctx.bezierCurveTo(
+      cx - S * 0.95, cy + S * 0.35,
+      cx - S * 0.35, cy + S * 0.55,
+      cx,           cy + S * 0.9,
+    );
+    // Right side up to the right lobe
+    ctx.bezierCurveTo(
+      cx + S * 0.35, cy + S * 0.55,
+      cx + S * 0.95, cy + S * 0.35,
+      cx + S * 0.95, cy - S * 0.05,
+    );
+    // Right lobe up and over, closing at the top dip
+    ctx.bezierCurveTo(
+      cx + S * 0.95, cy - S * 0.55,
+      cx,           cy - S * 0.55,
+      cx,           cy - S * 0.15 + topDip,
+    );
+    ctx.closePath();
+  };
+
+  // ── Drop shadow for depth.
+  ctx.save();
+  ctx.shadowBlur = 18;
+  ctx.shadowColor = '#ff0080';
+  // Main fill — radial gradient from a bright center to deeper pink edges.
+  const bodyGrad = ctx.createRadialGradient(
+    cx - s * 0.2, cy - s * 0.15, 0,
+    cx, cy + s * 0.15, s * 1.2,
+  );
+  bodyGrad.addColorStop(0,    '#ffe8f4');      // near-white highlight center
+  bodyGrad.addColorStop(0.25, '#ffb0d8');      // bright pink
+  bodyGrad.addColorStop(0.65, '#ff5aa6');      // mid pink
+  bodyGrad.addColorStop(1,    '#d62a7f');      // deep edge pink
+  pathHeart(1);
+  ctx.fillStyle = bodyGrad;
+  ctx.fill();
+  ctx.shadowBlur = 0;
+  // Thin edge accent — deeper magenta rim so the heart reads against the bg.
+  ctx.strokeStyle = 'rgba(180, 20, 100, 0.85)';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+  ctx.restore();
+
+  // ── Shine highlight — a small soft white ellipse in the top-left lobe.
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  const shine = ctx.createRadialGradient(
+    cx - s * 0.35, cy - s * 0.25, 0,
+    cx - s * 0.35, cy - s * 0.25, s * 0.35,
+  );
+  shine.addColorStop(0, 'rgba(255, 255, 255, 0.85)');
+  shine.addColorStop(1, 'rgba(255, 255, 255, 0)');
+  ctx.fillStyle = shine;
+  ctx.beginPath();
+  ctx.ellipse(cx - s * 0.32, cy - s * 0.28, s * 0.3, s * 0.18, -0.5, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+
+  // ── Sparkle points rotating around the heart (2 specks).
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  for (let i = 0; i < 2; i++) {
+    const ang = time * 0.005 + i * Math.PI;
+    const rx = cx + Math.cos(ang) * s * 1.35;
+    const ry = cy + Math.sin(ang) * s * 1.35;
+    ctx.fillStyle = 'rgba(255, 220, 240, 0.9)';
+    ctx.beginPath(); ctx.arc(rx, ry, 1.5, 0, Math.PI * 2); ctx.fill();
+  }
+  ctx.restore();
 }
 
 export function drawShockwave(ctx: CanvasRenderingContext2D, sw: Shockwave): void {
@@ -1540,13 +1657,16 @@ export function drawParticle(ctx: CanvasRenderingContext2D, p: Particle): void {
   ctx.globalAlpha = lifeT;
   ctx.fillStyle = p.color;
   if (p.isHeart) {
-    const s = p.size;
+    // Clean mini-heart — two arcs + a bottom triangle, centered on (p.x, p.y).
+    const s = p.size * 1.4;
+    const halfW = s * 0.5;
+    const lobeR = s * 0.32;
+    const cx = p.x, cy = p.y;
     ctx.beginPath();
-    ctx.moveTo(p.x, p.y + s / 4);
-    ctx.bezierCurveTo(p.x, p.y, p.x - s / 2, p.y, p.x - s / 2, p.y + s / 2);
-    ctx.bezierCurveTo(p.x - s / 2, p.y + s * 0.75, p.x, p.y + s, p.x, p.y + s);
-    ctx.bezierCurveTo(p.x, p.y + s, p.x + s / 2, p.y + s * 0.75, p.x + s / 2, p.y + s / 2);
-    ctx.bezierCurveTo(p.x + s / 2, p.y, p.x, p.y, p.x, p.y + s / 4);
+    ctx.arc(cx - halfW * 0.5, cy - s * 0.1, lobeR, Math.PI, 0, false);
+    ctx.arc(cx + halfW * 0.5, cy - s * 0.1, lobeR, Math.PI, 0, false);
+    ctx.lineTo(cx, cy + s * 0.55);
+    ctx.closePath();
     ctx.fill();
   } else {
     ctx.fillRect(p.x - p.size / 2, p.y - p.size / 2, p.size, p.size);
@@ -1559,10 +1679,21 @@ export function drawParticle(ctx: CanvasRenderingContext2D, p: Particle): void {
 // ─────────────────────────────────────────────────────────────
 
 export function drawProjectile(ctx: CanvasRenderingContext2D, p: Projectile, time: number = 0): void {
+  // Deflected projectiles render "ghosted" — lower opacity + desaturated tone —
+  // so the player can see they've been neutralised even before the chase
+  // fireball arrives. The projectile itself is harmless at this point.
+  if (p.deflected) {
+    ctx.save();
+    ctx.globalAlpha = 0.4;
+    ctx.filter = 'saturate(0.25) brightness(1.3)';
+  }
   if (p.fromBoss) {
     drawBossProjectile(ctx, p);
   } else {
     drawCasterProjectile(ctx, p, time);
+  }
+  if (p.deflected) {
+    ctx.restore();
   }
 }
 

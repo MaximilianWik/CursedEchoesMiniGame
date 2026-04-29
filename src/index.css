@@ -54,6 +54,20 @@
   }
 
   /* ═══════════════════════════════════════════════════════════ */
+  /* Jessyka companion — lovebomb spawn + angelic despawn         */
+  /* ═══════════════════════════════════════════════════════════ */
+  .jessyka-sprite {
+    animation:
+      jessykaLovebomb 1.3s cubic-bezier(0.18, 1.0, 0.3, 1.0),
+      jessykaIdleFloat 2.6s ease-in-out 1.3s infinite;
+    filter: drop-shadow(0 0 20px rgba(255, 128, 204, 0.75)) drop-shadow(0 0 40px rgba(255, 80, 180, 0.35));
+    will-change: transform, filter, opacity;
+  }
+  .jessyka-sprite.is-despawning {
+    animation: jessykaAngelic 1.6s cubic-bezier(0.3, 0.2, 0.2, 1) forwards;
+  }
+
+  /* ═══════════════════════════════════════════════════════════ */
   /* Rank icon — dramatic reveal on rank change + idle float     */
   /* ═══════════════════════════════════════════════════════════ */
   .rank-icon {
@@ -383,6 +397,56 @@
     25%  { transform: translate(-50%, -6px) scale(1.04); }
     60%  { transform: translate(-50%, -10px) scale(1.06); }
     100% { transform: translate(-50%, 0)    scale(1.00); }
+  }
+  @keyframes jessykaLovebomb {
+    0% {
+      opacity: 0;
+      transform: translate(60px, 40px) scale(0.4) rotate(15deg);
+      filter: drop-shadow(0 0 60px rgba(255, 80, 180, 1)) blur(16px) brightness(1.6);
+    }
+    35% {
+      opacity: 1;
+      transform: translate(-6px, -24px) scale(1.15) rotate(-5deg);
+      filter: drop-shadow(0 0 40px rgba(255, 100, 200, 0.95)) blur(0) brightness(1.3);
+    }
+    55% {
+      transform: translate(2px, 0) scale(0.95) rotate(2deg);
+      filter: drop-shadow(0 0 28px rgba(255, 128, 204, 0.85)) blur(0) brightness(1.15);
+    }
+    75% {
+      transform: translate(-1px, -2px) scale(1.03) rotate(-1deg);
+    }
+    100% {
+      opacity: 1;
+      transform: translate(0, 0) scale(1.00) rotate(0);
+      filter: drop-shadow(0 0 20px rgba(255, 128, 204, 0.75)) drop-shadow(0 0 40px rgba(255, 80, 180, 0.35));
+    }
+  }
+  @keyframes jessykaIdleFloat {
+    0%, 100% { transform: translate(0, 0) scale(1.00); }
+    50%      { transform: translate(0, -4px) scale(1.015); }
+  }
+  @keyframes jessykaAngelic {
+    0% {
+      opacity: 1;
+      transform: translate(0, 0) scale(1.00);
+      filter: drop-shadow(0 0 20px rgba(255, 128, 204, 0.75)) brightness(1);
+    }
+    30% {
+      opacity: 1;
+      transform: translate(0, -10px) scale(1.06);
+      filter: drop-shadow(0 0 60px rgba(255, 240, 200, 1)) drop-shadow(0 0 20px rgba(255, 200, 240, 0.9)) brightness(1.5);
+    }
+    65% {
+      opacity: 0.75;
+      transform: translate(0, -60px) scale(1.08);
+      filter: drop-shadow(0 0 80px rgba(255, 240, 200, 1)) brightness(1.8) blur(2px);
+    }
+    100% {
+      opacity: 0;
+      transform: translate(0, -140px) scale(1.12);
+      filter: drop-shadow(0 0 100px rgba(255, 255, 220, 1)) brightness(2.4) blur(10px);
+    }
   }
   @keyframes rankIconReveal {
     0%   { opacity: 0; transform: scale(0.3) rotate(-18deg); filter: drop-shadow(0 0 40px rgba(255,200,80,1)) blur(10px) brightness(2.2); }
