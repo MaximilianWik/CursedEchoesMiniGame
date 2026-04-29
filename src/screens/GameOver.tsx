@@ -146,8 +146,8 @@ export function GameOverScreen(props: GameOverScreenProps) {
         ))}
       </div>
 
-      {/* Version badge — bottom-right corner. */}
-      <div className="absolute bottom-3 right-4 font-[Cinzel] text-[10px] tracking-[0.4em] uppercase text-amber-700/50 select-none">
+      {/* Version badge — bottom-right corner, amber pill to stand out. */}
+      <div className="absolute bottom-4 right-4 px-3 py-1.5 border border-amber-600/80 bg-black/70 rounded-sm font-[Cinzel] text-xs tracking-[0.4em] uppercase text-amber-300 shadow-[0_0_14px_rgba(255,180,60,0.35)] select-none">
         v{APP_VERSION}
       </div>
     </div>

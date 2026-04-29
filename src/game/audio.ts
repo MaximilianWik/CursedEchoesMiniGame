@@ -422,6 +422,146 @@ export function sfxHeartbeat(now: number): void {
 }
 
 // ─────────────────────────────────────────────────────────────
+// 0.2.8 additions — dedicated sounds for Jessyka grace, boss
+// summons, lich split, estus godmode, word-switch, kiss impact.
+// Warm / major-key tonality reserved for Jessyka (contrasts the
+// Bloodborne dissonance elsewhere) so her moments land as relief.
+// ─────────────────────────────────────────────────────────────
+
+/** Jessyka's grace shield — the heartwarming love-explosion. Major chord
+ *  arpeggio (C major) with a sub-bass impact underneath and a shimmering
+ *  bell stack on top. Long tail so the aftermath lingers. */
+export function sfxJessykaGrace(): void {
+  if (!ctx || !sfxGain) return;
+  // Sub impact — the "WHOOMPH" of the explosion.
+  subThud(52, 0.9, 0.95);
+  // Major chord arpeggio (C E G C) — ascending, ringing.
+  const notes = [262, 330, 392, 523, 659];       // C4 E4 G4 C5 E5
+  notes.forEach((f, i) => {
+    window.setTimeout(() => {
+      if (!ctx || !sfxGain) return;
+      // Bell-ish body — sine + inharmonic partial.
+      const osc1 = ctx.createOscillator();
+      const osc2 = ctx.createOscillator();
+      osc1.type = 'sine'; osc2.type = 'triangle';
+      osc1.frequency.value = f;
+      osc2.frequency.value = f * 2.01;              // slightly inharmonic shimmer
+      const g = expDecay(2.0 + i * 0.15, 0.28);
+      osc1.connect(g); osc2.connect(g);
+      g.connect(sfxGain);
+      osc1.start(); osc2.start();
+      const stopAt = ctx.currentTime + 2.4;
+      osc1.stop(stopAt); osc2.stop(stopAt);
+    }, i * 75);
+  });
+  // High shimmer — breathy noise in a narrow bandpass, pitched up.
+  noise(1.4, 'bandpass', 3200, 8, 0.14);
+  // Warm low drone for the last 1.5s — fills the space after the chord.
+  window.setTimeout(() => {
+    if (!ctx || !sfxGain) return;
+    const drone = ctx.createOscillator();
+    drone.type = 'sine'; drone.frequency.value = 131;   // C3
+    const g = expDecay(1.2, 0.18);
+    drone.connect(g).connect(sfxGain);
+    drone.start(); drone.stop(ctx.currentTime + 1.5);
+  }, 260);
+}
+
+/** Boss summons a chanter — dissonant whisper rising into a snarl. */
+export function sfxBossSummonChanter(): void {
+  if (!ctx || !sfxGain) return;
+  noise(0.7, 'bandpass', 1200, 4, 0.18);
+  // Low growl that rises in pitch (summoning gesture).
+  tone(82, 0.7, 'sawtooth', 0.22, 'sfx', 196);
+  // Dissonant high whisper.
+  tone(620, 0.35, 'triangle', 0.08, 'sfx', 880);
+  subThud(44, 0.5, 0.5);
+}
+
+/** Boss summons a caster — sharper, more metallic, with a crackle. */
+export function sfxBossSummonCaster(): void {
+  if (!ctx || !sfxGain) return;
+  noise(0.35, 'highpass', 2600, 1.2, 0.16);
+  noise(0.5,  'bandpass', 1400, 6, 0.2);
+  tone(147, 0.4, 'sawtooth', 0.25, 'sfx', 330);
+  tone(440, 0.25, 'square', 0.08, 'sfx', 880);
+  subThud(58, 0.3, 0.45);
+}
+
+/** Lich split on death — crystalline purple shatter with a reverb-heavy body. */
+export function sfxLichSplit(): void {
+  if (!ctx || !sfxGain) return;
+  // Bright shatter noise.
+  noise(0.45, 'highpass', 3800, 0.6, 0.26);
+  // Dissonant minor-chord body.
+  [196, 233, 294].forEach((f, i) => {
+    const osc = ctx!.createOscillator();
+    osc.type = 'triangle';
+    osc.frequency.value = f;
+    const g = expDecay(0.9 + i * 0.1, 0.16);
+    osc.connect(g).connect(sfxGain!);
+    osc.start(); osc.stop(ctx!.currentTime + 1.2);
+  });
+  subThud(66, 0.35, 0.55);
+}
+
+/** Estus godmode starts — bright golden bell ring announcing the i-frame window. */
+export function sfxEstusGodmode(): void {
+  if (!ctx || !sfxGain) return;
+  // Ascending perfect-fourth bell (G → C) — hopeful, major tonality.
+  const pairs: [number, number][] = [[392, 1.0], [523, 2.01], [784, 3.04]];
+  pairs.forEach(([f, ratio], i) => {
+    const osc1 = ctx!.createOscillator();
+    const osc2 = ctx!.createOscillator();
+    osc1.type = 'sine'; osc2.type = 'triangle';
+    osc1.frequency.value = f;
+    osc2.frequency.value = f * ratio;
+    const g = expDecay(1.8 - i * 0.2, 0.18);
+    osc1.connect(g); osc2.connect(g);
+    g.connect(sfxGain!);
+    osc1.start(); osc2.start();
+    const stopAt = ctx!.currentTime + 2.0;
+    osc1.stop(stopAt); osc2.stop(stopAt);
+  });
+  // Airy shimmer over the top.
+  noise(0.8, 'bandpass', 4200, 10, 0.08);
+}
+
+/** Word-switch rescue — quick "whoosh" cue that the target pivoted. Dry,
+ *  non-musical, so it doesn't step on the cast/fireball audio that follows. */
+export function sfxWordSwitch(): void {
+  if (!ctx) return;
+  noise(0.14, 'bandpass', 2200, 6, 0.16, 'dry');
+  tone(520, 0.08, 'triangle', 0.08, 'dry', 880);
+}
+
+/** Kiss connects on a projectile or word — soft heart-chime. */
+export function sfxJessykaKissImpact(): void {
+  if (!ctx) return;
+  tone(880, 0.12, 'triangle', 0.14);
+  tone(1175, 0.18, 'sine', 0.08);         // major third up
+  noise(0.08, 'highpass', 4000, 1.2, 0.08, 'dry');
+}
+
+/** Jessyka Q-summon — celebratory chord swell (heart chord). */
+export function sfxJessykaSummon(): void {
+  if (!ctx || !sfxGain) return;
+  // Major triad rising (F A C) — warm summon.
+  [349, 440, 523].forEach((f, i) => {
+    window.setTimeout(() => {
+      if (!ctx || !sfxGain) return;
+      const osc = ctx.createOscillator();
+      osc.type = 'triangle'; osc.frequency.value = f;
+      const g = expDecay(1.4, 0.22);
+      osc.connect(g).connect(sfxGain);
+      osc.start(); osc.stop(ctx.currentTime + 1.8);
+    }, i * 60);
+  });
+  noise(0.45, 'bandpass', 1600, 4, 0.14);
+  subThud(88, 0.28, 0.3);
+}
+
+// ─────────────────────────────────────────────────────────────
 // Music — dark dissonant drone per zone.
 // Three detuned saws: root + flat-5th + octave, low-pass + slow LFO on cutoff.
 // ─────────────────────────────────────────────────────────────

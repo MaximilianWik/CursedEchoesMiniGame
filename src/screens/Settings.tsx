@@ -73,8 +73,8 @@ export function SettingsScreen({onClose}: SettingsScreenProps) {
           </button>
         </div>
 
-        {/* Version footer — centered, subtle, keeps the panel anchored in time. */}
-        <div className="mt-6 pt-3 border-t border-amber-900/30 text-center font-[Cinzel] text-[10px] tracking-[0.5em] uppercase text-amber-800/60 select-none">
+        {/* Version footer — bold, gold, centered under the DONE row. */}
+        <div className="mt-6 pt-3 border-t border-amber-700/60 text-center font-[Cinzel] text-xs tracking-[0.5em] uppercase text-amber-300 drop-shadow-[0_0_8px_rgba(255,180,60,0.45)] select-none">
           Cursed Echoes · v{APP_VERSION}
         </div>
       </div>

@@ -25,8 +25,9 @@ export function MenuScreen({onStart, onOpenSettings, onOpenDev}: MenuScreenProps
         ◇ Dev
       </button>
 
-      {/* Version badge — bottom-right corner, low-contrast so it reads as metadata. */}
-      <div className="absolute bottom-4 right-4 font-[Cinzel] text-xs tracking-[0.35em] uppercase text-amber-700/60 select-none">
+      {/* Version badge — bottom-right corner. Pill with a gold outline + glow
+          so the text is clearly legible against the dark menu background. */}
+      <div className="absolute bottom-4 right-4 px-3 py-1.5 border border-amber-600/80 bg-black/70 rounded-sm font-[Cinzel] text-xs tracking-[0.4em] uppercase text-amber-300 shadow-[0_0_14px_rgba(255,180,60,0.35)] select-none">
         v{APP_VERSION}
       </div>
 

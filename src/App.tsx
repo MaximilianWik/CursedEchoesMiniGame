@@ -31,6 +31,9 @@ import {
   sfxPlayerHit, sfxBonfire, sfxEstus, sfxDodge, sfxBossAppear, sfxBossDefeated,
   sfxBossScream, sfxBossCollapse, sfxBossFinale,
   sfxDeath, sfxHeartbeat,
+  sfxJessykaGrace, sfxBossSummonChanter, sfxBossSummonCaster,
+  sfxLichSplit, sfxEstusGodmode, sfxWordSwitch,
+  sfxJessykaKissImpact, sfxJessykaSummon,
 } from './game/audio';
 
 import {Hud, type HudStats} from './hud/Hud';
@@ -112,6 +115,10 @@ type JessykaCompanion = {
   summonSource: 'jessyka-word' | 'estus';
   projectileTargetId: number | null;  // Projectile.id currently being chased
   autoDespawnAt: number;              // performance.now at which to force 'leaving' (0 = no auto-despawn)
+  // New in 0.2.8 — grace shield. Triggered automatically when an incoming
+  // projectile/word is about to damage the player. Once per spawn; a second
+  // Jessyka summon resets this flag.
+  graceUsed: boolean;
 };
 
 type JessykaKiss = {
@@ -248,7 +255,7 @@ export default function App() {
   const zoneStartTimeRef = useRef(0);
   const zoneElapsedRef = useRef(0);
   const bossRef = useRef<BossRuntime | null>(null);
-  const bossAnnouncementRef = useRef<{text: string; life: number} | null>(null);
+  const bossAnnouncementRef = useRef<{text: string; life: number; color?: string} | null>(null);
 
   // Jessyka companion + kisses.
   const jessykaRef = useRef<JessykaCompanion | null>(null);
@@ -591,6 +598,7 @@ export default function App() {
       // or drinks another estus mid-window (second drink refreshes the class).
       const godEnd = performance.now() + ESTUS_GODMODE_MS;
       iFramesUntilRef.current = Math.max(iFramesUntilRef.current, godEnd);
+      sfxEstusGodmode();
       const img = playerImgRef.current;
       if (img) {
         img.classList.remove('is-estus-godmode');
@@ -788,7 +796,7 @@ type LoopDeps = {
   zoneStartTimeRef: React.RefObject<number>;
   zoneElapsedRef: React.RefObject<number>;
   bossRef: React.RefObject<BossRuntime | null>;
-  bossAnnouncementRef: React.RefObject<{text: string; life: number} | null>;
+  bossAnnouncementRef: React.RefObject<{text: string; life: number; color?: string} | null>;
   statsRef: React.RefObject<RunStats>;
   jessykaRef: React.RefObject<JessykaCompanion | null>;
   jessykaKissesRef: React.RefObject<JessykaKiss[]>;
@@ -895,7 +903,7 @@ function runGameLoop(d: LoopDeps): () => void {
       }
     }
 
-    // ── Boss announcement banner ──────────────────────────────
+    // ── Boss / ability announcement banner ────────────────────
     if (d.bossAnnouncementRef.current) {
       const a = d.bossAnnouncementRef.current;
       a.life -= dt;
@@ -905,8 +913,13 @@ function runGameLoop(d: LoopDeps): () => void {
         textCtx.font = 'bold 42px "Cinzel", serif';
         textCtx.textAlign = 'center';
         const t = a.life / 180;
-        textCtx.fillStyle = 'rgba(255, 60, 30, ' + t.toFixed(3) + ')';
-        textCtx.shadowBlur = 24; textCtx.shadowColor = '#ff3020';
+        // Parse "#rgb" or "#rrggbb" colour into rgba with life-alpha.
+        const color = a.color ?? '#ff3c1e';
+        const r = parseInt(color.length === 4 ? color[1] + color[1] : color.slice(1, 3), 16);
+        const g = parseInt(color.length === 4 ? color[2] + color[2] : color.slice(3, 5), 16);
+        const b = parseInt(color.length === 4 ? color[3] + color[3] : color.slice(5, 7), 16);
+        textCtx.fillStyle = 'rgba(' + r + ',' + g + ',' + b + ',' + t.toFixed(3) + ')';
+        textCtx.shadowBlur = 24; textCtx.shadowColor = color;
         textCtx.fillText(a.text, DESIGN_W / 2, 280);
         textCtx.restore();
       }
@@ -1316,6 +1329,7 @@ function spawnBossAttack(d: LoopDeps, pattern: BossPattern, _letters: string, ti
       spawnAnim: {start: time, duration: 900},
     });
     d.bossAnnouncementRef.current = {text: 'A CHANTER RISES', life: 140};
+    sfxBossSummonChanter();
     triggerLightning(d.bgStateRef.current, time);
     return true;
   } else if (pattern === 'caster') {
@@ -1347,6 +1361,7 @@ function spawnBossAttack(d: LoopDeps, pattern: BossPattern, _letters: string, ti
       spawnAnim: {start: time, duration: 900},
     });
     d.bossAnnouncementRef.current = {text: 'A CASTER EMERGES', life: 140};
+    sfxBossSummonCaster();
     triggerLightning(d.bgStateRef.current, time);
     return true;
   }
@@ -1948,10 +1963,9 @@ function updateJessykaKisses(d: LoopDeps, ctx: CanvasRenderingContext2D, time: n
       const dx = p.x - k.x, dy = p.y - k.y;
       const dist = Math.sqrt(dx * dx + dy * dy);
       if (dist < 18) {
-        // Arrival — splice the projectile, burst, shockwave, sfx.
+        // Arrival — splice the projectile, burst, shockwave, sfx (kissImpact plays inside).
         d.projectilesRef.current.splice(pIdx, 1);
         spawnKissProjectileHit(d, p.x, p.y);
-        sfxFireball();
         d.statsRef.current.projectilesDeflected += 1;
         kisses.splice(i, 1);
         continue;
@@ -1995,6 +2009,7 @@ function updateJessykaKisses(d: LoopDeps, ctx: CanvasRenderingContext2D, time: n
         if (w.typed.length === k.letterIdx) {
           w.typed += w.text[k.letterIdx] ?? '';
         }
+        sfxJessykaKissImpact();
         // Impact sparkles.
         for (let p = 0; p < 10; p++) {
           if (d.particlesRef.current.length >= PARTICLE_CAP) break;
@@ -2018,6 +2033,7 @@ function updateJessykaKisses(d: LoopDeps, ctx: CanvasRenderingContext2D, time: n
 
 /** FX for a kiss hitting a deflected boss projectile — heart burst + shockwave. */
 function spawnKissProjectileHit(d: LoopDeps, x: number, y: number): void {
+  sfxJessykaKissImpact();
   for (let p = 0; p < 16; p++) {
     if (d.particlesRef.current.length >= PARTICLE_CAP) break;
     const ang = Math.random() * Math.PI * 2;
@@ -2541,7 +2557,169 @@ function drawDamageTexts(d: LoopDeps, textCtx: CanvasRenderingContext2D, dt: num
   textCtx.restore();
 }
 
+/** Jessyka grace shield — a once-per-spawn defensive ability. When damage is
+ *  about to land on the player, if she is active AND hasn't spent her grace
+ *  yet, she veils the player in a love-explosion: cancels the hit, pushes all
+ *  hostile words outward from the player, splices in-flight projectiles,
+ *  grants brief post-explosion i-frames, and plays a heartwarming chord.
+ *  Returns true when grace was spent (caller should skip damage). */
+function tryJessykaGraceShield(d: LoopDeps, time: number): boolean {
+  const j = d.jessykaRef.current;
+  if (!j || j.state !== 'active' || j.graceUsed) return false;
+  j.graceUsed = true;
+
+  // 1.2 s of i-frames after the shield so the player can't take a second hit
+  // the same frame some other projectile lands.
+  d.iFramesUntilRef.current = Math.max(d.iFramesUntilRef.current, time + 1200);
+
+  // ── Sound: big major-chord love chord with sub impact + shimmer tail.
+  sfxJessykaGrace();
+
+  // ── Visual: massive pink shockwave, almost screen-wide.
+  d.shockwavesRef.current.push({
+    x: PLAYER.x, y: PLAYER.y - 20,
+    radius: 10, maxRadius: DESIGN_W * 0.6,
+    color: 'rgba(255, 120, 200, ALPHA)',
+  });
+  // Secondary inner ring — tighter, brighter, offset in time via radius diff.
+  d.shockwavesRef.current.push({
+    x: PLAYER.x, y: PLAYER.y - 20,
+    radius: 4, maxRadius: 260,
+    color: 'rgba(255, 220, 240, ALPHA)',
+  });
+  // Third outer ring — biggest, softest, the enveloping grace aura.
+  d.shockwavesRef.current.push({
+    x: PLAYER.x, y: PLAYER.y - 20,
+    radius: 16, maxRadius: DESIGN_W * 0.75,
+    color: 'rgba(255, 160, 220, ALPHA)',
+  });
+
+  // ── Particles: 120-ish radial burst. Mix of hearts, petals, and cream sparks.
+  const cx = PLAYER.x, cy = PLAYER.y - 20;
+  for (let i = 0; i < 120; i++) {
+    if (d.particlesRef.current.length >= PARTICLE_CAP) break;
+    const ang = (i / 120) * Math.PI * 2 + Math.random() * 0.12;
+    const spd = 4 + Math.random() * 9;
+    d.particlesRef.current.push({
+      x: cx + Math.cos(ang) * 18,
+      y: cy + Math.sin(ang) * 18,
+      vx: Math.cos(ang) * spd,
+      vy: Math.sin(ang) * spd - 1.5,
+      life: 46, maxLife: 46, size: 3 + Math.random() * 2,
+      color: i % 3 === 0 ? '#ffd6ec' : (i % 3 === 1 ? '#ff80cc' : '#ff3d96'),
+      isHeart: Math.random() < 0.55,
+    });
+  }
+  // A secondary slow "petal drift" layer — lingers for 2s.
+  for (let i = 0; i < 40; i++) {
+    if (d.particlesRef.current.length >= PARTICLE_CAP) break;
+    const ang = Math.random() * Math.PI * 2;
+    const spd = 0.8 + Math.random() * 2;
+    d.particlesRef.current.push({
+      x: cx + (Math.random() - 0.5) * 60,
+      y: cy + (Math.random() - 0.5) * 40,
+      vx: Math.cos(ang) * spd,
+      vy: Math.sin(ang) * spd - 0.4,
+      life: 120, maxLife: 120, size: 2.5 + Math.random() * 1.5,
+      color: Math.random() < 0.5 ? '#ffe0ee' : '#ffb0d4',
+      isHeart: Math.random() < 0.35,
+    });
+  }
+  // Overhead cream-angelic flecks above the player (veil imagery).
+  for (let i = 0; i < 30; i++) {
+    if (d.particlesRef.current.length >= PARTICLE_CAP) break;
+    const ang = -Math.PI / 2 + (Math.random() - 0.5) * 1.4;
+    const spd = 2 + Math.random() * 3;
+    d.particlesRef.current.push({
+      x: cx + (Math.random() - 0.5) * 80,
+      y: cy - 30,
+      vx: Math.cos(ang) * spd * 0.4,
+      vy: Math.sin(ang) * spd,
+      life: 68, maxLife: 68, size: 2 + Math.random() * 1.5,
+      color: Math.random() < 0.6 ? '#fff5e0' : '#ffe0c0',
+    });
+  }
+
+  // ── Screen flash (pink heart-hued).
+  d.hitFlashUntilRef.current = Math.max(d.hitFlashUntilRef.current, time + 360);
+  if (d.screenFlashRef.current) {
+    d.screenFlashRef.current.style.background =
+      'radial-gradient(ellipse at 50% 75%, rgba(255,150,210,0.85) 0%, rgba(255,80,180,0.45) 45%, rgba(0,0,0,0) 85%)';
+    // Revert to the default red after the flash so ordinary hits look right.
+    window.setTimeout(() => {
+      if (d.screenFlashRef.current) {
+        d.screenFlashRef.current.style.background =
+          'radial-gradient(ellipse at 50% 90%, rgba(220,20,20,0.75) 0%, rgba(120,0,0,0.4) 40%, rgba(0,0,0,0) 80%)';
+      }
+    }, 700);
+  }
+
+  // ── Push all hostile words outward from the player, in sync with the
+  //    explosion's outward motion. Boss-attack runners get pushed hardest;
+  //    idle words get a gentler nudge; boss phrase / Jessyka targets / any
+  //    spawn-anim'd words are left alone to avoid weird visual snaps.
+  const PUSH_BASE = 160;      // px pushed along the direction vector
+  for (const w of d.wordsRef.current) {
+    if (w.isBossPhrase || w.jessykaTarget || w.spawnAnim) continue;
+    if (w.isSpecial) continue;                          // don't yank the heart word
+    const dx = w.x - PLAYER.x, dy = w.y - PLAYER.y;
+    const dist = Math.max(1, Math.sqrt(dx * dx + dy * dy));
+    const mag = w.isBossAttack ? PUSH_BASE : PUSH_BASE * 0.7;
+    w.x += (dx / dist) * mag;
+    w.y += (dy / dist) * mag - 20;                      // small upward bias so they fly "off"
+    // Stationary words (chanter/caster/boss-summoned) shouldn't be airborne
+    // afterwards — clamp to their stationaryX so they snap back over the next
+    // frames instead of drifting into walls.
+    if (w.speed === 0) {
+      // Mark a subtle fling via speed so they visibly recoil, then return to
+      // idle because speed === 0 keeps them from chasing the player anyway.
+    }
+  }
+  // Projectiles — splice them (grace scours the air) with bursts at each.
+  for (let i = d.projectilesRef.current.length - 1; i >= 0; i--) {
+    const p = d.projectilesRef.current[i];
+    if (!p.fromBoss || p.deflected) continue;
+    p.deflected = true;
+    for (let k = 0; k < 6; k++) {
+      if (d.particlesRef.current.length >= PARTICLE_CAP) break;
+      d.particlesRef.current.push({
+        x: p.x, y: p.y,
+        vx: (Math.random() - 0.5) * 5, vy: (Math.random() - 0.5) * 5,
+        life: 18, maxLife: 18, size: 2,
+        color: '#ffb0d4',
+      });
+    }
+    d.projectilesRef.current.splice(i, 1);
+  }
+
+  // ── Announcement — floating "GRACE" in the boss-announcement spot, using
+  //    the existing bossAnnouncementRef so it pops in both zone and boss.
+  d.bossAnnouncementRef.current = {text: "JESSYKA'S GRACE", life: 160, color: '#ff9ecc'};
+
+  // Damage-text-style pink popup at the player so the trigger is legible even
+  // if the screen is busy.
+  d.damageTextsRef.current.push({
+    x: PLAYER.x, y: PLAYER.y - 60,
+    value: 'VEILED', life: 70, maxLife: 70, color: '#ffb0d4',
+  });
+
+  // Small screen-shake beat, capped so it doesn't compete with hit-shake.
+  const s = getSettings();
+  if (!s.reduceMotion) {
+    d.shakeMagRef.current = Math.max(d.shakeMagRef.current, 6);
+    d.shakeUntilRef.current = Math.max(d.shakeUntilRef.current, time + 220);
+  }
+
+  d.statsRef.current.projectilesDeflected += 1;   // count it toward parried-air stats
+  return true;
+}
+
 function applyDamageToPlayer(d: LoopDeps, dmg: number, time: number): void {
+  // Jessyka grace shield — once per spawn she can veil the player in her
+  // grace, cancelling this incoming hit and pushing everything hostile away.
+  // Returns true if grace was spent; the caller's damage numbers are dropped.
+  if (tryJessykaGraceShield(d, time)) return;
+
   d.healthRef.current = Math.max(0, d.healthRef.current - dmg);
   d.statsRef.current.damageTaken += dmg;
   if (dmg > d.statsRef.current.biggestHit) d.statsRef.current.biggestHit = dmg;
@@ -2670,11 +2848,12 @@ function trySummonEstusJessyka(d: LoopDeps, now: number): boolean {
     summonSource: 'estus',
     projectileTargetId: null,
     autoDespawnAt: now + JESS_SPAWN_MS + JESS_ESTUS_ACTIVE_MS,
+    graceUsed: false,
   };
   d.setJessykaVisible(true);
   d.setJessykaDespawning(false);
-  d.bossAnnouncementRef.current = {text: "LOVE'S EMBRACE", life: 140};
-  sfxFireball();
+  d.bossAnnouncementRef.current = {text: "LOVE'S EMBRACE", life: 140, color: '#ffb8d8'};
+  sfxJessykaSummon();
   // Celebratory pink burst at her arrival spot.
   const ox = PLAYER.x + JESS_X_OFFSET + JESS_MOUTH_DX, oy = PLAYER.y + JESS_MOUTH_DY;
   for (let p = 0; p < 32; p++) {
@@ -2797,18 +2976,30 @@ function handleCharLive(d: LoopDeps, rawChar: string): void {
           if (w.typed === w.text) completeWord(d, w, d.activeWordRef.current, now);
         } else {
           // Word-switch rescue: if the keystroke doesn't match the active
-          // word's next letter but IS the first letter of another typable
-          // word on screen, switch. Combo still resets as a drop penalty.
-          const switchIdx = words.findIndex(ww => ww !== w && typable(ww) && ww.text.startsWith(char));
+          // word's next letter but IS the NEXT-expected letter of another
+          // typable word (or its first letter if untouched), switch. Combo
+          // still resets as a drop penalty so the rescue isn't free.
+          //
+          // For boss phrases we preserve `typed` — the phrase remains
+          // resumable by typing its next letter later. Non-phrase active
+          // words get reset on switch (existing behaviour). This fixes the
+          // bug where the boss phrase would silently reset mid-way when the
+          // player's keystroke coincided with another word's first letter.
+          const switchIdx = words.findIndex(ww =>
+            ww !== w && typable(ww) && ww.text.charAt(ww.typed.length) === char,
+          );
           if (switchIdx !== -1) {
-            w.typed = '';
+            if (!w.isBossPhrase) w.typed = '';     // preserve phrase progress for later resume
             const nw = words[switchIdx];
-            nw.typed = char;
+            // Only advance the target's typed if we're starting it fresh;
+            // a half-typed word we're switching to gets its next letter.
+            nw.typed = nw.typed + char;
             d.activeWordRef.current = switchIdx;
             d.correctKeyRef.current += 1;
             d.statsRef.current.correctLetters += 1;
-            d.comboRef.current = 0;
+            d.comboRef.current = 0;                 // drop penalty — combo resets, keystroke credits
             progressed = true;
+            sfxWordSwitch();                        // distinct "pivot" cue
             spawnFireball(d, nw);
             if (nw.typed === nw.text) completeWord(d, nw, switchIdx, now);
           } else {
@@ -2819,10 +3010,14 @@ function handleCharLive(d: LoopDeps, rawChar: string): void {
         }
       }
     } else {
-      const idx = words.findIndex(w => typable(w) && w.text.startsWith(char));
+      // Match any word that can accept this char NEXT — not just fresh ones.
+      // This lets the player resume a half-typed boss phrase that was
+      // dropped via the rescue-switch above. The char is appended, not
+      // overwritten, so progress is preserved.
+      const idx = words.findIndex(w => typable(w) && w.text.charAt(w.typed.length) === char);
       if (idx !== -1) {
         const w = words[idx];
-        w.typed = char;
+        w.typed = w.typed + char;
         d.correctKeyRef.current += 1;
         d.statsRef.current.correctLetters += 1;
         d.comboRef.current += 1;
@@ -2916,11 +3111,13 @@ function completeWord(d: LoopDeps, w: Word, idx: number, now: number): void {
         summonSource: 'jessyka-word',
         projectileTargetId: null,
         autoDespawnAt: 0,
+        graceUsed: false,
       };
       d.setJessykaVisible(true);
       d.setJessykaDespawning(false);
     } else {
       existing.state = 'active';
+      existing.graceUsed = false;      // chained JESSYKA refresh grants a new grace shield
       d.setJessykaDespawning(false);
     }
   }
@@ -2932,6 +3129,7 @@ function completeWord(d: LoopDeps, w: Word, idx: number, now: number): void {
   if (w.kind === 'lich') {
     const parentX = w.x + w.text.length * 7;
     const parentY = w.y - 10;
+    sfxLichSplit();
     // Parent split burst — purple shockwave.
     d.shockwavesRef.current.push({
       x: parentX, y: parentY,
