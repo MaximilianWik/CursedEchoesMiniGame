@@ -27,6 +27,7 @@ export type HudStats = {
   zoneTimeLeft: number;
   zoneDuration: number;
   bossActive: boolean;
+  jessykaSummonAvailable: boolean;   // boss fight + estus>=1 + no Jessyka present
 };
 
 export const Hud = memo(function Hud({stats}: {stats: HudStats}) {
@@ -150,6 +151,11 @@ export const Hud = memo(function Hud({stats}: {stats: HudStats}) {
         <span className="text-xs text-amber-600/80 font-[Cinzel] tracking-[0.4em] uppercase">
           ESTUS {stats.estusCharges}/{stats.estusMax}
         </span>
+        {stats.jessykaSummonAvailable && (
+          <span className="text-xs text-pink-300 font-[Cinzel] tracking-[0.25em] uppercase animate-pulse drop-shadow-[0_0_8px_rgba(255,128,204,0.75)]">
+            [Q] JESSYKA — 1 ESTUS
+          </span>
+        )}
       </div>
     </>
   );

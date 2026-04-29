@@ -17,7 +17,7 @@ import {
   DESIGN_W, DESIGN_H, PARTICLE_CAP, COMBO_RANKS,
   rankForCombo, setupHiDPICanvas, buildCharWidthCache, createBgState, setZoneStyling,
   drawBackground, drawWordAura, drawWordText, drawFireball, drawShockwave, drawParticle,
-  drawProjectile, drawDecals, addImpactDecal, drawBoss, triggerLightning,
+  drawProjectile, drawDecals, addImpactDecal, drawBoss, drawBossMinionSprite, triggerLightning,
   type Word, type Fireball, type Particle, type Shockwave, type Projectile,
   type BgState, type Rank, type BossRenderState,
 } from './graphics';
@@ -78,9 +78,11 @@ const nextProjectileId = (): number => _projectileIdCounter++;
 
 const JESS_SPAWN_MS = 1300;
 const JESS_DESPAWN_MS = 1600;
-const JESS_KISS_INTERVAL_MS = 550;       // time between kiss fires
-const JESS_KISS_FLIGHT_MS = 420;         // how long a kiss is in-flight
-const JESS_X_OFFSET = 130;               // how far right of the player she stands
+const JESS_KISS_INTERVAL_MS = 750;       // time between kiss fires (was 550 — less spammy)
+const JESS_KISS_FLIGHT_MS = 680;         // how long a kiss is in-flight (was 420 — reads as projectile)
+const JESS_X_OFFSET = 80;                // how far right of the player she stands (was 130 — closer)
+const JESS_ESTUS_ACTIVE_MS = 15000;      // boss-fight estus summon active duration
+const JESS_ESTUS_PROJECTILE_CHASE_SPEED = 10;  // px/frame homing speed in projectile-chase mode
 
 type JessykaState = 'spawning' | 'active' | 'leaving' | 'despawning';
 
@@ -92,6 +94,11 @@ type JessykaCompanion = {
   lettersFired: number;     // how many kisses she has fired at the target
   nextKissAt: number;       // performance.now when she fires her next kiss
   castingUntil: number;     // sprite swap to kiss.png while time < this
+  // New in 0.2.6 — boss-fight estus summon variant. When 'estus', she ignores
+  // words entirely and homes kisses onto incoming boss projectiles instead.
+  summonSource: 'jessyka-word' | 'estus';
+  projectileTargetId: number | null;  // Projectile.id currently being chased
+  autoDespawnAt: number;              // performance.now at which to force 'leaving' (0 = no auto-despawn)
 };
 
 type JessykaKiss = {
@@ -101,6 +108,9 @@ type JessykaKiss = {
   progress: number;                      // 0..1
   wordId: number;
   letterIdx: number;                     // which letter this kiss represents
+  // Boss-projectile homing branch — when set, kiss re-aims to the projectile's
+  // live position every frame at 10 px/frame instead of following a bezier arc.
+  chaseProjectileId?: number;
 };
 
 
@@ -691,6 +701,7 @@ function initialHudStats(): HudStats {
     stamina: MAX_STAMINA, maxStamina: MAX_STAMINA,
     zoneName: ZONES[0].name, zoneSubtitle: ZONES[0].subtitle,
     zoneTimeLeft: ZONES[0].duration, zoneDuration: ZONES[0].duration, bossActive: false,
+    jessykaSummonAvailable: false,
   };
 }
 
@@ -1119,15 +1130,23 @@ function updateBoss(d: LoopDeps, time: number, dt: number): void {
 
   // ── Attack pattern scheduler.
   if (time >= b.nextAttackAt) {
-    const pat = phase.patterns[b.patternRotationIdx % phase.patterns.length];
-    b.patternRotationIdx += 1;
-    spawnBossAttack(d, pat, phase.projectileLetters, time);
+    // Try up to patterns.length rotations — if the selected pattern is
+    // capped (e.g. a summoner is already alive), advance and retry so the
+    // boss never "skips" a turn silently.
+    let spawned = false;
+    for (let tries = 0; tries < phase.patterns.length && !spawned; tries++) {
+      const pat = phase.patterns[b.patternRotationIdx % phase.patterns.length];
+      b.patternRotationIdx += 1;
+      spawned = spawnBossAttack(d, pat, phase.projectileLetters, time, b.phaseIdx);
+    }
     b.nextAttackAt = time + phase.patternInterval * 1000;
   }
 }
 
-/** Spawn a wave of boss projectiles following the given pattern. */
-function spawnBossAttack(d: LoopDeps, pattern: BossPattern, letters: string, time: number): void {
+/** Spawn a wave of boss projectiles following the given pattern. Returns
+ *  true if the pattern actually produced a threat this tick, false when a
+ *  cap/pre-condition blocked it (so the scheduler can advance). */
+function spawnBossAttack(d: LoopDeps, pattern: BossPattern, letters: string, time: number, phaseIdx: number): boolean {
   // Build a projectile-letter pool that EXCLUDES every letter present in the
   // current boss phrase. This guarantees typing-ambiguity can never happen:
   // each keystroke is EITHER a phrase letter OR a projectile deflect, never
@@ -1158,16 +1177,18 @@ function spawnBossAttack(d: LoopDeps, pattern: BossPattern, letters: string, tim
       fromBoss: true,
       life: 520,
     });
+    return true;
   } else if (pattern === 'volley') {
     // Three simultaneous drops spread across the middle third of the screen —
-    // chord-like. Drop at positions the player actually occupies horizontally.
+    // chord-like. Slower vy than 0.2.5 so the volley reads as a telegraph
+    // instead of an instant kill.
     const xs = [BOSS_AIM.x - 140, BOSS_AIM.x, BOSS_AIM.x + 140];
     for (const x of xs) {
       d.projectilesRef.current.push({
         id: nextProjectileId(),
         x, y: BOSS_BODY_Y + (Math.random() - 0.5) * 20,
         vx: 0,
-        vy: 1.9,
+        vy: 1.55,
         char: pick(),
         fromBoss: true,
         life: 500,
@@ -1175,13 +1196,16 @@ function spawnBossAttack(d: LoopDeps, pattern: BossPattern, letters: string, tim
     }
     // Small telegraph — quick screen flicker.
     triggerLightning(d.bgStateRef.current, time);
+    return true;
   } else if (pattern === 'wave') {
-    // Slow-spinning bullet-hell spiral. 12 projectiles arranged around the boss,
-    // rotating slowly while expanding outward. Passes through the player zone.
-    const count = 12;
+    // Slow-spinning bullet-hell spiral. Count varies by phase (10 in P2,
+    // 12 in P3) so the wave pressure grows through the fight. Angular and
+    // radial velocities are ~40% slower than 0.2.5 to make the pattern
+    // readable — waves no longer overlap each other.
+    const count = phaseIdx >= 2 ? 12 : 10;
     const direction = Math.random() > 0.5 ? 1 : -1;
-    const angVel = direction * (0.012 + Math.random() * 0.008);
-    const radVel = 0.9;
+    const angVel = direction * (0.008 + Math.random() * 0.005);  // was 0.012..0.020
+    const radVel = 0.55;                                          // was 0.9
     for (let i = 0; i < count; i++) {
       const startAng = (i / count) * Math.PI * 2;
       d.projectilesRef.current.push({
@@ -1199,13 +1223,14 @@ function spawnBossAttack(d: LoopDeps, pattern: BossPattern, letters: string, tim
         spiralRadVel: radVel,
       });
     }
+    return true;
   } else if (pattern === 'word') {
     // Fire a multi-letter WORD as a single falling projectile. Damages player
     // on contact; typing it destroys it (but doesn't damage the boss).
-    const pool = ['DEATH', 'DOOM', 'WITHER', 'RUIN', 'ASHES', 'CURSE', 'PYRE', 'DUSK', 'ABYSS', 'BLIGHT'];
+    const wordPool = ['DEATH', 'DOOM', 'WITHER', 'RUIN', 'ASHES', 'CURSE', 'PYRE', 'DUSK', 'ABYSS', 'BLIGHT'];
     const existingFirstLetters = new Set(d.wordsRef.current.map(w => w.text[0]));
-    const available = pool.filter(w => !existingFirstLetters.has(w[0]));
-    if (available.length === 0) return;
+    const available = wordPool.filter(w => !existingFirstLetters.has(w[0]));
+    if (available.length === 0) return false;
     const text = available[Math.floor(Math.random() * available.length)];
     // Spawn from boss center, drifting toward player.
     d.wordsRef.current.push({
@@ -1221,7 +1246,71 @@ function spawnBossAttack(d: LoopDeps, pattern: BossPattern, letters: string, tim
     });
     // Telegraph.
     triggerLightning(d.bgStateRef.current, time);
+    return true;
+  } else if (pattern === 'summoner') {
+    // Spawn ONE stationary chanter word as the boss's conjured minion. Cap:
+    // ≤ 1 boss-summoned chanter alive at a time. The chanter's existing
+    // "emit minion echoes every ~3.5s" logic in updateWords handles its
+    // behaviour — no new runtime code, just a new spawn path with a boss
+    // silhouette overlay.
+    const alreadySummoned = d.wordsRef.current.some(w => w.isBossSummoned && w.kind === 'chanter');
+    if (alreadySummoned) return false;
+    const firstLettersUsed = new Set(d.wordsRef.current.map(w => w.text[0]));
+    const candidates = GOTHIC_WORDS.filter(x =>
+      x.length >= 5 && x.length <= 7 && !firstLettersUsed.has(x[0]) && !forbidden.has(x[0]),
+    );
+    if (candidates.length === 0) return false;
+    const text = candidates[Math.floor(Math.random() * candidates.length)];
+    // Stationary: middle two-thirds of the screen.
+    const margin = DESIGN_W / 6;
+    const xPos = margin + Math.random() * (DESIGN_W - margin * 2 - text.length * 14);
+    const yPos = 100 + Math.random() * 40;
+    d.wordsRef.current.push({
+      id: nextWordId(),
+      text, x: xPos, y: yPos,
+      speed: 0,
+      typed: '', kind: 'chanter', isSpecial: false,
+      hp: 1, fireCooldown: 0, ghostPhase: 0,
+      scrambled: false, stationaryX: xPos, spawnTime: time,
+      isBossSummoned: true,
+      spawnAnim: {start: time, duration: 900},
+    });
+    d.bossAnnouncementRef.current = {text: 'A CHANTER RISES', life: 140};
+    triggerLightning(d.bgStateRef.current, time);
+    return true;
+  } else if (pattern === 'caster') {
+    // Spawn ONE stationary caster word from the boss's repertoire. Cap:
+    // ≤ 1 boss-summoned caster alive at a time. It fires projectile-letters
+    // via the existing caster cooldown logic in updateWords.
+    const alreadySummoned = d.wordsRef.current.some(w => w.isBossSummoned && w.kind === 'caster');
+    if (alreadySummoned) return false;
+    const onScreen = new Set(d.wordsRef.current.map(w => w.text));
+    const firstLettersUsed = new Set(d.wordsRef.current.map(w => w.text[0]));
+    const casterPool = CASTER_WORDS.filter(w =>
+      !onScreen.has(w) && !firstLettersUsed.has(w[0]) && !forbidden.has(w[0]),
+    );
+    if (casterPool.length === 0) return false;
+    const text = casterPool[Math.floor(Math.random() * casterPool.length)];
+    const margin = DESIGN_W / 6;
+    const xPos = margin + Math.random() * (DESIGN_W - margin * 2 - text.length * 14);
+    const yPos = 110 + Math.random() * 30;
+    d.wordsRef.current.push({
+      id: nextWordId(),
+      text, x: xPos, y: yPos,
+      speed: 0,                                  // explicitly stationary — never drifts toward player
+      typed: '', kind: 'caster', isSpecial: false,
+      hp: 1,
+      fireCooldown: 2.5,                         // matches normal caster initial delay
+      ghostPhase: 0,
+      scrambled: false, stationaryX: xPos, spawnTime: time,
+      isBossSummoned: true,
+      spawnAnim: {start: time, duration: 900},
+    });
+    d.bossAnnouncementRef.current = {text: 'A CASTER EMERGES', life: 140};
+    triggerLightning(d.bgStateRef.current, time);
+    return true;
   }
+  return false;
 }
 
 function drawBossToBg(bgCtx: CanvasRenderingContext2D, d: LoopDeps, time: number): void {
@@ -1613,8 +1702,31 @@ function updateJessyka(d: LoopDeps, ctx: CanvasRenderingContext2D, time: number)
 
   // ── Active / leaving: pick and fire on targets.
   if (j.state === 'active' || j.state === 'leaving') {
-    // Validate current target.
-    if (j.targetId !== null) {
+    if (j.summonSource === 'estus') {
+      // Boss-fight variant — target boss projectiles instead of words. She
+      // picks a new projectile each shot (no sticky target since projectiles
+      // die on deflection). Fires as fast as JESS_KISS_INTERVAL_MS allows,
+      // and waits idle when nothing's in the air.
+      if (time >= j.nextKissAt) {
+        const fired = fireJessykaProjectileKiss(d, j, time);
+        if (!fired) {
+          // Nothing to shoot — short backoff so we don't scan the array every frame.
+          j.nextKissAt = time + 120;
+        }
+      }
+      // Auto-despawn trigger.
+      if (j.state === 'active' && j.autoDespawnAt > 0 && time >= j.autoDespawnAt) {
+        j.state = 'leaving';
+      }
+      if (j.state === 'leaving') {
+        // Estus summon exits immediately — no "finish the word" semantics here.
+        j.state = 'despawning';
+        j.despawnStart = time;
+        d.setJessykaDespawning(true);
+        spawnJessykaAngelicBurst(d, time);
+      }
+    } else if (j.targetId !== null) {
+      // Validate current target.
       const wIdx = d.wordsRef.current.findIndex(w => w.id === j.targetId);
       if (wIdx === -1) {
         // Target is gone (contact damage, etc). Release and re-pick next frame.
@@ -1700,12 +1812,115 @@ function fireJessykaKiss(d: LoopDeps, j: JessykaCompanion, w: Word, time: number
   }
 }
 
-/** Advance and render kisses. On arrival, advance target-word's typed and
- *  splice the word if fully typed. */
+/** Estus summon variant — picks the nearest undeflected boss projectile to the
+ *  player and fires a homing kiss at it. The projectile is marked deflected
+ *  atomically so the player is protected during flight. Never targets boss
+ *  phrases, boss attack-words, or boss-summoned casters — she clears the air,
+ *  not the boss itself. Returns true if a kiss was fired. */
+function fireJessykaProjectileKiss(d: LoopDeps, j: JessykaCompanion, time: number): boolean {
+  // Find nearest un-deflected boss projectile to the player.
+  let best: Projectile | null = null;
+  let bestDist = Infinity;
+  for (const p of d.projectilesRef.current) {
+    if (!p.fromBoss || p.deflected) continue;
+    const dx = p.x - PLAYER.x, dy = p.y - PLAYER.y;
+    const dist = dx * dx + dy * dy;
+    if (dist < bestDist) { best = p; bestDist = dist; }
+  }
+  if (!best) return false;
+  // Atomic parry — mark the projectile deflected immediately so it can't damage
+  // the player even if the kiss takes a few frames to arrive.
+  best.deflected = true;
+
+  const origin = {x: PLAYER.x + JESS_X_OFFSET, y: PLAYER.y - 12};
+  d.jessykaKissesRef.current.push({
+    x: origin.x, y: origin.y,
+    sx: origin.x, sy: origin.y,
+    tx: best.x, ty: best.y,
+    progress: 0,
+    wordId: -1, letterIdx: 0,
+    chaseProjectileId: best.id,
+  });
+  j.projectileTargetId = best.id;
+  j.nextKissAt = time + JESS_KISS_INTERVAL_MS;
+  j.castingUntil = time + 220;
+  // Small pink muzzle puff.
+  for (let k = 0; k < 8; k++) {
+    if (d.particlesRef.current.length >= PARTICLE_CAP) break;
+    const ang = Math.random() * Math.PI * 2;
+    const spd = 0.8 + Math.random() * 2;
+    d.particlesRef.current.push({
+      x: origin.x, y: origin.y,
+      vx: Math.cos(ang) * spd, vy: Math.sin(ang) * spd - 0.5,
+      life: 16, maxLife: 16, size: 2,
+      color: Math.random() < 0.5 ? '#ff80cc' : '#ffd6ec',
+    });
+  }
+  return true;
+}
+
+/** Advance and render kisses. Has two branches:
+ *  - word branch (default): follows a bezier arc to the target word's next letter.
+ *    On arrival, advances w.typed and (if complete) splices the word.
+ *  - projectile-chase branch (boss-fight estus summon, chaseProjectileId set):
+ *    re-aims each frame to the projectile's live position at 10 px/frame. On
+ *    arrival (dist<18), splices the projectile and detonates — the projectile
+ *    was already marked deflected atomically at fire-time, so the player is
+ *    never in danger while the kiss is in flight. If the projectile vanishes
+ *    (off-screen, boss death, etc.) the kiss self-detonates in place. */
 function updateJessykaKisses(d: LoopDeps, ctx: CanvasRenderingContext2D, time: number): void {
   const kisses = d.jessykaKissesRef.current;
   for (let i = kisses.length - 1; i >= 0; i--) {
     const k = kisses[i];
+
+    // Petal trail — 1-2 pink petals per frame behind the kiss.
+    const petalCount = 1 + (Math.random() < 0.5 ? 1 : 0);
+    for (let pp = 0; pp < petalCount; pp++) {
+      if (d.particlesRef.current.length >= PARTICLE_CAP) break;
+      d.particlesRef.current.push({
+        x: k.x + (Math.random() - 0.5) * 6,
+        y: k.y + (Math.random() - 0.5) * 6,
+        vx: (Math.random() - 0.5) * 0.7,
+        vy: 0.2 + Math.random() * 0.6,
+        life: 22, maxLife: 22, size: 2 + Math.random() * 1.5,
+        color: Math.random() < 0.55 ? '#ffc2e0' : '#ff85c0',
+        isHeart: Math.random() < 0.25,
+      });
+    }
+
+    if (k.chaseProjectileId !== undefined) {
+      // ── Projectile-chase branch. Re-aim to the projectile's live position.
+      const pIdx = d.projectilesRef.current.findIndex(p => p.id === k.chaseProjectileId);
+      if (pIdx === -1) {
+        // Target gone — detonate in place.
+        spawnKissProjectileHit(d, k.x, k.y);
+        kisses.splice(i, 1);
+        continue;
+      }
+      const p = d.projectilesRef.current[pIdx];
+      const dx = p.x - k.x, dy = p.y - k.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist < 18) {
+        // Arrival — splice the projectile, burst, shockwave, sfx.
+        d.projectilesRef.current.splice(pIdx, 1);
+        spawnKissProjectileHit(d, p.x, p.y);
+        sfxFireball();
+        d.statsRef.current.projectilesDeflected += 1;
+        kisses.splice(i, 1);
+        continue;
+      }
+      if (dist > 0.001) {
+        const v = JESS_ESTUS_PROJECTILE_CHASE_SPEED / dist;
+        k.x += dx * v; k.y += dy * v;
+      }
+      k.tx = p.x; k.ty = p.y;     // update for the heart's rotation angle
+      // Render — angle along the travel direction.
+      const ang = Math.atan2(dy, dx);
+      drawKissHeart(ctx, k.x, k.y, 12, time, ang);
+      continue;
+    }
+
+    // ── Word-bezier branch (default).
     k.progress += (1000 / 60) / JESS_KISS_FLIGHT_MS;     // normalized to 60fps frames
 
     // Re-home target position in case the word is still moving.
@@ -1722,8 +1937,8 @@ function updateJessykaKisses(d: LoopDeps, ctx: CanvasRenderingContext2D, time: n
     k.x = k.sx + (k.tx - k.sx) * t;
     k.y = k.sy + (k.ty - k.sy) * t - arcLift;
 
-    // Render a small pink heart.
-    drawKissHeart(ctx, k.x, k.y, 7);
+    // Render the heart — rotated along travel direction.
+    drawKissHeart(ctx, k.x, k.y, 12, time, Math.atan2(k.ty - k.sy, k.tx - k.sx));
 
     if (k.progress >= 1) {
       // Arrival — apply the letter to the target (if it still exists).
@@ -1752,6 +1967,26 @@ function updateJessykaKisses(d: LoopDeps, ctx: CanvasRenderingContext2D, time: n
       kisses.splice(i, 1);
     }
   }
+}
+
+/** FX for a kiss hitting a deflected boss projectile — heart burst + shockwave. */
+function spawnKissProjectileHit(d: LoopDeps, x: number, y: number): void {
+  for (let p = 0; p < 16; p++) {
+    if (d.particlesRef.current.length >= PARTICLE_CAP) break;
+    const ang = Math.random() * Math.PI * 2;
+    const spd = 1.5 + Math.random() * 4.5;
+    d.particlesRef.current.push({
+      x, y,
+      vx: Math.cos(ang) * spd, vy: Math.sin(ang) * spd - 0.5,
+      life: 28, maxLife: 28, size: 3,
+      color: Math.random() < 0.5 ? '#ff80cc' : '#ffd6ec',
+      isHeart: Math.random() < 0.55,
+    });
+  }
+  d.shockwavesRef.current.push({
+    x, y, radius: 6, maxRadius: 60,
+    color: 'rgba(255, 140, 210, ALPHA)',
+  });
 }
 
 function jessykaKillTarget(d: LoopDeps, w: Word, wIdx: number, _time: number): void {
@@ -1785,31 +2020,63 @@ function jessykaKillTarget(d: LoopDeps, w: Word, wIdx: number, _time: number): v
   }
 }
 
-/** Draw a small heart at (x,y) with half-extent s. Used for kiss projectiles. */
-function drawKissHeart(ctx: CanvasRenderingContext2D, x: number, y: number, s: number): void {
-  // Soft pink glow halo.
+/** Draw a large gradient-filled heart at (x,y) with half-extent s. Used for
+ *  kiss projectiles — includes a pulsing halo, two rotating sparkle arcs, and
+ *  a rotation angle so the heart tips along its travel direction. */
+function drawKissHeart(ctx: CanvasRenderingContext2D, x: number, y: number, s: number, time: number = 0, angle: number = 0): void {
+  // Pulsing halo — breath = sin(time·0.012) gives a slow ~8Hz pulse.
+  const breath = 1 + Math.sin(time * 0.012) * 0.15;
+  const haloR = s * 2.5 * breath;
   ctx.save();
   ctx.globalCompositeOperation = 'lighter';
-  const halo = ctx.createRadialGradient(x, y, 0, x, y, s * 2.2);
-  halo.addColorStop(0, 'rgba(255, 150, 210, 0.55)');
+  const halo = ctx.createRadialGradient(x, y, 0, x, y, haloR);
+  halo.addColorStop(0, 'rgba(255, 150, 210, 0.65)');
+  halo.addColorStop(0.5, 'rgba(255, 120, 200, 0.35)');
   halo.addColorStop(1, 'rgba(255, 150, 210, 0)');
   ctx.fillStyle = halo;
-  ctx.fillRect(x - s * 2.2, y - s * 2.2, s * 4.4, s * 4.4);
+  ctx.fillRect(x - haloR, y - haloR, haloR * 2, haloR * 2);
   ctx.restore();
-  // Heart glyph (two-arc + triangle).
+
+  // Two orbiting sparkle arcs — the "pucker" shimmer.
   ctx.save();
-  const lobeR = s * 0.55;
-  ctx.fillStyle = '#ff78bd';
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.translate(x, y);
+  ctx.rotate(time * 0.008);
+  ctx.strokeStyle = 'rgba(255, 230, 245, 0.7)';
+  ctx.lineWidth = 1.3;
   ctx.beginPath();
-  ctx.arc(x - lobeR * 0.7, y - s * 0.1, lobeR, Math.PI, 0, false);
-  ctx.arc(x + lobeR * 0.7, y - s * 0.1, lobeR, Math.PI, 0, false);
-  ctx.lineTo(x, y + s * 0.85);
+  ctx.arc(0, 0, s * 1.4, 0.2, 1.1);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(0, 0, s * 1.4, Math.PI + 0.2, Math.PI + 1.1);
+  ctx.stroke();
+  ctx.restore();
+
+  // Heart glyph — gradient-filled, rotated along travel angle (clamped to 8°).
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(Math.max(-0.14, Math.min(0.14, angle)));
+  const grad = ctx.createRadialGradient(-s * 0.25, -s * 0.35, 1, 0, 0, s * 1.1);
+  grad.addColorStop(0, '#ffd6ec');
+  grad.addColorStop(0.35, '#ff9dd6');
+  grad.addColorStop(0.75, '#ff5aa8');
+  grad.addColorStop(1, '#c73e84');
+  ctx.fillStyle = grad;
+  const lobeR = s * 0.55;
+  ctx.beginPath();
+  ctx.arc(-lobeR * 0.7, -s * 0.1, lobeR, Math.PI, 0, false);
+  ctx.arc(lobeR * 0.7, -s * 0.1, lobeR, Math.PI, 0, false);
+  ctx.lineTo(0, s * 0.95);
   ctx.closePath();
   ctx.fill();
-  // Subtle shine.
-  ctx.fillStyle = 'rgba(255, 235, 245, 0.7)';
+  // Dark outline — keeps the heart legible against bright backgrounds.
+  ctx.strokeStyle = 'rgba(120, 20, 60, 0.55)';
+  ctx.lineWidth = 1.2;
+  ctx.stroke();
+  // Shine highlight.
+  ctx.fillStyle = 'rgba(255, 240, 248, 0.85)';
   ctx.beginPath();
-  ctx.ellipse(x - s * 0.35, y - s * 0.3, s * 0.22, s * 0.14, -0.5, 0, Math.PI * 2);
+  ctx.ellipse(-s * 0.38, -s * 0.3, s * 0.26, s * 0.16, -0.5, 0, Math.PI * 2);
   ctx.fill();
   ctx.restore();
 }
@@ -1850,8 +2117,68 @@ function updateWords(d: LoopDeps, ctx: CanvasRenderingContext2D, textCtx: Canvas
   for (let i = d.wordsRef.current.length - 1; i >= 0; i--) {
     const w = d.wordsRef.current[i];
 
-    // Movement.
-    if (w.kind !== 'chanter' && w.speed > 0) {
+    // ── Spawn animation pass. Boss-summoned summoner/caster words play a
+    //    static pulse-in; lich children lerp from the parent position to their
+    //    final offset with a purple trail. While spawnAnim is active the word
+    //    skips movement, collision, caster fire, and chanter emit — and is
+    //    filtered out of player targeting via the typable() predicate in
+    //    handleCharLive (so the player can't start typing it yet).
+    let spawnScale = 1;
+    if (w.spawnAnim) {
+      const elapsed = time - w.spawnAnim.start;
+      const dur = w.spawnAnim.duration;
+      if (elapsed >= dur) {
+        // Arrival beat — small purple shockwave at the final position.
+        d.shockwavesRef.current.push({
+          x: w.x + w.text.length * 7, y: w.y - 8,
+          radius: 4, maxRadius: w.spawnAnim.sourceX !== undefined ? 36 : 54,
+          color: w.kind === 'normal' ? 'rgba(180,80,220,ALPHA)' : 'rgba(255,120,220,ALPHA)',
+        });
+        w.spawnAnim = undefined;
+      } else {
+        const t = Math.max(0, Math.min(1, elapsed / dur));
+        // Lich-child branch — lerp position from parent → target along ease-out.
+        if (w.spawnAnim.sourceX !== undefined && w.spawnAnim.targetX !== undefined) {
+          const eased = 1 - Math.pow(1 - t, 3);
+          w.x = w.spawnAnim.sourceX + (w.spawnAnim.targetX - w.spawnAnim.sourceX) * eased;
+          w.y = (w.spawnAnim.sourceY ?? w.y) + ((w.spawnAnim.targetY ?? w.y) - (w.spawnAnim.sourceY ?? w.y)) * eased;
+          // Trailing purple rune particles behind the flying child.
+          if (Math.random() < 0.34 && d.particlesRef.current.length < PARTICLE_CAP) {
+            d.particlesRef.current.push({
+              x: w.x + (Math.random() - 0.5) * 14,
+              y: w.y + (Math.random() - 0.5) * 14,
+              vx: (Math.random() - 0.5) * 0.6,
+              vy: -0.2 - Math.random() * 0.5,
+              life: 22, maxLife: 22, size: 2 + Math.random() * 1.2,
+              color: Math.random() < 0.5 ? '#c080ff' : '#a040e0',
+            });
+          }
+        }
+        // Scale 0 → 1 with overshoot at t=0.7 (1.15×), settling to 1.0 at t=1.
+        if (t < 0.7) spawnScale = (t / 0.7) * 1.15;
+        else spawnScale = 1.15 - ((t - 0.7) / 0.3) * 0.15;
+        // Pulsing ring around boss-summoned static spawners.
+        if (w.isBossSummoned) {
+          const cx = w.x + w.text.length * 7;
+          const cy = w.y - 8;
+          const r = 30 + Math.sin(time * 0.02) * 6 + t * 10;
+          ctx.save();
+          ctx.globalCompositeOperation = 'lighter';
+          ctx.strokeStyle = w.kind === 'caster' ? 'rgba(255,120,220,0.5)' : 'rgba(120,220,255,0.5)';
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.arc(cx, cy, r, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.restore();
+        }
+      }
+    }
+    const inSpawn = !!w.spawnAnim;
+    // (drawShockwave does the ALPHA->number interpolation per frame — the
+    // colour string above uses the same 'ALPHA' placeholder convention.)
+
+    // Movement. Suppressed during spawn animations — position is authoritative.
+    if (!inSpawn && w.kind !== 'chanter' && w.speed > 0) {
       const dx = PLAYER.x - w.x, dy = PLAYER.y - w.y;
       const dist = Math.sqrt(dx * dx + dy * dy);
       if (dist > 0.001) {
@@ -1862,7 +2189,7 @@ function updateWords(d: LoopDeps, ctx: CanvasRenderingContext2D, textCtx: Canvas
 
     // Caster: fire projectiles on cooldown. Fires a char that's visibly muzzle-
     // flashed at the caster's location so the player sees where it came from.
-    if (w.kind === 'caster') {
+    if (!inSpawn && w.kind === 'caster') {
       w.fireCooldown -= dt / 60;
       if (w.fireCooldown <= 0) {
         w.fireCooldown = 2.4 + Math.random() * 0.8;
@@ -1893,7 +2220,7 @@ function updateWords(d: LoopDeps, ctx: CanvasRenderingContext2D, textCtx: Canvas
 
     // Summoner (chanter kind): stationary at top; periodically spawns a small
     // minion echo that homes toward the player. Killing the summoner stops spawns.
-    if (w.kind === 'chanter') {
+    if (!inSpawn && w.kind === 'chanter') {
       w.fireCooldown -= dt / 60;
       if (w.fireCooldown <= 0) {
         w.fireCooldown = 4.0 + Math.random() * 1.2;
@@ -1916,6 +2243,23 @@ function updateWords(d: LoopDeps, ctx: CanvasRenderingContext2D, textCtx: Canvas
     // Visual width.
     let wordW = 0;
     for (let k = 0; k < w.text.length; k++) wordW += (widths[w.text[k]] ?? 14) * fontScale;
+
+    // Apply a scale transform around the word's visual center during spawn
+    // animation. All subsequent aura/frame/text draws inherit this transform.
+    const applySpawnTransform = spawnScale !== 1;
+    const sCx = w.x + wordW / 2, sCy = w.y - 8;
+    if (applySpawnTransform) {
+      ctx.save();
+      ctx.translate(sCx, sCy);
+      ctx.scale(spawnScale, spawnScale);
+      ctx.translate(-sCx, -sCy);
+      textCtx.save();
+      textCtx.translate(sCx, sCy);
+      textCtx.scale(spawnScale, spawnScale);
+      textCtx.translate(-sCx, -sCy);
+      // Fade glyphs during spawn — starts transparent, settles to 1.
+      textCtx.globalAlpha = spawnScale / 1.15;
+    }
 
     // Aura on main canvas (action layer).
     drawWordAura(ctx, w, wordW, time, ENEMY_KINDS[w.kind].auraColor);
@@ -1963,10 +2307,29 @@ function updateWords(d: LoopDeps, ctx: CanvasRenderingContext2D, textCtx: Canvas
     // Glyphs on text canvas (front layer).
     drawWordText(textCtx, w, widths, time, fontScale);
 
+    // Boss-minion sprite overlay — floating above summoner/caster words the
+    // boss has conjured. A scaled version of the boss silhouette tinted with
+    // the theme colour, anchored to the word's center-top.
+    if (w.isBossSummoned && d.bossRef.current) {
+      const def = d.bossRef.current.def;
+      const sx = w.x + wordW / 2;
+      const sy = w.y - 22;       // slightly above the word — "hovers over"
+      drawBossMinionSprite(ctx, def.silhouette, def.themeColor, sx, sy, 0.22, time);
+    }
+
+    if (applySpawnTransform) {
+      textCtx.globalAlpha = 1;
+      textCtx.restore();
+      ctx.restore();
+    }
+
     // Contact with player — in zone phase for non-chanter enemies, OR during
-    // boss fights for boss-attack word-projectiles.
-    const canHitPlayer = (d.phaseRef.current === 'zone' && w.kind !== 'chanter')
-                       || (d.phaseRef.current === 'boss' && w.isBossAttack);
+    // boss fights for boss-attack word-projectiles. Suppressed during spawn
+    // anim so summoner/caster can't damage before they're typable.
+    const canHitPlayer = !inSpawn && (
+      (d.phaseRef.current === 'zone' && w.kind !== 'chanter')
+      || (d.phaseRef.current === 'boss' && w.isBossAttack)
+    );
     if (canHitPlayer) {
       const dx = PLAYER.x - w.x, dy = PLAYER.y - w.y;
       const dist = Math.sqrt(dx * dx + dy * dy);
@@ -2211,6 +2574,11 @@ function pushHudStats(d: LoopDeps): void {
     zoneTimeLeft,
     zoneDuration: zone.duration,
     bossActive: d.phaseRef.current === 'boss',
+    jessykaSummonAvailable: d.phaseRef.current === 'boss'
+      && d.bossRef.current !== null && !d.bossRef.current.defeated
+      && d.bossRef.current.currentHp > 0 && d.bossRef.current.introStart === 0
+      && d.estusChargesRef.current >= 1
+      && d.jessykaRef.current === null,
   });
 }
 
@@ -2218,6 +2586,61 @@ function pushHudStats(d: LoopDeps): void {
 // handleChar — routes a typed letter to projectiles + active word.
 // Called by the global keydown listener via handleCharImpl.
 // ─────────────────────────────────────────────────────────────
+
+/** Boss-fight Q-binding — consume 1 estus to summon Jessyka in projectile-
+ *  chase mode for ~15 seconds. Returns true when the Q keystroke was
+ *  consumed (either a summon succeeded, or a precondition-failure message
+ *  flashed). Returns false only if no boss is active. */
+function trySummonEstusJessyka(d: LoopDeps, now: number): boolean {
+  const b = d.bossRef.current;
+  if (!b) return false;
+  // Boss must be alive and out of the intro cutscene.
+  if (b.defeated || b.currentHp <= 0 || b.introStart > 0) return false;
+  // Already-here / no-estus flashes still consume the keystroke so the player
+  // isn't punished for a deliberate Q press with a combo-break miss.
+  if (d.jessykaRef.current !== null) {
+    d.bossAnnouncementRef.current = {text: 'ALREADY HERE', life: 70};
+    return true;
+  }
+  if (d.estusChargesRef.current < 1) {
+    d.bossAnnouncementRef.current = {text: 'NO ESTUS', life: 70};
+    return true;
+  }
+  // Consume one estus + spawn Jessyka in estus mode.
+  d.estusChargesRef.current -= 1;
+  d.jessykaRef.current = {
+    state: 'spawning',
+    spawnStart: now,
+    despawnStart: 0,
+    targetId: null,
+    lettersFired: 0,
+    nextKissAt: now + JESS_SPAWN_MS + 300,
+    castingUntil: 0,
+    summonSource: 'estus',
+    projectileTargetId: null,
+    autoDespawnAt: now + JESS_SPAWN_MS + JESS_ESTUS_ACTIVE_MS,
+  };
+  d.setJessykaVisible(true);
+  d.setJessykaDespawning(false);
+  d.bossAnnouncementRef.current = {text: "LOVE'S EMBRACE", life: 140};
+  sfxFireball();
+  // Celebratory pink burst at her arrival spot.
+  const ox = PLAYER.x + JESS_X_OFFSET, oy = PLAYER.y - 20;
+  for (let p = 0; p < 32; p++) {
+    if (d.particlesRef.current.length >= PARTICLE_CAP) break;
+    const ang = Math.random() * Math.PI * 2;
+    const spd = 1 + Math.random() * 4;
+    d.particlesRef.current.push({
+      x: ox + (Math.random() - 0.5) * 40,
+      y: oy + (Math.random() - 0.5) * 30,
+      vx: Math.cos(ang) * spd, vy: Math.sin(ang) * spd - 1,
+      life: 36, maxLife: 36, size: 2.5 + Math.random() * 1.5,
+      color: Math.random() < 0.6 ? '#ff80cc' : '#ffd6ec',
+      isHeart: Math.random() < 0.45,
+    });
+  }
+  return true;
+}
 
 function handleCharLive(d: LoopDeps, rawChar: string): void {
   const phase = d.phaseRef.current;
@@ -2227,6 +2650,23 @@ function handleCharLive(d: LoopDeps, rawChar: string): void {
   if (now < d.estusActiveUntilRef.current) return;
   const char = rawChar.toUpperCase();
   if (char.length !== 1 || char < 'A' || char > 'Z') return;
+
+  // ── Q-binding — boss-fight Jessyka summon (0.2.6). Fall-through priority
+  //    preserves typing: if any word can currently accept a Q (active word's
+  //    next letter is Q, or an idle word starts with Q) or any in-flight
+  //    projectile matches Q, the keystroke routes to normal deflection/typing
+  //    first. Only when nothing else claims Q do we attempt the summon.
+  //    A failed summon (no estus / already here) still consumes the keystroke
+  //    so the player doesn't eat a miss for pressing Q deliberately.
+  if (char === 'Q' && phase === 'boss') {
+    const wordWantsQ = d.wordsRef.current.some(w =>
+      !w.spawnAnim && !w.jessykaTarget && w.text.charAt(w.typed.length) === 'Q',
+    );
+    const projWantsQ = d.projectilesRef.current.some(p => p.char === 'Q' && !p.deflected);
+    if (!wordWantsQ && !projWantsQ) {
+      if (trySummonEstusJessyka(d, now)) return;
+    }
+  }
 
   d.totalKeyRef.current += 1;
   d.statsRef.current.totalLetters += 1;
@@ -2294,6 +2734,10 @@ function handleCharLive(d: LoopDeps, rawChar: string): void {
   //    phrase letters and projectile letters never overlap, so this rule
   //    doesn't cause double-duty loss.)
   if (!deflectedAny) {
+    // Helper — skip words that can't be typed right now (claimed by Jessyka
+    // or still playing a spawn-in animation).
+    const typable = (w: Word) => !w.jessykaTarget && !w.spawnAnim;
+
     if (d.activeWordRef.current !== null) {
       const w = words[d.activeWordRef.current];
       if (w) {
@@ -2308,13 +2752,33 @@ function handleCharLive(d: LoopDeps, rawChar: string): void {
           spawnFireball(d, w);
           if (w.typed === w.text) completeWord(d, w, d.activeWordRef.current, now);
         } else {
-          registerWrong(d.statsRef.current, char);
-          sfxMiss();
-          d.comboRef.current = 0;
+          // Word-switch rescue (new in 0.2.6): if the keystroke doesn't match
+          // the active word's next letter but IS the first letter of another
+          // typable non-jessyka word on screen, switch to that word. This fixes
+          // the "runner boss-word untypable" bug where the player was locked
+          // onto a boss phrase and couldn't start a falling runner word. Combo
+          // still resets as a drop penalty so the rescue isn't free.
+          const switchIdx = words.findIndex(ww => ww !== w && typable(ww) && ww.text.startsWith(char));
+          if (switchIdx !== -1) {
+            w.typed = '';                           // release the old active word
+            const nw = words[switchIdx];
+            nw.typed = char;
+            d.activeWordRef.current = switchIdx;
+            d.correctKeyRef.current += 1;
+            d.statsRef.current.correctLetters += 1;
+            d.comboRef.current = 0;                 // drop penalty — combo resets, keystroke credits
+            progressed = true;
+            spawnFireball(d, nw);
+            if (nw.typed === nw.text) completeWord(d, nw, switchIdx, now);
+          } else {
+            registerWrong(d.statsRef.current, char);
+            sfxMiss();
+            d.comboRef.current = 0;
+          }
         }
       }
     } else {
-      const idx = words.findIndex(w => !w.jessykaTarget && w.text.startsWith(char));
+      const idx = words.findIndex(w => typable(w) && w.text.startsWith(char));
       if (idx !== -1) {
         const w = words[idx];
         w.typed = char;
@@ -2408,6 +2872,9 @@ function completeWord(d: LoopDeps, w: Word, idx: number, now: number): void {
         lettersFired: 0,
         nextKissAt: now + JESS_SPAWN_MS + 300,
         castingUntil: 0,
+        summonSource: 'jessyka-word',
+        projectileTargetId: null,
+        autoDespawnAt: 0,
       };
       d.setJessykaVisible(true);
       d.setJessykaDespawning(false);
@@ -2417,8 +2884,32 @@ function completeWord(d: LoopDeps, w: Word, idx: number, now: number): void {
     }
   }
 
-  // Lich children on death.
+  // Lich children on death — new in 0.2.6: parent shockwave + rune burst, then
+  // children spawn at the parent's exact position and animate OUT to their
+  // offset targets. Previously they silently popped in ±40px away, which made
+  // players miss the connection between parent and children.
   if (w.kind === 'lich') {
+    const parentX = w.x + w.text.length * 7;
+    const parentY = w.y - 10;
+    // Parent split burst — purple shockwave.
+    d.shockwavesRef.current.push({
+      x: parentX, y: parentY,
+      radius: 6, maxRadius: 80,
+      color: 'rgba(180,80,220,ALPHA)',
+    });
+    // Rune-glyph radial burst — 30 purple particles fanning outward.
+    for (let p = 0; p < 30; p++) {
+      if (d.particlesRef.current.length >= PARTICLE_CAP) break;
+      const ang = (p / 30) * Math.PI * 2 + Math.random() * 0.3;
+      const spd = 2 + Math.random() * 4;
+      d.particlesRef.current.push({
+        x: parentX, y: parentY,
+        vx: Math.cos(ang) * spd, vy: Math.sin(ang) * spd - 0.8,
+        life: 34, maxLife: 34, size: 2.5 + Math.random() * 1.5,
+        color: Math.random() < 0.55 ? '#c080ff' : '#8040d0',
+      });
+    }
+    // Children spawn AT the parent, then lerp outward via spawnAnim.
     const used = new Set(d.wordsRef.current.map(ww => ww.text[0]));
     used.add(w.text[0]);
     for (let i = 0; i < 2; i++) {
@@ -2426,12 +2917,24 @@ function completeWord(d: LoopDeps, w: Word, idx: number, now: number): void {
       if (candidates.length === 0) break;
       const childText = candidates[Math.floor(Math.random() * candidates.length)];
       used.add(childText[0]);
+      const dx = i === 0 ? -40 : 40;
+      const targetX = w.x + dx;
+      const targetY = w.y + 10;
+      // Start co-located with the parent so the lerp reads as "emerging from
+      // the corpse" instead of teleporting into place.
       d.wordsRef.current.push({
         id: nextWordId(),
-        text: childText, x: w.x + (i === 0 ? -40 : 40), y: w.y + 10,
+        text: childText,
+        x: w.x, y: w.y,
         speed: 0.3, typed: '', kind: 'normal', isSpecial: false,
         hp: 1, fireCooldown: 0, ghostPhase: 0, scrambled: false,
         stationaryX: 0, spawnTime: now,
+        spawnAnim: {
+          start: now,
+          duration: 900,
+          sourceX: w.x, sourceY: w.y,
+          targetX, targetY,
+        },
       });
     }
   }
@@ -2595,7 +3098,7 @@ function renderAppTree(p: RenderProps) {
               data-state="idle"
               alt="Jessyka"
               className={`absolute bottom-4 w-32 h-32 object-contain z-20 jessyka-sprite ${p.jessykaDespawning ? 'is-despawning' : ''}`}
-              style={{left: (PLAYER.x + 130) + 'px'}}
+              style={{left: (PLAYER.x + JESS_X_OFFSET) + 'px'}}
               draggable={false}
             />
           )}

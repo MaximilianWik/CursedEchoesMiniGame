@@ -1,4 +1,4 @@
-# Cursed Echoes
+﻿# Cursed Echoes
 
 A gothic typing trial. Four zones. Three bosses. Banish the echoes, parry the spells, type the phrases, kindle the fading flame.
 

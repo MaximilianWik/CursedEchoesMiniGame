@@ -51,7 +51,19 @@ export type Word = {
   spawnTime: number;
   isBossAttack?: boolean;             // word-projectile fired by a boss
   isBossPhrase?: boolean;             // stationary phrase that damages the boss when completed
+  isBossSummoned?: boolean;           // summoner/caster spawned by a boss pattern
   jessykaTarget?: boolean;            // claimed by the Jessyka companion; player cannot start typing this
+  // Spawn animation for boss-summoned minions and lich children. While active,
+  // the word is untypable and rendered scaled/lerped from source→target. Source/target
+  // are optional (omitted for static spawners like summoner/caster).
+  spawnAnim?: {
+    start: number;
+    duration: number;
+    sourceX?: number;
+    sourceY?: number;
+    targetX?: number;
+    targetY?: number;
+  };
 };
 
 export type Fireball = {
@@ -2084,3 +2096,57 @@ function hexWithAlpha(hex: string, alpha: number): string {
   const b = parseInt(h.length === 3 ? h[2] + h[2] : h.slice(4, 6), 16);
   return 'rgba(' + r + ', ' + g + ', ' + b + ', ' + alpha.toFixed(3) + ')';
 }
+
+/** Miniature boss silhouette used as the visual overlay for boss-summoned
+ *  summoner and caster words. Reuses the full drawTaurus/drawOrnstein/drawGwyn
+ *  paths at a reduced scale with a theme-coloured rim glow. Position is the
+ *  sprite's *foot* (bottom-center) in world space. */
+export function drawBossMinionSprite(
+  ctx: CanvasRenderingContext2D,
+  silhouette: 'taurus' | 'ornstein' | 'gwyn',
+  themeColor: string,
+  x: number,
+  y: number,
+  scale: number,
+  time: number,
+): void {
+  // Minimal boss state just to drive the silhouette-draw helpers.
+  const state: BossRenderState = {
+    silhouette,
+    themeColor,
+    currentHp: 1, maxHp: 1, phaseIdx: 0,
+    attackWindupT: 0, enraged: false,
+    deathStart: 0, introStart: 0, introDurationMs: 0,
+  };
+  // Rim aura — smaller radius than a real boss, themeColor-tinted.
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  const rimR = 90 * scale;
+  const rim = ctx.createRadialGradient(x, y - 40 * scale, 4, x, y - 40 * scale, rimR);
+  rim.addColorStop(0, hexWithAlpha(themeColor, 0.45));
+  rim.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = rim;
+  ctx.fillRect(x - rimR, y - rimR, rimR * 2, rimR * 2);
+  ctx.restore();
+  // Silhouette body. Tint is applied via globalCompositeOperation so the
+  // otherwise near-black shape takes on the boss theme colour.
+  ctx.save();
+  const bob = Math.sin(time * 0.004) * (2 * scale);
+  ctx.translate(x, y + bob);
+  ctx.scale(scale, scale);
+  if (silhouette === 'taurus') drawTaurus(ctx, state, time);
+  else if (silhouette === 'ornstein') drawOrnstein(ctx, state, time);
+  else drawGwyn(ctx, state, time);
+  ctx.restore();
+  // Theme-colour wash over the silhouette — lighter composite gives a "possessed
+  // by the boss's aura" feel without hiding the shape outline.
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.globalAlpha = 0.35;
+  ctx.fillStyle = themeColor;
+  ctx.beginPath();
+  ctx.ellipse(x, y - 140 * scale, 80 * scale, 140 * scale, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
