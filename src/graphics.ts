@@ -53,6 +53,13 @@ export type Word = {
   isBossPhrase?: boolean;             // stationary phrase that damages the boss when completed
   isBossSummoned?: boolean;           // summoner/caster spawned by a boss pattern
   jessykaTarget?: boolean;            // claimed by the Jessyka companion; player cannot start typing this
+  // New in 0.2.10 — Jessyka grace shield push. While `graceUntil > time` the
+  // word skips its normal homing-toward-player movement and instead drifts
+  // along (graceVx, graceVy) which decays each frame. Creates the "swept
+  // outward by the love wave" visual.
+  graceUntil?: number;
+  graceVx?: number;
+  graceVy?: number;
   // Spawn animation for boss-summoned minions and lich children. While active,
   // the word is untypable and rendered scaled/lerped from source→target. Source/target
   // are optional (omitted for static spawners like summoner/caster).

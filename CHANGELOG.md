@@ -4,6 +4,85 @@ All notable changes to Cursed Echoes. Format loosely follows [Keep a Changelog](
 
 ---
 
+## [0.2.10] — Frame-perfect estus godmode, cathedral-grade grace veil
+
+Two long-standing frustrations put to bed: estus godmode is now granted at the moment Tab is pressed rather than inside a drift-prone `setTimeout`, so the 4-second invulnerability window always starts exactly when the chug ends. Jessyka's grace veil got its full cinematic makeover — every word and projectile on screen rides the expanding love wave outward with physics-driven drift, five staggered shockwaves paint the arena pink, 320+ particles across four layers linger for three seconds.
+
+### Estus godmode — zero-drift invulnerability
+
+Root cause of the "sometimes doesn't kick in" bug: the 0.2.7 implementation granted i-frames INSIDE the `setTimeout(..., ESTUS_CHUG_MS)` callback. On a backgrounded tab, during a main-thread stall, or when a GC pause lands at the wrong moment, that timer could drift 50–500 ms late — and for that window the player was "healed but still vulnerable", taking hits they expected to shrug off.
+
+- **New `estusGodmodeUntilRef` set AT Tab press time**, computed as `pressTime + ESTUS_CHUG_MS + ESTUS_GODMODE_MS`. No setTimeout involved in the i-frame plumbing — if `performance.now()` is past the chug end and inside the godmode window, the player is invulnerable. Full stop.
+- **New `isInvulnerable(d, time)` helper** replaces both contact-damage guard sites. It combines dodge/hit i-frames (`iFramesUntilRef`) with the estus godmode window (chug-done AND window-active). Both contact sites — projectile (`updateProjectiles`) and word (`updateWords`) — now call this helper. One source of truth.
+- **The setTimeout now drives ONLY visuals and particles** — heal application, golden-pulse class, heal-text popup, celebratory burst. If it fires a few frames late, the player is already invulnerable from the ref. Visual lag ≠ mechanical lag.
+- **All phase-exit / reset paths clear `estusGodmodeUntilRef`** alongside the existing `estusActiveUntilRef` reset, so a new run never inherits stale godmode state.
+
+### Jessyka grace veil — full cinematic makeover
+
+The 0.2.8 shield pushed some words outward once and spliced projectiles instantly. User feedback: "the veil should push EVERY word and projectile on screen back in sync with the pink animation expanding outwards" + "more dramatic and effectful". Rebuilt accordingly.
+
+#### Physics-driven push via new `Word.graceUntil/graceVx/graceVy` fields
+
+- `Word` type in `graphics.ts` gains three optional fields. While `w.graceUntil > time`, `updateWords` skips the normal homing-toward-player movement and instead drifts the word along `(graceVx, graceVy)` which decays at 6% per frame (Math.pow(0.94, dt)). Creates an actual "swept outward by the wave" visual rather than an instant teleport.
+- **Every word pushed**, including Jessyka's current target (she releases `jessykaTarget` first — pick up again after grace). Only the boss phrase is spared, because its centered gothic frame reads broken when off-axis and typing progress matters.
+- **Velocity tiered by threat**: boss-attack / boss-summoned words get 16 px/frame initial; everything else gets 11. All words get a uniform -5 upward bias for visible "lift off".
+- **Close/stacked word handling (dist < 24)** rotates the eject angle by 360°/7 per word so seven overlapping words fan out cleanly in seven different directions. No wiggle-in-place.
+- **Arena clamp on every drifting frame** inside `updateWords` so pushed runners don't exit the playfield and immediately return.
+- **Fields auto-clear on expiry** so stale grace values can't affect subsequent frames.
+
+#### Projectiles ride the veil, not spliced
+
+Previously the projectile loop spliced un-deflected boss projectiles out of the array instantly. That made them vanish rather than visibly "ride the wave". Now:
+
+- `p.deflected = true` — they can't damage the player.
+- `p.vy = -max(|vy|*1.4, 2.4)` — flipped upward with a firm push, so they rocket off-screen top.
+- `p.vx += sign(p.x - PLAYER.x) * (2.5 + rand)` — kicked horizontally outward, so they fan away from the player.
+- Spiral pattern fields (`spiralAngVel`, `spiralRadVel`) zeroed — so `wave` projectiles unspool and fly straight out instead of continuing their orbit.
+- 5 pink trail particles at each projectile's current position so the reversal is unmistakable visually.
+
+#### Five staggered shockwaves, cathedral of pink
+
+Was 3 concentric rings; now 5, with setTimeout delays matching the audio beats:
+
+| Ring | Delay | Max Radius | Color |
+|------|-------|-----------|-------|
+| Inner white flare | 0 ms | 160 px | `rgba(255,245,252)` |
+| Bright pink | 60 ms | 340 px | `rgba(255,210,236)` |
+| Main pink | 140 ms | `DESIGN_W × 0.55` | `rgba(255,120,205)` |
+| Outer magenta | 240 ms | `DESIGN_W × 0.8` | `rgba(255,150,220)` |
+| Full-arena halo | 360 ms | `DESIGN_W × 1.0` | `rgba(255,190,235)` |
+
+The progressive delay + progressive radius gives a true *expanding wave* instead of three overlapping circles. The 5th ring covers the entire play area.
+
+#### 320+ particles across four layers
+
+- **Layer 1 — Dense fast radial burst (180)**: radial hearts/petals at 5–16 px/frame, `life: 52`. The core explosion mass.
+- **Layer 2 — Slow drifting petals (60)**: random directions at 0.6–2.8 px/frame, `life: 160` (~2.7 s). The lingering afterglow.
+- **Layer 3 — Overhead cream-angelic flecks (50)**: upward bias, `life: 84` (~1.4 s). The "veil of light descending" imagery.
+- **Layer 4 — Large heart runes (30)**: oversized pink hearts at `size: 5–8`, slow upward drift, `life: 180` (~3 s). The warm emotional punctuation.
+- **Delayed secondary burst at 380 ms (+60 sparks)** — fires as the third ring peaks for a second "pulse" feel.
+
+#### Layered SFX
+
+- `sfxJessykaGrace()` at t=0 — the main chord (sub-bass + C major arpeggio + shimmer).
+- `sfxJessykaKissImpact()` x2 at t=220 ms — paired high heart-chimes as the outer ring reaches arena edges.
+- `sfxJessykaSummon()` at t=460 ms — triad swell punctuating the aftermath.
+
+#### Tuning
+
+- **Grace i-frames after the shield** bumped from 1200 → 1400 ms so the player is safe across the full ring expansion.
+- **Screen flash duration** 360 → 520 ms; opacity 0.85 → 0.95; auto-restore to default red delayed 700 → 900 ms.
+- **Screen shake** 6-mag for 220 ms → **9-mag for 420 ms**. Simulates a wall of love displacing the battlefield. Still respects reduce-motion.
+- **`VEILED` damage text** life 70 → 90 frames. Announcement banner life 160 → 180.
+
+### Files
+
+- `src/App.tsx` — new `estusGodmodeUntilRef`, plumbed into LoopDeps; new `isInvulnerable` helper replacing both contact-damage i-frame checks. `handleTab` sets godmode window at press; setTimeout body slimmed to visuals only. `tryJessykaGraceShield` fully rewritten: 5-ring staggered shockwaves, 4-layer particle system, physics push via `graceUntil/graceVx/graceVy`, projectile redirect (reverse vy + radial vx kick + spiral cancel + trail), 3-part audio stack, longer flash/shake. `updateWords` interprets grace-drift fields, overriding homing + decaying velocity 6%/frame, clearing on expiry.
+- `src/graphics.ts` — `Word.graceUntil/graceVx/graceVy` optional fields.
+- `src/version.ts`, `package.json`, `README.md` — 0.2.10.
+
+---
+
 ## [0.2.9] — Digits 2-6, slower projectiles, Tab priority, summon cooldowns, minion damage fix
 
 Four player-reported issues, five targeted fixes. The digit `1` is off the parry grid (too letter-like in Cinzel); every projectile is slower across the board; Tab now always fires the heal when the game is active; boss summons have real cooldowns; chanter-summoned minions actually damage during boss fights.
