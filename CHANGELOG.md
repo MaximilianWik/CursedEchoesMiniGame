@@ -4,6 +4,55 @@ All notable changes to Cursed Echoes. Format loosely follows [Keep a Changelog](
 
 ---
 
+## [0.2.12] — Boss-specific lore phrases, faster Jessyka, clean summon placement, Kiln 2x buff
+
+Four tuning fixes driven by playtest feedback. The three generic phrase banks (EASY/MID/HARD) are replaced with per-boss lore-accurate banks sourced from canonical Dark Souls 1 material, so each fight now reads like its own boss instead of a shared flavour pool. Jessyka's projectile cadence and flight speed both increase 40%. Boss-summoned chanters and casters spawn center-biased below the HUD so they can't hide behind the HP bar anymore. The Kiln of the First Flame grants a 2x estus buff as a final-zone survival tool.
+
+### Per-boss lore phrase banks
+
+Previously every fight drew from one of three shared banks (`BOSS_PHRASES_EASY/MID/HARD`) — Taurus and Gwyn ended up quoting the same generic "hollow unkindled" / "flame of the first shall consume you" lines, which blurred the fights together. Now each boss has its own bank grounded in canonical item descriptions, dialogue, and established lore.
+
+- **`BOSS_PHRASES_TAURUS`** (14 phrases) — Bed of Chaos, Izalith's failure, bone-carved weaponry, fled the Silver Knights' purge. Sample: *"CARVED FROM THE FALLEN"*, *"IZALITHS BROKEN CHILD"*, *"THE WITCHS FAILURE"*, *"GREATAXE OF BROTHERS BONE"*.
+- **`BOSS_PHRASES_ORNSTEIN`** (14 phrases) — Captain of the Four Knights, dragon slayer, lightning-imbued spear, guardian of Anor Londo. Sample: *"LIGHTNING CLINGS TO THE SPEAR"*, *"DRAGONS FELL TO MY CROSS"*, *"ANOR LONDO IS FORSAKEN"*, *"LEONINE IN MAJESTY"*.
+- **`BOSS_PHRASES_GWYN`** (16 phrases) — First Lord of Sunlight, linked the First Flame, feared the Dark. Pulled from canonical Kaathe dialogue and the Sunlight Spear item description. Sample: *"A THOUSAND YEARS OF FEAR"*, *"I TREMBLED AT THE DARK"*, *"RAYS OF SUNLIGHT FIERCE"*, *"BEQUEATHED THE WANING FLAME"*, *"RESIST THE COURSE OF NATURE"*.
+
+**Anti-repeat phrase picker** — new `BossRuntime.recentPhrases: string[]` tracks the last 3 phrases used in the current fight. The picker filters the pool against this list, so the same line can't re-appear until two others have passed. Falls back to random from the full pool if all remaining are filtered (rare; only happens on tiny banks). Applies across phase transitions too.
+
+### Jessyka — 40% faster across the board
+
+- `JESS_KISS_INTERVAL_MS`: 750 → **450 ms** (time between kiss fires).
+- `JESS_KISS_FLIGHT_MS`: 1100 → **660 ms** (in-flight duration of each kiss).
+- `JESS_ESTUS_PROJECTILE_CHASE_SPEED`: 6 → **10 px/frame** (boss-fight homing speed).
+
+She now reads as genuinely active support rather than a slow-motion helper. A 7-letter word takes her ~3.2 s instead of ~5.3 s.
+
+### Summoner/caster placement — below the HUD, center-biased
+
+Previously summoner (chanter) and caster words from boss patterns spawned at `margin = DESIGN_W / 6` (~170 px) with `y = 100-140`. That overlapped with the top-left HUD block (HP bar, stamina, souls, zone progress, rank — extending to ~x=370, y=~240) which made the summoned word either invisible or unreadable half the time.
+
+- **New spawn bounds**: `xPos = (DESIGN_W - wordW) / 2 + (Math.random() - 0.5) * 240` — centered with ±120 px jitter. The word can't land inside the HUD block regardless of its length.
+- **Y offset below HUD**: summoner at 170-210, caster at 180-210. Both safely below the HUD's last element. A stacked summoner+caster pair no longer overlaps either.
+- No change to the cap (1 summoner + 1 caster) or cooldowns (18 s each).
+
+### Kiln of the First Flame — 2x estus buff
+
+The Kiln is the final zone (fastest spawn rate, hardest boss in Gwyn) and the player has far less room to breathe. As a survival balance fix, both estus-related windows double in the Kiln:
+
+- **Estus godmode**: `ESTUS_GODMODE_MS * kilnMul` where `kilnMul = zone.id === 'kiln' ? 2 : 1`. In Kiln, Tab grants **8 seconds** of i-frames after the chug instead of 4.
+- **Jessyka Q-summon**: `JESS_ESTUS_ACTIVE_MS * kilnMul`. In Kiln, Q burns 1 estus for **50 seconds** of Jessyka projectile-intercept mode instead of 25.
+
+The multiplier is evaluated at Tab press / Q press time, so the benefit is tied to where you ARE, not where you WERE. Resolved once, baked into the ref for the whole duration — leaving the Kiln mid-window doesn't shrink it.
+
+**Visual cleanup**: the golden-pulse class removal now fully delegated to the per-frame `updateEstusGodmodeVisual` poller. The old inner `setTimeout` that removed the class at the fixed 4 s mark would've caused a flicker in Kiln (class removed at 4 s, re-added at 4.016 s by the poller since the window is actually 8 s). Gone.
+
+### Files
+
+- `src/game/config.ts` — three new phrase banks replacing the generic EASY/MID/HARD set; all boss phases wired to their own bank.
+- `src/App.tsx` — `BossRuntime.recentPhrases` field + anti-repeat picker. `JESS_KISS_INTERVAL_MS` 750→450, `JESS_KISS_FLIGHT_MS` 1100→660, `JESS_ESTUS_PROJECTILE_CHASE_SPEED` 6→10. Summoner + caster spawn bounds centre-biased with new y ranges. `handleTab` Kiln multiplier on `estusGodmodeUntilRef`; `trySummonEstusJessyka` Kiln multiplier on `autoDespawnAt`. Inner setTimeout class-removal dropped (poller owns it).
+- `src/version.ts`, `package.json`, `README.md` — 0.2.12.
+
+---
+
 ## [0.2.11] — Jessyka's target reads pink, player's target reads orange
 
 Small, surgical visual clarity fix. Jessyka's current target word now paints in a distinct heart-pink palette across three layers — aura, ring, and typed-letter glow — so the ownership of every word on screen is legible at a glance. No more wondering "is she already on that one?" before committing a keystroke.

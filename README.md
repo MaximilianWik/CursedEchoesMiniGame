@@ -3,7 +3,7 @@
 A gothic typing trial. Four zones. Three bosses. Banish the echoes, parry the spells, type the phrases, kindle the fading flame.
 
 **Live:** https://cursedechoes.vercel.app/
-**Current version:** `0.2.11` — Jessyka's target word now renders with a pink aura, pink ring, and pink typed-letter glow so the ownership of every word on screen is unmistakable. See [CHANGELOG.md](./CHANGELOG.md) for full history. Version is shown in-game on the menu, pause, settings, game-over and victory screens.
+**Current version:** `0.2.12` — lore-accurate per-boss phrase banks, 40% faster Jessyka, summons spawn under the HUD, Kiln 2x estus buff. See [CHANGELOG.md](./CHANGELOG.md) for full history. Version is shown in-game on the menu, pause, settings, game-over and victory screens.
 
 https://github.com/user-attachments/assets/cc4d2332-4475-4e61-bd31-d33734f54dab
 
