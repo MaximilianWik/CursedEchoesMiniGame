@@ -4,6 +4,32 @@ All notable changes to Cursed Echoes. Format loosely follows [Keep a Changelog](
 
 ---
 
+## [0.2.11] — Jessyka's target reads pink, player's target reads orange
+
+Small, surgical visual clarity fix. Jessyka's current target word now paints in a distinct heart-pink palette across three layers — aura, ring, and typed-letter glow — so the ownership of every word on screen is legible at a glance. No more wondering "is she already on that one?" before committing a keystroke.
+
+### What changes visually
+
+- **Aura gradient recoloured on her target.** The normal per-kind aura (blue for chanter, peach for runner, etc.) is overridden with a heart-pink radial gradient (`#ff8cd7 → #ff50b4 → transparent`) so the halo under the word glows pink. Reads as "claimed" from across the play area.
+- **Pulsing pink ring around her target.** A thin 1.8 px ellipse at `#ff80cc` opacity 0.55 × pulse (`sin(time·0.012)`) orbits the word's outline. Composited additively so it reads through other aura colours.
+- **Typed letters render heart-pink, not fire-orange.** When `word.jessykaTarget === true` (and it's not the JESSYKA special heart word), typed-letter fill switches from `#ff6a20` → `#ff80cc`, and the glow shadow from `#ff4500` → `#ff40a0`. The player's own words keep their existing fire-orange palette. Three distinct palettes total:
+  - Player-typed → `#ff6a20` fill + `#ff4500` glow (fire)
+  - Jessyka-claimed → `#ff80cc` fill + `#ff40a0` glow (heart pink)
+  - JESSYKA special heart word → `#ffe4f1` fill + `#ff80cc` glow (pearl pink)
+
+Each palette has a different shadow colour, so on a busy screen the glow alone is enough to tell whose word is whose — even before the typed letters are filled in.
+
+### Why this matters
+
+Before 0.2.11 the only hint that Jessyka owned a word was her kisses in flight. Players couldn't see *which* word she'd picked until the first kiss landed, and her aura looked identical to the word's kind aura. With the pink tier added to aura + ring + typed-letter glow, ownership is legible before the first letter — and the player never wastes a keystroke on a word they can't type anyway (the existing keystroke filter already prevents targeting Jessyka's word).
+
+### Files
+
+- `src/graphics.ts` — `drawWordAura` gets a Jessyka-target branch (gradient + pulsing ring). `drawWordText` gets a third typed-letter palette tier for `jessykaTarget && !isSpecial` cases.
+- `src/version.ts`, `package.json`, `README.md` — 0.2.11.
+
+---
+
 ## [0.2.10] — Frame-perfect estus godmode, cathedral-grade grace veil
 
 Two long-standing frustrations put to bed: estus godmode is now granted at the moment Tab is pressed rather than inside a drift-prone `setTimeout`, so the 4-second invulnerability window always starts exactly when the chug ends. Jessyka's grace veil got its full cinematic makeover — every word and projectile on screen rides the expanding love wave outward with physics-driven drift, five staggered shockwaves paint the arena pink, 320+ particles across four layers linger for three seconds.
