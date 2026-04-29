@@ -29,8 +29,8 @@ export function PauseScreen({onResume, onOpenSettings, onOpenDev, onAbandon}: Pa
         <kbd className="px-1 py-0.5 mx-1 border border-amber-800 text-amber-500">ESC</kbd> to resume
       </p>
 
-      {/* Version badge — bottom-right corner. */}
-      <div className="absolute bottom-4 right-4 font-[Cinzel] text-xs tracking-[0.35em] uppercase text-amber-700/60 select-none">
+      {/* Version badge — bottom-right corner with gold pill outline. */}
+      <div className="absolute bottom-4 right-4 px-3 py-1.5 border border-amber-600/80 bg-black/70 rounded-sm font-[Cinzel] text-xs tracking-[0.4em] uppercase text-amber-300 shadow-[0_0_14px_rgba(255,180,60,0.35)] select-none">
         v{APP_VERSION}
       </div>
     </div>

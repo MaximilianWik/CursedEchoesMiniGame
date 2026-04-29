@@ -56,8 +56,8 @@ export function VictoryScreen(props: VictoryScreenProps) {
         ◇ DEV
       </button>
 
-      {/* Version badge — bottom-right corner, gold-tinted to match the victory frame. */}
-      <div className="absolute bottom-6 right-6 z-[65] font-[Cinzel] text-[10px] tracking-[0.4em] uppercase text-amber-500/60 select-none">
+      {/* Version badge — bottom-right corner, gold-tinted pill to match the victory frame. */}
+      <div className="absolute bottom-6 right-6 z-[65] px-3 py-1.5 border border-amber-400/80 bg-black/70 rounded-sm font-[Cinzel] text-xs tracking-[0.4em] uppercase text-amber-200 shadow-[0_0_16px_rgba(255,210,100,0.45)] select-none">
         v{APP_VERSION}
       </div>
     </div>

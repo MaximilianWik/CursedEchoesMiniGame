@@ -4,6 +4,74 @@ All notable changes to Cursed Echoes. Format loosely follows [Keep a Changelog](
 
 ---
 
+## [0.2.8] — Grace shield, phrase-resume, wider SFX, visible version badges
+
+Four targeted fixes and one major new mechanic: Jessyka's grace shield — a once-per-spawn defensive explosion that veils the player from damage, scours projectiles from the air, and pushes hostile words outward in a screen-wide wave of pink. Boss phrases no longer reset mid-type on mismatched keystrokes. Seven new dedicated SFX fill out the game's new moments. Version badges on all screens upgraded from "easy to miss" to "clearly legible".
+
+### Phrase-reset hardening
+
+Verified that `0.2.7`'s digit-projectile split fixed the original projectile-resets-phrase bug (the digit branch in `handleCharLive` never touches `wordsRef`). Also hardened the adjacent case where a letter-mismatch rescue-switch could still silently drop the phrase.
+
+- **`w.typed` preserved on rescue-switch for boss phrases.** If the active word is `isBossPhrase`, the switch keeps its partial progress — the player can return to it later by typing its next-expected letter.
+- **Resume-matching in the no-active-word branch.** The initial `findIndex` now matches on `w.text.charAt(w.typed.length) === char` instead of `startsWith(char)`, so a half-typed phrase is pickable again by typing what's next — not restarted from scratch.
+- **Rescue-switch also matches next-expected-letter**, not just first-letter, so switching onto a half-typed word appends instead of overwriting.
+
+### Jessyka's grace shield — new once-per-spawn defensive ability
+
+When a projectile or enemy is about to damage the player and Jessyka is `active` with her grace still unspent, she automatically veils the player in a screen-wide love-explosion. The damage is cancelled, the air is scoured, and the screen becomes a cathedral of pink.
+
+- **Auto-trigger.** Hooked into `applyDamageToPlayer` as an early-return: `tryJessykaGraceShield(d, time)` runs first, and if it fires, the caller's damage is dropped entirely. Works against both projectile hits (updateProjectiles) and word contact damage (updateWords).
+- **Visual — three concentric shockwaves**:
+  - Inner bright ring (`rgba(255,220,240,ALPHA)`, maxRadius 260) — the bright core of the blast.
+  - Main pink ring (`rgba(255,120,200,ALPHA)`, maxRadius ≈ `DESIGN_W * 0.6`) — the body of the explosion.
+  - Outer soft ring (`rgba(255,160,220,ALPHA)`, maxRadius ≈ `DESIGN_W * 0.75`) — the enveloping grace aura.
+- **Particles — 190 across three layers**:
+  - 120 radial heart+petal+sparkle burst fanned evenly around the player.
+  - 40-particle slow "petal drift" layer at 120-frame life so the aftermath lingers for ~2 s.
+  - 30 cream-angelic flecks drifting upward above the player (the "veil" imagery).
+- **Screen flash recoloured to pink** (`radial-gradient` swapped to heart-hued), auto-restored to the default red after 700 ms so subsequent ordinary hits look right.
+- **Hostile word push** — every non-phrase, non-special, non-Jessyka-targeted word gets shoved outward from the player by 160 px (112 px for idle zone words) with a 20 px upward bias. Feels like a shockwave of love.
+- **Projectile scour** — every un-deflected boss projectile is marked `deflected = true` and spliced, with a 6-particle pink burst at each. The air is cleared.
+- **i-frames + micro-shake** — 1.2 s of i-frames after the shield so the player can't be double-tapped the same frame, and a capped 6-magnitude, 220 ms screen-shake (skipped if reduce-motion is on).
+- **Announcement** — `JESSYKA'S GRACE` floats in the boss-announcement slot, newly given an optional `color` field so the banner renders in pink (`#ff9ecc`) instead of the default boss red.
+- **Damage-text `VEILED` popup** over the player so the trigger is legible even in visual chaos.
+- **One per spawn, reset on refresh.** `JessykaCompanion.graceUsed` is set `true` at use. A chained JESSYKA word that refreshes an already-present Jessyka resets `graceUsed` back to `false` — a new blessing, a new shield.
+- **Parity with other Jessyka modes.** Works identically whether she was summoned via the JESSYKA heart word OR the Q estus summon — both initialise `graceUsed: false`.
+
+### New SFX — 8 dedicated sounds for recent features
+
+All additions use the existing procedural Web Audio graph (envelope + oscillators + shared reverb bus). Jessyka's sounds deliberately use major-key tonality to contrast the Bloodborne-dissonant palette elsewhere.
+
+- **`sfxJessykaGrace`** — the heartwarming chord for the grace shield. Sub-bass impact → ascending C major arpeggio (C-E-G-C-E) with inharmonic shimmer partials → breathy high bandpass → low sine drone tail. ~2 s total.
+- **`sfxJessykaSummon`** — Q-summon cue. Staggered F-A-C major triad (60 ms offsets) + mid bandpass noise + sub thud. Replaces the generic `sfxFireball` that was there.
+- **`sfxJessykaKissImpact`** — soft heart-chime for kiss arrivals (both word kisses and boss-projectile intercepts). Triangle 880 Hz + sine 1175 Hz (major third up) + brief highpass sizzle.
+- **`sfxBossSummonChanter`** — low sawtooth growl rising from 82→196 Hz + dissonant high whisper + sub thud. Plays on the boss `summoner` pattern.
+- **`sfxBossSummonCaster`** — metallic crackle + sawtooth 147→330 Hz + square 440→880 Hz + sub thud. Plays on the boss `caster` pattern.
+- **`sfxLichSplit`** — crystalline high-shatter + dissonant minor-chord body + sub impact. Plays on lich death, layering with the existing `sfxShatter` from `completeWord`.
+- **`sfxEstusGodmode`** — bright golden bell ring when the 4 s post-chug window opens. Ascending G-C-high-C bell stack (major tonality) + high airy shimmer.
+- **`sfxWordSwitch`** — dry non-musical "whoosh" for the rescue-switch pivot. Sits below the cast/fireball audio that follows on the same frame, so it doesn't step on them.
+
+Also removed a redundant `sfxFireball()` call from the Jessyka projectile-chase intercept path — `spawnKissProjectileHit` now plays `sfxJessykaKissImpact` once, cleanly.
+
+### Version badges — now legible
+
+Version text was previously rendered at `text-amber-700/60` (or worse) — designed as subtle metadata but in practice barely visible against the black menu backgrounds. Every screen now uses a bordered gold pill with a glow shadow:
+
+- **Menu, Pause, Game Over** — `px-3 py-1.5 border border-amber-600/80 bg-black/70 rounded-sm text-amber-300 shadow-[0_0_14px_rgba(255,180,60,0.35)]`.
+- **Settings** — centered footer bar with `text-amber-300 drop-shadow-[0_0_8px_rgba(255,180,60,0.45)]` over a stronger top-border (`border-amber-700/60`), promoted from `[10px]` size to `xs`.
+- **Victory** — gold-tinted pill (`border-amber-400/80 text-amber-200`) matching the victory frame's warmer palette.
+
+All screens share the same pattern so the badge reads consistently across contexts.
+
+### Files
+
+- `src/game/audio.ts` — eight new SFX exports at the bottom of the file.
+- `src/App.tsx` — new `tryJessykaGraceShield` helper ahead of `applyDamageToPlayer`; new imports + wiring for 8 SFX. `JessykaCompanion.graceUsed` field + init + refresh reset. `bossAnnouncementRef` now supports optional `color`. Letter rescue-switch preserves phrase `typed`; no-active-word findIndex matches on next-expected-letter; rescue SFX + kiss impact SFX + estus godmode SFX + boss-summon SFX + lich-split SFX wired.
+- `src/screens/Menu.tsx`, `Pause.tsx`, `Settings.tsx`, `GameOver.tsx`, `Victory.tsx` — version badges upgraded to bordered pills with glow shadows.
+- `src/version.ts`, `package.json`, `README.md` — bumped to 0.2.8.
+
+---
+
 ## [0.2.7] — Digit projectiles, estus godmode, Jessyka polish, boss countdown
 
 Five surgical fixes to input clarity, reward framing, companion feel, and pacing information. Projectiles and word-typing no longer share an input surface; estus now actually feels like a commitment worth making; Jessyka's kisses read as blown from her lips; the zone progress bar is now a named boss countdown.
