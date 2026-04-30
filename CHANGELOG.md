@@ -4,6 +4,112 @@ All notable changes to Cursed Echoes. Format loosely follows [Keep a Changelog](
 
 ---
 
+## [0.3.15] — Taurus final spectacle: WRATH OF IZALITH meteor
+
+Taurus Demon's last move is no longer just "another phrase that happens to finish him" — it's a full cinematic. When his HP drops to the finisher threshold, the arena turns dire, he charges up, and summons a fiery meteor bearing the word that will end the fight. Hit by it: instant death. Type it out: pyroclastic explosion + boss death cutscene.
+
+### Trigger
+
+At `currentHp <= TAURUS_FINISHER_HP_THRESHOLD` (= 3) AND `!finisherActive` AND boss is Taurus, `updateBoss` flips into finisher mode:
+
+- Clears all projectiles + words + active typing targets.
+- Parks `nextAttackAt` / `nextPhraseAt` at `+9_999_999` so no normal threats spawn.
+- Flips `finisherActive: true` on the `BossRuntime`.
+- Locks Taurus sprite into `attack` (`/TaurusATTACK.png`) — the existing 1.2 s idle-revert timeout checks `finisherActive` now and skips if set.
+- Flips `taurusFinisher: true` React state → arena gets the `taurus-finisher-active` wrapper class → dire overrides kick in (see below).
+- Plays `sfxTaurusFinisherRoar` + `sfxBossScream`, triggers lightning, bumps screen shake (mag 14, 700 ms).
+- 60-particle ember swell spiralling inward toward Taurus's chest (fire gathering for the summon).
+- Announcement: *"A FINAL HYMN"*.
+- Schedules `spawnTaurusFinisherMeteor` after a **1.5 s charge-up** (`TAURUS_FINISHER_CHARGE_MS`).
+
+### Meteor word
+
+`spawnTaurusFinisherMeteor` pushes a single `Word` into `wordsRef.current` with:
+- `text: 'WRATH OF IZALITH'` (16 chars / 13 letters + 2 spaces — long enough to read as a hero move, short enough to type in a panic).
+- Starting position: top-centre of the frame (`y: -80`).
+- `speed: 0.68` (slow homing toward the player — deliberately slower than any other word in the game).
+- `isBossPhrase: true` — routes completion damage through `spawnFireball` to the boss.
+- **`isFinisher: true`** (new field on `Word`) — unlocks the meteor visual + instant-kill contact path + lethal damage override.
+
+On spawn: another lightning flash, screen shake (mag 10, 500 ms), 28-particle ember burst at the spawn origin, `sfxTaurusFinisherRoar` layered again.
+
+### Meteor render
+
+`drawTaurusMeteorOrb(ctx, cx, cy, time)` painted on the text canvas BEFORE the regular phrase frame + glyphs so letters stay crisp on top. Four layered radial gradients + rotating flame tongues:
+
+- **Outer heat haze** — 240 px radial, dim red-orange, pulsing.
+- **Mid fire body** — 160 px radial, bright amber → red, pulsing.
+- **Flickering inner core** — 70 px radial, hot white-yellow, extra jitter via `Math.random()` per frame.
+- **Six rotating flame tongues** — `repeating-conic` triangles radiating out, slow rotation (`time * 0.0008`) so it looks alive.
+
+Plus a **trail** — 3 fire particles per frame spawned opposite the meteor's movement direction (fanning out ~30 px behind the orb) so it streaks through the air as it descends.
+
+### Dire arena ("is-finisher")
+
+`.taurus-finisher-active` wrapper on the arena applies heavier overrides:
+- **Vignette deepens** — 65% × 55% ellipse with a 0.75-opacity red stop instead of 0.55.
+- **Lightning strobes faster** — 2.2 s loop instead of 7.5 s.
+- **Ground crack pulses brighter** — 1 s loop (vs 2.4 s) with `brightness(1.55)`.
+- **Chains swing harder** — 2.6 s loop (vs 5–6.6 s).
+- **Embers rise faster** — 4.5 s loop (vs 8 s) at 0.95 opacity.
+- **Torches flicker furiously** — 0.16 s loop (vs 0.28) with a larger blur + bigger drop-shadow.
+- **Full-frame red pulse** — a `::after` pseudo-element flashes radially every 1.4 s at 50–95% opacity so the whole arena feels like it's breathing fire.
+
+### Sprite pulse
+
+`.taurus-boss-sprite.is-finisher` runs a new `taurusFinisherPulse` 0.9 s keyframe — the ATTACK-pose sprite now breathes heat: base glow at 42 px / 80 px drop-shadow, peaking to 70 px / 130 px with brightness(1.5) and saturate(1.25) at the mid-cycle. Locked in ATTACK for the whole finisher.
+
+### Contact → instant death (with grace)
+
+`updateWords`'s `canHitPlayer` predicate extended with `|| (d.phaseRef.current === 'boss' && w.isFinisher)` so the meteor is a valid hit target. On contact:
+- `sfxTaurusFinisherImpact` (3-stage: stone-crack, massive boom, smoldering tail + dissonant minor-second).
+- 80-particle explosion at the player's feet.
+- 420 px shockwave.
+- Screen shake mag 22 for 1000 ms.
+- If `isInvulnerable(d, time)` (dodge i-frames, estus godmode) — `DODGE` text + stat credit, finisher deactivates, fight resumes.
+- Otherwise `applyDamageToPlayer(d, MAX_HEALTH * 3, time)` which routes through the Jessyka-grace-shield check — if she has a veil stored, she saves and the finisher deactivates, fight resumes. Otherwise the player dies (`triggerDeath`).
+
+### Completion → explosion + defeat
+
+When the player types the meteor's last letter, `completeWord` runs first, then `spawnFireball` routes lethal damage to Taurus (new `bossDamage = d.bossRef.current.currentHp` override when `w.isFinisher`), then `defeatBoss` runs naturally when HP hits 0. The pyroclastic beat is inside `completeWord`:
+
+- `sfxTaurusFinisherExplode` — triumphant: crack + bass boom + rising rumble from 55 → 82 Hz + fire-whoosh noise.
+- **Three concentric shockwaves** at the meteor's last position: 240 / 420 / 640 px max radius.
+- **160-particle ember burst** fanning out, colour-distributed across white-hot / amber / red / deep-red.
+- Screen shake mag 24 for 1200 ms.
+- 700 ms hit-flash overlay.
+- Big floating text: *"METEOR FELLED"*.
+- `finisherActive` flag cleared so the death cutscene's existing timeouts can fire.
+
+The extended 6.5 s Taurus death cutscene (from 0.3.13) runs on top of all this, so the full sequence is:
+
+| Offset | Beat |
+|---|---|
+| 0 | Meteor explosion + sfxTaurusFinisherExplode + 160 particles + "METEOR FELLED" |
+| + ~100 ms | Phrase fireball lands on Taurus → `defeatBoss` triggers → scream + 60-particle boss burst + "THE RAMPART IS YOURS" |
+| + 900 ms | First collapse rumble |
+| + 1.8 s | "SILENCE SETTLES" + ember pour |
+| + 3.2 s | Second heavy collapse + crack flare |
+| + 4.6 s | "THE BURG CAN BREATHE" |
+| + 5.6 s | Finale flash + resolved chord |
+| + 6.5 s | Bonfire |
+
+### New SFX
+
+- `sfxTaurusFinisherRoar` — beastial low horn (85 → 40 Hz over 1.4 s) + dissonant minor-third overtone + chest-thud + fire-breath noise. Fires on finisher trigger AND meteor spawn.
+- `sfxTaurusFinisherImpact` — stone-crack + massive low boom + smoldering tail + minor-second dread layer.
+- `sfxTaurusFinisherExplode` — three-layer triumphant blast: crack, bass boom, rising-fifth rumble (55 → 82 Hz), fire-whoosh.
+
+### Files touched
+
+- `src/graphics.ts` — `Word.isFinisher?: boolean` field.
+- `src/game/audio.ts` — three new SFX (`sfxTaurusFinisherRoar`, `sfxTaurusFinisherImpact`, `sfxTaurusFinisherExplode`).
+- `src/App.tsx` — `BossRuntime.finisherActive` + `finisherStart`; `taurusFinisher` React state (threaded through `RenderProps`); constants (`TAURUS_FINISHER_HP_THRESHOLD`, `_CHARGE_MS`, `_METEOR_SPEED`, `_TEXT`); trigger block in `updateBoss`; `spawnTaurusFinisherMeteor` + `drawTaurusMeteorOrb` helpers; meteor trail particles + instant-death contact in `updateWords`; lethal-damage override in `spawnFireball`; meteor explosion beat in `completeWord`; finisher class on the arena wrapper + Taurus sprite in the render tree; reset calls in `resetRunState` / `beginBonfire`.
+- `src/index.css` — `.taurus-finisher-active` dire overrides + `::after` pulse overlay; `.taurus-boss-sprite.is-finisher` + `taurusFinisherPulse` keyframes.
+- `package.json` + `src/version.ts` — 0.3.15.
+
+---
+
 ## [0.3.14] — Taurus sample call matches AfroMan exactly + procedural fallback when a sample fails
 
 Two changes, both aimed at the "taurusSOUNDTRACK.mp3 doesn't play" report.

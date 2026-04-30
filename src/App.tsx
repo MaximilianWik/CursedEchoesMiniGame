@@ -36,6 +36,7 @@ import {
   sfxLichSplit, sfxEstusGodmode, sfxWordSwitch,
   sfxJessykaKissImpact, sfxJessykaSummon,
   sfxTaurusCharge, sfxTaurusStomp,
+  sfxTaurusFinisherRoar, sfxTaurusFinisherImpact, sfxTaurusFinisherExplode,
 } from './game/audio';
 
 import {Hud, type HudStats} from './hud/Hud';
@@ -212,6 +213,25 @@ const ZOOTED_TICK_INTERVAL_SEC = 10;
 /** Max ZOOTED stacks. Once at 3 the timer stops incrementing. */
 const ZOOTED_CAP = 3;
 
+/** Taurus final spectacle — HP threshold at which the finisher triggers.
+ *  Anything ≤ this and we flip into the meteor cutscene instead of the
+ *  next normal phrase. 3 HP is chosen so the last 1-2 canonical phrases
+ *  right before would have finished him normally — the finisher replaces
+ *  that killing-blow phrase with the meteor. */
+const TAURUS_FINISHER_HP_THRESHOLD = 3;
+/** How long after the finisher trigger before the meteor word spawns.
+ *  This is the "charge-up" beat: sprite in ATTACK pose, screen red-flash,
+ *  announcement banner, particle swell from the boss. */
+const TAURUS_FINISHER_CHARGE_MS = 1500;
+/** Vertical speed of the meteor once it spawns. It homes toward the
+ *  player (standard Word movement), so actual time-to-player depends on
+ *  where the player is standing — this is the scalar the updateWords
+ *  movement code multiplies into its homing unit vector. */
+const TAURUS_FINISHER_METEOR_SPEED = 0.68;
+/** Meteor text — long enough to require focus, thematic enough to
+ *  register as a final-move name. 16 chars (13 letters + 2 spaces). */
+const TAURUS_FINISHER_TEXT = 'WRATH OF IZALITH';
+
 type BonfireInfo = {
   reason: BonfireReason;
   nextZoneIdx: number;
@@ -339,6 +359,11 @@ export default function App() {
   // the death cutscene (swap to TaurusDEAD.png + slump animation).
   const [taurusBossPhase, setTaurusBossPhase] = useState<'hidden' | 'idle' | 'attack' | 'dying'>('hidden');
   const [taurusBossHit, setTaurusBossHit] = useState(false);
+  // 0.3.14 — Taurus final-spectacle flag. Mirrors bossRef.current.finisherActive
+  // into React state so the arena + sprite pick up the `is-finisher`
+  // class. Toggled on in updateBoss when HP drops below the threshold,
+  // and off on resetRunState / beginBonfire / etc.
+  const [taurusFinisher, setTaurusFinisher] = useState(false);
 
   // Jessyka companion + kisses.
   const jessykaRef = useRef<JessykaCompanion | null>(null);
@@ -454,6 +479,7 @@ export default function App() {
     // 0.3.12 — Taurus fight state reset.
     setTaurusBossPhase('hidden');
     setTaurusBossHit(false);
+    setTaurusFinisher(false);
     stopMusicSample(200);
   }, []);
 
@@ -493,6 +519,7 @@ export default function App() {
     setAfromanGrooving(false);
     setTaurusBossPhase('hidden');
     setTaurusBossHit(false);
+    setTaurusFinisher(false);
     stopMusicSample(600);
     sfxBonfire();
     setBonfireInfo({reason, nextZoneIdx, defeatedBossName});
@@ -536,6 +563,8 @@ export default function App() {
       defeated: false,
       deathStart: 0,
       introStart: hasSample ? 0 : nowMs,
+      finisherActive: false,
+      finisherStart: 0,
       summonerCooldownUntil: 0,
       casterCooldownUntil: 0,
       recentPhrases: [],
@@ -1024,7 +1053,7 @@ export default function App() {
       zoneIdxRef, zoneStartTimeRef, zoneElapsedRef, bossRef, bossAnnouncementRef,
       zootedStacksRef, zootedDecayAtRef, lastBeatNowRef, beatPulseRef,
       setZootedLevel, setAfromanBossPhase, setAfromanBossHit,
-      setTaurusBossPhase, setTaurusBossHit,
+      setTaurusBossPhase, setTaurusBossHit, setTaurusFinisher,
       statsRef,
       jessykaRef, jessykaKissesRef, jessykaImgRef,
       setJessykaVisible, setJessykaDespawning,
@@ -1065,6 +1094,7 @@ export default function App() {
     afromanGrooving,
     taurusBossPhase,
     taurusBossHit,
+    taurusFinisher,
   });
 }
 
@@ -1155,6 +1185,7 @@ type LoopDeps = {
   setAfromanBossHit: (v: boolean) => void;
   setTaurusBossPhase: (p: 'hidden' | 'idle' | 'attack' | 'dying') => void;
   setTaurusBossHit: (v: boolean) => void;
+  setTaurusFinisher: (v: boolean) => void;
   statsRef: React.RefObject<RunStats>;
   jessykaRef: React.RefObject<JessykaCompanion | null>;
   jessykaKissesRef: React.RefObject<JessykaKiss[]>;
@@ -1516,6 +1547,61 @@ function updateBoss(d: LoopDeps, time: number, dt: number): void {
     else return;
   }
 
+  // ─── Taurus final spectacle ────────────────────────────────────────
+  // When HP drops below the threshold, intercept the normal flow and
+  // enter the finisher cutscene: clear threats, lock Taurus into his
+  // ATTACK pose, switch the arena to its dire `is-finisher` state, and
+  // schedule the meteor spawn after a 1.5 s charge-up. From here until
+  // the meteor resolves (player types it OR it contacts), no normal
+  // attacks, no phrase respawns, no phase transitions.
+  if (!b.finisherActive && b.def.id === 'taurus' && b.currentHp <= TAURUS_FINISHER_HP_THRESHOLD) {
+    b.finisherActive = true;
+    b.finisherStart = time;
+    // Clear the field so only the meteor is on screen.
+    d.projectilesRef.current = [];
+    d.wordsRef.current = [];
+    d.activeWordRef.current = null;
+    // Push attack/phrase schedules far into the future — the meteor is
+    // the only thing that should appear. Reset when the fight resolves.
+    b.nextAttackAt = time + 9_999_999;
+    b.nextPhraseAt = time + 9_999_999;
+    // Sprite lock + arena dire state.
+    d.setTaurusBossPhase('attack');
+    d.setTaurusFinisher(true);
+    // Hero announcement + telegraph.
+    d.bossAnnouncementRef.current = {text: 'A FINAL HYMN', life: 240, color: '#ff6028'};
+    triggerLightning(d.bgStateRef.current, time);
+    sfxTaurusFinisherRoar();
+    sfxBossScream();
+    d.shakeMagRef.current = Math.max(d.shakeMagRef.current, 14);
+    d.shakeUntilRef.current = Math.max(d.shakeUntilRef.current, time + 700);
+    // Charge-up particle swell from Taurus's chest (fire building up
+    // before the meteor summon). 60 particles spiraling inward.
+    for (let k = 0; k < 60; k++) {
+      if (d.particlesRef.current.length >= PARTICLE_CAP) break;
+      const ang = Math.random() * Math.PI * 2;
+      const r = 140 + Math.random() * 80;
+      d.particlesRef.current.push({
+        x: BOSS_AIM.x + Math.cos(ang) * r,
+        y: BOSS_AIM.y + Math.sin(ang) * r,
+        vx: -Math.cos(ang) * (2.5 + Math.random() * 2),
+        vy: -Math.sin(ang) * (2.5 + Math.random() * 2),
+        life: 38, maxLife: 38, size: 2.5 + Math.random() * 2,
+        color: Math.random() < 0.5 ? '#ffaa28' : '#c01408',
+      });
+    }
+    // Spawn the meteor after the charge-up delay.
+    window.setTimeout(() => {
+      if (!d.bossRef.current || d.bossRef.current.defeated) return;
+      if (d.bossRef.current.def.id !== 'taurus') return;
+      spawnTaurusFinisherMeteor(d, performance.now());
+    }, TAURUS_FINISHER_CHARGE_MS);
+    return;
+  }
+  // While the finisher is live, skip the normal phrase + attack loop —
+  // only the meteor gets to exist on the field.
+  if (b.finisherActive) return;
+
   // Phase transition based on HP.
   const hpPct = b.currentHp / b.def.maxHp;
   let newPhase = 0;
@@ -1613,10 +1699,13 @@ function spawnBossAttack(d: LoopDeps, pattern: BossPattern, _letters: string, ti
   }
   // 0.3.12 — same pattern for Taurus. TaurusATTACK.png held for ~1.2 s
   // during every attack spawn so the pose reads as a clear telegraph.
+  // 0.3.14 — during the finisher lock the sprite is held in ATTACK pose
+  // continuously, so the revert skips if finisherActive is still set.
   if (isTaurus) {
     d.setTaurusBossPhase('attack');
     window.setTimeout(() => {
       if (d.bossRef.current && !d.bossRef.current.defeated && d.bossRef.current.def.id === 'taurus') {
+        if (d.bossRef.current.finisherActive) return;
         d.setTaurusBossPhase('idle');
       }
     }, 1200);
@@ -1960,6 +2049,115 @@ function spawnBossAttack(d: LoopDeps, pattern: BossPattern, _letters: string, ti
     return true;
   }
   return false;
+}
+
+/** Taurus final-spectacle meteor spawn. Called ~1.5 s after the finisher
+ *  trigger (the charge-up window). Adds a huge phrase-sized word at the
+ *  top-centre of the frame, flagged `isFinisher: true`. The word homes
+ *  toward the player at TAURUS_FINISHER_METEOR_SPEED (deliberately slow
+ *  so the player has time to type it); contact with the player is
+ *  instant-kill (handled in updateWords), typing completes it (handled
+ *  in completeWord + spawnFireball with a lethal-damage override). */
+function spawnTaurusFinisherMeteor(d: LoopDeps, time: number): void {
+  const text = TAURUS_FINISHER_TEXT;
+  const widthEst = text.length * 14;
+  const x = (DESIGN_W - widthEst) / 2;
+  d.wordsRef.current.push({
+    id: nextWordId(),
+    text, x, y: -80,
+    speed: TAURUS_FINISHER_METEOR_SPEED,
+    typed: '', kind: 'normal', isSpecial: false,
+    hp: 1, fireCooldown: 0, ghostPhase: 0,
+    scrambled: false, stationaryX: x, spawnTime: time,
+    isBossPhrase: true,     // routes damage through spawnFireball on completion
+    isFinisher: true,       // unlocks the meteor visual + instant-kill contact
+  });
+  d.bossAnnouncementRef.current = {text: 'WRATH OF IZALITH', life: 200, color: '#ff9040'};
+  triggerLightning(d.bgStateRef.current, time);
+  sfxTaurusFinisherRoar();
+  d.shakeMagRef.current = Math.max(d.shakeMagRef.current, 10);
+  d.shakeUntilRef.current = Math.max(d.shakeUntilRef.current, time + 500);
+  // Explosive ember burst at the meteor's spawn point.
+  for (let k = 0; k < 28; k++) {
+    if (d.particlesRef.current.length >= PARTICLE_CAP) break;
+    const ang = Math.random() * Math.PI * 2;
+    const spd = 2 + Math.random() * 5;
+    d.particlesRef.current.push({
+      x: x + widthEst / 2, y: -40,
+      vx: Math.cos(ang) * spd,
+      vy: Math.sin(ang) * spd - 1,
+      life: 40, maxLife: 40, size: 3 + Math.random() * 2,
+      color: Math.random() < 0.45 ? '#ffa028' : '#c80808',
+    });
+  }
+}
+
+/** Draw the big fiery meteor orb surrounding the Taurus finisher word.
+ *  Painted on the text canvas right before the regular phrase frame +
+ *  glyphs are drawn, so the word letters still read crisply on top of
+ *  the glow. `centerX/Y` is the visual center of the word (x + wordW/2,
+ *  y - 8). */
+function drawTaurusMeteorOrb(ctx: CanvasRenderingContext2D, centerX: number, centerY: number, time: number): void {
+  const pulse = 0.85 + Math.sin(time * 0.018) * 0.15;
+  // Outer heat haze — very large, faint, red.
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  const outer = ctx.createRadialGradient(centerX, centerY, 20, centerX, centerY, 240 * pulse);
+  outer.addColorStop(0,    'rgba(255, 140, 40, 0.55)');
+  outer.addColorStop(0.35, 'rgba(220, 60, 20, 0.35)');
+  outer.addColorStop(0.7,  'rgba(140, 20, 10, 0.18)');
+  outer.addColorStop(1,    'rgba(0, 0, 0, 0)');
+  ctx.fillStyle = outer;
+  ctx.fillRect(centerX - 240, centerY - 240, 480, 480);
+  ctx.restore();
+  // Mid fire body — tighter, brighter amber.
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  const mid = ctx.createRadialGradient(centerX, centerY, 4, centerX, centerY, 160 * pulse);
+  mid.addColorStop(0,   'rgba(255, 235, 180, 1)');
+  mid.addColorStop(0.25,'rgba(255, 180, 60, 0.9)');
+  mid.addColorStop(0.55,'rgba(255, 80, 20, 0.65)');
+  mid.addColorStop(1,   'rgba(120, 10, 10, 0)');
+  ctx.fillStyle = mid;
+  ctx.fillRect(centerX - 160, centerY - 160, 320, 320);
+  ctx.restore();
+  // Flickering inner core — small hot white-yellow centre.
+  ctx.save();
+  const flicker = 0.9 + Math.sin(time * 0.045) * 0.1 + Math.random() * 0.08;
+  ctx.globalCompositeOperation = 'lighter';
+  const core = ctx.createRadialGradient(centerX, centerY, 0, centerX, centerY, 70 * flicker);
+  core.addColorStop(0,   'rgba(255, 250, 220, 1)');
+  core.addColorStop(0.4, 'rgba(255, 200, 100, 0.75)');
+  core.addColorStop(1,   'rgba(255, 120, 40, 0)');
+  ctx.fillStyle = core;
+  ctx.fillRect(centerX - 70, centerY - 70, 140, 140);
+  ctx.restore();
+  // Jagged flame tongues — six radial streaks with a slow rotate so
+  // the meteor feels alive and angry.
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.translate(centerX, centerY);
+  ctx.rotate((time * 0.0008) % (Math.PI * 2));
+  const tongues = 6;
+  for (let i = 0; i < tongues; i++) {
+    const ang = (i / tongues) * Math.PI * 2;
+    const len = 170 + Math.sin(time * 0.01 + i) * 30;
+    ctx.save();
+    ctx.rotate(ang);
+    const grad = ctx.createLinearGradient(0, 0, len, 0);
+    grad.addColorStop(0,    'rgba(255, 200, 80, 0.55)');
+    grad.addColorStop(0.55, 'rgba(255, 100, 30, 0.25)');
+    grad.addColorStop(1,    'rgba(120, 20, 10, 0)');
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.moveTo(0, -18);
+    ctx.lineTo(len, 0);
+    ctx.lineTo(0, 18);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  }
+  ctx.restore();
 }
 
 function drawBossToBg(bgCtx: CanvasRenderingContext2D, d: LoopDeps, time: number): void {
@@ -3092,6 +3290,37 @@ function updateWords(d: LoopDeps, ctx: CanvasRenderingContext2D, textCtx: Canvas
     // Aura on main canvas (action layer).
     drawWordAura(ctx, w, wordW, time, ENEMY_KINDS[w.kind].auraColor);
 
+    // 0.3.14 — Taurus meteor orb. Renders the huge fiery orb around the
+    // finisher word's center BEFORE the regular phrase frame + glyphs
+    // so text stays crisp on top. Also spawns a small trail behind the
+    // meteor each frame (fire particles drifting away from the motion
+    // direction) so it reads as flying through the air.
+    if (w.isFinisher && !inSpawn) {
+      const cx2 = w.x + wordW / 2;
+      const cy2 = w.y - 8;
+      drawTaurusMeteorOrb(textCtx, cx2, cy2, time);
+      // Trail particles — spawn opposite the movement direction so the
+      // meteor streaks behind its motion path.
+      if (!inGracePush) {
+        const dxm = PLAYER.x - w.x, dym = PLAYER.y - w.y;
+        const distm = Math.sqrt(dxm * dxm + dym * dym);
+        if (distm > 0.001 && d.particlesRef.current.length < PARTICLE_CAP - 6) {
+          const nx = -dxm / distm, ny = -dym / distm;
+          for (let k = 0; k < 3; k++) {
+            if (d.particlesRef.current.length >= PARTICLE_CAP) break;
+            d.particlesRef.current.push({
+              x: cx2 + nx * 30 + (Math.random() - 0.5) * 36,
+              y: cy2 + ny * 30 + (Math.random() - 0.5) * 36,
+              vx: nx * (1.4 + Math.random() * 1.2) + (Math.random() - 0.5) * 0.8,
+              vy: ny * (1.4 + Math.random() * 1.2) - 0.4,
+              life: 34, maxLife: 34, size: 3 + Math.random() * 2,
+              color: Math.random() < 0.4 ? '#ffcc40' : Math.random() < 0.75 ? '#ff5818' : '#8c0a08',
+            });
+          }
+        }
+      }
+    }
+
     // Boss-phrase gothic frame: clearly marks the word tied to the boss HP bar.
     // Just an outline + corner brackets + label — no rectangular fill (which
     // created an ugly opaque box in an earlier revision).
@@ -3152,11 +3381,13 @@ function updateWords(d: LoopDeps, ctx: CanvasRenderingContext2D, textCtx: Canvas
     }
 
     // Contact with player — in zone phase for non-chanter enemies, OR during
-    // boss fights for boss-attack word-projectiles. Suppressed during spawn
-    // anim so summoner/caster can't damage before they're typable.
+    // boss fights for boss-attack word-projectiles OR the Taurus finisher
+    // meteor (isFinisher). Suppressed during spawn anim so summoner/caster
+    // can't damage before they're typable.
     const canHitPlayer = !inSpawn && (
       (d.phaseRef.current === 'zone' && w.kind !== 'chanter')
       || (d.phaseRef.current === 'boss' && w.isBossAttack)
+      || (d.phaseRef.current === 'boss' && w.isFinisher)
     );
     if (canHitPlayer) {
       const dx = PLAYER.x - w.x, dy = PLAYER.y - w.y;
@@ -3172,6 +3403,67 @@ function updateWords(d: LoopDeps, ctx: CanvasRenderingContext2D, textCtx: Canvas
         if (j && j.targetId === w.id) {
           j.targetId = null;
           j.lettersFired = 0;
+        }
+        // 0.3.14 — Taurus finisher meteor contact. Instant-kill unless the
+        // player is genuinely invulnerable (dodge i-frames, estus godmode,
+        // or Jessyka's stored veil fires inside applyDamageToPlayer).
+        // Routed through applyDamageToPlayer with overkill damage so the
+        // Jessyka grace shield still gets its chance to intercept —
+        // otherwise a stored veil would feel cheated out of a save.
+        if (w.isFinisher) {
+          sfxTaurusFinisherImpact();
+          // Big impact burst at the player's position.
+          for (let k = 0; k < 80; k++) {
+            if (d.particlesRef.current.length >= PARTICLE_CAP) break;
+            const ang = Math.random() * Math.PI * 2;
+            const spd = 3 + Math.random() * 8;
+            d.particlesRef.current.push({
+              x: PLAYER.x, y: PLAYER.y,
+              vx: Math.cos(ang) * spd,
+              vy: Math.sin(ang) * spd - 1.5,
+              life: 48, maxLife: 48, size: 3 + Math.random() * 2,
+              color: Math.random() < 0.4 ? '#ffb048' : Math.random() < 0.75 ? '#ff4818' : '#780808',
+            });
+          }
+          d.shockwavesRef.current.push({
+            x: PLAYER.x, y: PLAYER.y, radius: 10, maxRadius: 420,
+            color: 'rgba(255, 100, 40, ALPHA)',
+          });
+          d.shakeMagRef.current = Math.max(d.shakeMagRef.current, 22);
+          d.shakeUntilRef.current = Math.max(d.shakeUntilRef.current, time + 1000);
+          if (isInvulnerable(d, time)) {
+            // Genuinely invulnerable — survive the meteor (extremely rare —
+            // requires precise dodge or mid-godmode timing).
+            d.statsRef.current.dodgesSuccessful += 1;
+            d.damageTextsRef.current.push({
+              x: PLAYER.x, y: PLAYER.y - 40,
+              value: 'DODGE', life: 60, maxLife: 60, color: '#90f0ff',
+            });
+            // The finisher is spent — re-arm the fight so the boss can be
+            // killed by other means (meteor gone, can't respawn until the
+            // trigger condition is rechecked). Flip finisherActive off so
+            // normal phrases resume.
+            if (d.bossRef.current) d.bossRef.current.finisherActive = false;
+            d.setTaurusFinisher(false);
+            if (d.bossRef.current) {
+              d.bossRef.current.nextAttackAt = time + 1400;
+              d.bossRef.current.nextPhraseAt = time + 900;
+            }
+          } else {
+            applyDamageToPlayer(d, MAX_HEALTH * 3, time);
+            // If grace veil fired, the player survived — same recovery
+            // path as the dodge branch above (meteor is gone, fight
+            // resumes). Detect via whether HP is still > 0.
+            if (d.healthRef.current > 0) {
+              if (d.bossRef.current) d.bossRef.current.finisherActive = false;
+              d.setTaurusFinisher(false);
+              if (d.bossRef.current) {
+                d.bossRef.current.nextAttackAt = time + 1400;
+                d.bossRef.current.nextPhraseAt = time + 900;
+              }
+            }
+          }
+          continue;
         }
         // 0.3.1 — munchies no longer apply ZOOTED on contact. ZOOTED is
         // purely timer-based (tickZooted in the boss loop). A munchie
@@ -4111,6 +4403,12 @@ function spawnFireball(d: LoopDeps, w: Word): void {
   if (isBoss && w.isBossPhrase && w.typed === w.text) {
     const letters = w.text.replace(/ /g, '').length;
     bossDamage = Math.max(1, Math.ceil(letters / 7));
+    // 0.3.14 — finisher meteor completion guarantees a lethal blow. The
+    // meteor is THE final move; its typing has to drop Taurus no matter
+    // what his current HP is.
+    if (w.isFinisher && d.bossRef.current) {
+      bossDamage = d.bossRef.current.currentHp;
+    }
   }
   d.fireballsRef.current.push({
     x: PLAYER.x, y: PLAYER.y,
@@ -4125,6 +4423,52 @@ function spawnFireball(d: LoopDeps, w: Word): void {
 }
 
 function completeWord(d: LoopDeps, w: Word, idx: number, now: number): void {
+  // 0.3.14 — Taurus finisher meteor completion. Pyroclastic explosion at
+  // the meteor's current position before the normal phrase-damage
+  // fireball routes to the boss. The fireball still fires (spawnFireball
+  // earlier in handleCharLive), carries the lethal damage override, and
+  // defeatBoss picks up naturally when boss HP hits 0 — the death
+  // cutscene unfolds with the meteor explosion already lingering.
+  if (w.isFinisher) {
+    sfxTaurusFinisherExplode();
+    const mx = w.x + w.text.length * 7;
+    const my = w.y - 8;
+    // Three concentric shockwaves for scale.
+    d.shockwavesRef.current.push({x: mx, y: my, radius: 10, maxRadius: 240, color: 'rgba(255, 240, 180, ALPHA)'});
+    d.shockwavesRef.current.push({x: mx, y: my, radius: 14, maxRadius: 420, color: 'rgba(255, 120, 40, ALPHA)'});
+    d.shockwavesRef.current.push({x: mx, y: my, radius: 18, maxRadius: 640, color: 'rgba(220, 60, 20, ALPHA)'});
+    // Massive ember burst — 160 particles fanning out.
+    for (let k = 0; k < 160; k++) {
+      if (d.particlesRef.current.length >= PARTICLE_CAP) break;
+      const ang = Math.random() * Math.PI * 2;
+      const spd = 2 + Math.random() * 10;
+      d.particlesRef.current.push({
+        x: mx + (Math.random() - 0.5) * 40,
+        y: my + (Math.random() - 0.5) * 40,
+        vx: Math.cos(ang) * spd,
+        vy: Math.sin(ang) * spd - 1,
+        life: 48, maxLife: 48, size: 3 + Math.random() * 2.5,
+        color: Math.random() < 0.25 ? '#fff2c0' : Math.random() < 0.55 ? '#ffa040' : Math.random() < 0.85 ? '#ff4818' : '#780808',
+      });
+    }
+    // Weighty shake + screen flash.
+    d.shakeMagRef.current = Math.max(d.shakeMagRef.current, 24);
+    d.shakeUntilRef.current = Math.max(d.shakeUntilRef.current, now + 1200);
+    d.hitFlashUntilRef.current = Math.max(d.hitFlashUntilRef.current, now + 700);
+    // Big floating "METEOR FELLED" text above the explosion.
+    d.damageTextsRef.current.push({
+      x: mx, y: my - 40,
+      value: 'METEOR FELLED',
+      life: 180, maxLife: 180,
+      color: '#ffe088',
+      big: true,
+    });
+    // Flip finisherActive off — the boss is about to die anyway but
+    // the flag needs to clear so defeatBoss's timeouts can fire normally.
+    if (d.bossRef.current) d.bossRef.current.finisherActive = false;
+    d.setTaurusFinisher(false);
+  }
+
   // JESSYKA full heal + blessed aura.
   if (w.isSpecial) {
     for (let i = 0; i < 80; i++) {
@@ -4349,6 +4693,7 @@ type RenderProps = {
   afromanGrooving: boolean;
   taurusBossPhase: 'hidden' | 'idle' | 'attack' | 'dying';
   taurusBossHit: boolean;
+  taurusFinisher: boolean;
 };
 
 function renderAppTree(p: RenderProps) {
@@ -4401,7 +4746,7 @@ function renderAppTree(p: RenderProps) {
               Mounts whenever the Taurus sprite is on stage (intro→idle→
               attack→dying) so the scene is live for the whole fight. */}
           {p.taurusBossPhase !== 'hidden' && (
-            <div className="absolute inset-0 z-[1] pointer-events-none">
+            <div className={`absolute inset-0 z-[1] pointer-events-none ${p.taurusFinisher ? 'taurus-finisher-active' : ''}`}>
               <TaurusArena hit={p.taurusBossHit} />
             </div>
           )}
@@ -4454,7 +4799,7 @@ function renderAppTree(p: RenderProps) {
                   : '/TaurusIDLE.png'
                 }
                 alt="Taurus Demon"
-                className={`taurus-boss-sprite ${p.taurusBossHit ? 'is-hit' : ''} ${p.taurusBossPhase === 'dying' ? 'is-dying' : ''}`}
+                className={`taurus-boss-sprite ${p.taurusBossHit ? 'is-hit' : ''} ${p.taurusBossPhase === 'dying' ? 'is-dying' : ''} ${p.taurusFinisher ? 'is-finisher' : ''}`}
                 draggable={false}
               />
             </>
