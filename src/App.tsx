@@ -388,16 +388,40 @@ export default function App() {
     return () => { if (blessedTimeoutRef.current !== null) window.clearTimeout(blessedTimeoutRef.current); };
   }, []);
 
-  // Viewport-fit scale.
+  // Viewport-fit scale. 0.3.16 — also listens to the VisualViewport API so
+  // the frame shrinks when the soft keyboard opens on mobile (iOS Safari
+  // doesn't fire a window.resize when the keyboard appears — only
+  // visualViewport.resize changes). Without this, the 768 px tall frame
+  // stays at its pre-keyboard scale and the bottom half gets covered by
+  // the on-screen keyboard.
+  // `viewportH` is also tracked separately so the outer wrapper can
+  // collapse to the visible area — otherwise the flex-center positions
+  // the scaled frame in the middle of the FULL viewport, which means it
+  // still overlaps the keyboard.
+  const [viewportH, setViewportH] = useState(() =>
+    typeof window !== 'undefined'
+      ? (window.visualViewport?.height ?? window.innerHeight)
+      : 0,
+  );
   useEffect(() => {
     const onResize = () => {
-      const sx = window.innerWidth / DESIGN_W;
-      const sy = window.innerHeight / DESIGN_H;
+      const vv = window.visualViewport;
+      const vw = vv ? vv.width : window.innerWidth;
+      const vh = vv ? vv.height : window.innerHeight;
+      const sx = vw / DESIGN_W;
+      const sy = vh / DESIGN_H;
       setScale(Math.min(sx, sy) * 0.98);
+      setViewportH(vh);
     };
     onResize();
     window.addEventListener('resize', onResize);
-    return () => window.removeEventListener('resize', onResize);
+    window.visualViewport?.addEventListener('resize', onResize);
+    window.visualViewport?.addEventListener('scroll', onResize);
+    return () => {
+      window.removeEventListener('resize', onResize);
+      window.visualViewport?.removeEventListener('resize', onResize);
+      window.visualViewport?.removeEventListener('scroll', onResize);
+    };
   }, []);
 
   // Menu music on menu phase; stop all when unmounting.
@@ -1069,6 +1093,7 @@ export default function App() {
   // RENDER_PLACEHOLDER
   return renderAppTree({
     phase, paused, scale, settings,
+    viewportH,
     showSettings, setShowSettings,
     showSecretAsk, setShowSecretAsk,
     showDevPanel, setShowDevPanel,
@@ -4627,6 +4652,12 @@ type RenderProps = {
   phase: Phase;
   paused: boolean;
   scale: number;
+  /** Visible viewport height in CSS pixels. On mobile this shrinks when
+   *  the soft keyboard opens; the outer wrapper uses it as its explicit
+   *  height so the scaled frame stays centered in the VISIBLE area
+   *  rather than the full dvh viewport (which doesn't shrink for the
+   *  keyboard). */
+  viewportH: number;
   settings: ReturnType<typeof useSettings>[0];
   showSettings: boolean;
   setShowSettings: (v: boolean) => void;
@@ -4707,7 +4738,8 @@ function renderAppTree(p: RenderProps) {
 
   return (
     <div
-      className={`w-full h-[100dvh] bg-black flex items-center justify-center font-serif text-[#d1c7b7] overflow-hidden ${highContrastClass} ${colorblindClass} ${reduceMotionClass} ${zootedClass}`}
+      className={`w-full bg-black flex items-center justify-center font-serif text-[#d1c7b7] overflow-hidden ${highContrastClass} ${colorblindClass} ${reduceMotionClass} ${zootedClass}`}
+      style={{height: p.viewportH ? p.viewportH + 'px' : '100dvh'}}
       onClick={() => {
         if ((p.phase === 'zone' || p.phase === 'boss') && !p.paused && p.mobileInputRef.current) {
           p.mobileInputRef.current.focus();
@@ -4719,7 +4751,7 @@ function renderAppTree(p: RenderProps) {
         ref={p.mobileInputRef}
         type="text"
         data-game-relay
-        className="absolute top-[-100px] left-0 opacity-0"
+        className="absolute top-1/2 left-1/2 w-px h-px opacity-0 pointer-events-none -z-10"
         value=""
         onBlur={() => p.setIsMobileFocused(false)}
         onChange={(e) => { const v = e.target.value; if (v.length > 0) p.handleChar(v[v.length - 1]); }}
