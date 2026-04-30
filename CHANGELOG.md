@@ -4,6 +4,84 @@ All notable changes to Cursed Echoes. Format loosely follows [Keep a Changelog](
 
 ---
 
+## [0.3.17] — Victory screen cathedral redesign + dev-menu auto-unpauses
+
+Two parallel tasks: the post-Gwyn reveal gets the same cathedral-level production polish the rest of the game has, and dev-menu actions no longer leave you stuck on the pause screen.
+
+### Victory — full cathedral redesign
+
+The 0.3.16 Victory was a flat list of stats over a simple gold vignette. Now it's a staged cinematic framed as a gothic cathedral reveal — god rays pouring through the rose window, stained-glass light on both flanks, a pointed archway silhouette, dark stone pillars, and a proper multi-layer bonfire centrepiece with the broken-sword icon.
+
+#### Backdrop
+
+Nine stacked layers, all sized to fill the frame corners-to-corners, all staggered-revealed:
+
+- **`.vic-sky`** — twilight vertical gradient (indigo-black → charred amber at the floor). 1.6 s fade-in.
+- **`.vic-rose-window`** — 480 × 480 px conic-gradient disc at top-centre with six hue wedges (amber / indigo / ruby / cobalt / gold / forest), 60 s rotation, radial mask so edges feather into the sky. Scales in over 2 s.
+- **`.vic-rays`** — three layered linear-gradient beams sweeping across the full viewport on a 14 s loop, `mix-blend-mode: screen` so they brighten the atmosphere.
+- **`.vic-arch`** — pointed gothic arch silhouette via `clip-path: polygon(0 100%, 0 40%, 50% 0, 100% 40%, 100% 100%)` with an inner cutout. Rises from below on reveal.
+- **`.vic-pillars-left` / `.vic-pillars-right`** — dark stone column silhouettes at the frame edges with repeating-linear-gradient mortar stripes.
+- **`.vic-stained-left` / `.vic-stained-right`** — three blurred colour ellipses per side (purple / blue / orange on the left, gold / green / rose on the right) at `mix-blend-mode: screen`, `filter: blur(30px)` — reads as stained-glass window light bleeding through.
+- **`.vic-ash`** — 7 radial-gradient specks rising continuously across the full width.
+- **`.vic-floor-shine`** — soft gold radial at the bottom so the bonfire reflects onto the cathedral floor.
+
+#### Bonfire centrepiece
+
+Replaces the old flat 60 × 140 blob. Now a 280 × 200 composition:
+
+- **`.vic-bonfire-halo`** — outer radial glow with `blur(6px)`, pulsing 3.2 s.
+- **`.vic-bonfire-rays`** — 600 × 600 conic gradient sunburst behind the flame, 28 s rotation, radial mask so the centre stays clear.
+- **`.vic-bonfire-core`** — 60 × 60 bright white-amber radial orb, 0.5 s scale-pulse.
+- **`.vic-bonfire-flame-1 / 2 / 3`** — three stacked teardrop-shaped radial gradients at decreasing sizes (120/80/40 wide, 200/160/120 tall), staggered `vicBonfireFlame` flicker keyframe with skew + scaleY — the inner flame reads as the hottest.
+- **`.vic-bonfire-sword`** — CSS broken sword stuck in the pile: 4 × 110 vertical blade with `::before` crossguard and `::after` pommel. The classic Dark Souls bonfire icon.
+- **`.vic-bonfire-logs`** — 100 × 20 log base with repeating-linear-gradient striping + a gold drop-shadow cast upward.
+- **`.vic-bonfire-ember-1 / 2 / 3`** — three 3 × 3 embers drifting upward on a 3.2 s loop, staggered delays so one is always mid-flight.
+
+#### Three-column gothic stat plate
+
+Mirrors the GameOver layout (sibling screens now feel like a pair):
+
+- **THE ASCENT** — hero card. Souls at 36 px amber-cream. Max Combo at 28 px flanked by the earned rank badge image + italic rank label (`topRank.label`). Time at the bottom. Diamond-sigil dividers between stats.
+- **THE PILGRIMAGE** — dotted-leader inventory. Accuracy, Words/min, Bosses felled, Words banished, Projectiles parried, Dodges, Estus drunk. **Perfect parries** line appears only if > 0, in secret-pink. **Biggest hit taken** line appears only if > 0, in danger-red.
+- **ACCOLADES** — title pills that slide in staggered 120 ms apart. Dynamic: `LORD OF CINDER` (always, cinder accent), `SECRET ROUTE` (if AfroMan felled, pink accent with ✦ sigil), `IMMACULATE` (if accuracy ≥ 95 %, gold), `PERFECT TIMING` (if ≥ 5 perfect parries, gold), `[S/SS/SSS] RANK` (if top rank, steel accent with ◆ sigil), `NIMBLE` (if ≥ 20 dodges, steel). Each pill has a left-edge star/sigil and a detail line underneath.
+
+Each card is a dark parchment panel with corner brackets (`::before` TL / `::after` BR), `radial-gradient` top-glow, sigil-flanked header (`✦ THE ASCENT ✦`), matching the GameOver treatment.
+
+#### Title + subtitle + secret badge
+
+- **Title** `VICTORY ACHIEVED` at 58 px Cinzel with a **gold gradient** (`#fff2c4 → #ffd280 → #c9892a`) via `background-clip: text`, double drop-shadow glow, new `vicTitleReveal` keyframe (0 → scale-punch at 1.08 → settle at 1) over 1.8 s starting 800 ms after mount, then a 4.5 s `vicTitlePulse` loop.
+- **Subtitle** "The First Flame is yours to kindle." fading in at 1.8 s.
+- **Sigil bar** above the title — `✦ line ◆ line ✦` in soft gold.
+- **Secret-route badge** (same structure as GameOver) below the subtitle when `stats.secretBossDefeated`.
+
+#### CTA
+
+**`Begin Anew`** upgraded from a thin outline to a gold-framed gothic CTA with flanking ✦ sigils, gradient fill, brighter border glow on hover, focus-visible ring. `autoFocus` so Enter restarts after the fade-in completes.
+
+#### Staggered reveal cadence
+
+Matches GameOver beat-timing: 400 ms cathedral + 600 ms rays + 800 ms title + 1800 ms subtitle + 2200 ms bonfire + 2600 ms columns + 2700–3300 ms accolade pills + 3200 ms CTA + 3400 ms dev.
+
+### Dev-menu → auto-close pause
+
+Bug: if you opened the dev console from the pause screen and then selected anything (boss jump, cheat, etc.), the action fired but the pause screen stayed up. After the cutscene / new phase, `paused` was still true, so the pause overlay rendered again on top of the fresh gameplay — you had to press Esc to actually resume.
+
+Every `dev*` callback now calls `setPaused(false)` in addition to the existing `setShowDevPanel(false)`. Applies to:
+
+- Jumps: `devJumpToZone`, `devJumpToBoss`, `devJumpToVictory`, `devOpenBossSelect`
+- Cheats: `devHeal`, `devGiveEstus`, `devAddCombo`, `devKillAllWords`, `devTriggerLightning`, `devResetSaveData`, `devSpawnJessyka`, `devAddZooted`, `devClearZooted`, `devSkipBossIntro`
+
+The dev-gate close (X button, backdrop click) still only closes the dev panel — pause stays if you arrived there through it.
+
+### Files touched
+
+- `src/screens/Victory.tsx` — complete rewrite. Cathedral backdrop layers, bonfire centrepiece markup, 3-column stat plate, accolade pills computed from stats, gold-framed Begin Anew CTA. Same prop contract.
+- `src/index.css` — `.vic-*` family (~360 LOC new): sky + rose-window + rays + arch + pillars + stained-glass + ash + floor-shine + title + sub + secret-badge + 11-element bonfire + card system + stat list + accolade pills + CTA + keyframes (`vicSkyFade`, `vicRoseSpin`, `vicRoseFade`, `vicRaysSweep`, `vicRaysFade`, `vicArchRise`, `vicPillarSlide`, `vicStainedFade`, `vicAshRise`, `vicAshFade`, `vicTitleReveal`, `vicTitlePulse`, `vicSubFade`, `vicBonfireHaloPulse`, `vicBonfireRaysSpin`, `vicBonfireCorePulse`, `vicBonfireFlame`, `vicBonfireEmber`, `vicAccoladeIn`).
+- `src/App.tsx` — `setPaused(false)` added to all 14 dev callbacks.
+- `package.json` + `src/version.ts` — 0.3.17.
+
+---
+
 ## [0.3.16] — Mobile soft-keyboard fix: VisualViewport-aware scaling + container sizing
 
 Bug: on mobile, opening the soft keyboard (via tapping into the play area) covered roughly half the game frame. Typing still worked, but the player couldn't see the bottom half of the action — where the player sprite, bottom-of-screen projectiles, and half the words live.
