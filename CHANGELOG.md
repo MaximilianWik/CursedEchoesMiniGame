@@ -4,6 +4,22 @@ All notable changes to Cursed Echoes. Format loosely follows [Keep a Changelog](
 
 ---
 
+## [0.3.10] — Jessyka: remember word target across projectile shielding
+
+Fix for a targeting regression introduced by 0.3.9's projectile-priority shielding.
+
+### Bug
+
+When Jessyka was mid-word and a projectile entered the field, she would correctly switch to shielding — but the priority-1 branch nulled her `targetId` and `lettersFired` and released the word's `jessykaTarget` claim. Once the projectile was dead, `tryPickJessykaTarget` ran fresh and picked whatever the highest-threat/nearest word was at that instant — frequently a different word than the one she had been typing. Result: the original word was left half-finished, hovering with a few Jessyka-typed letters and no one claiming the rest.
+
+### Fix
+
+`updateJessyka` no longer clears the word target when switching to projectile shielding. `targetId`, `lettersFired`, and the word's `jessykaTarget` flag all persist across the shield interval. When the projectile is gone, the existing validation in priority-2 resumes firing kisses from exactly the letter index she left off at. If the word genuinely died during shielding (player typed it, contact damage, off-screen), the `wIdx === -1` branch still nulls and repicks as before — so there is no stuck-target failure mode.
+
+Side effect: the word stays claimed (`jessykaTarget: true`) during shielding, meaning the player cannot steal-type it mid-shield. Previous behaviour (0.3.9) allowed the player to grab it during the shield window. This is an intentional trade — consistency of her finishing what she started beats the occasional racing opportunity.
+
+---
+
 ## [0.3.9] — Jessyka: projectile-priority shielding, broader target pool, welcome veil, stored-veil glow
 
 Four interlocking Jessyka behaviour changes from playtest feedback.
