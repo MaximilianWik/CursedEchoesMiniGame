@@ -4,6 +4,48 @@ All notable changes to Cursed Echoes. Format loosely follows [Keep a Changelog](
 
 ---
 
+## [0.3.8] — ZOOTED 3 wobble no longer shrinks the playfield
+
+Bug: when the AfroMan fight hit ZOOTED level 3, the playable frame visibly snapped to a smaller size (surrounded by black letterboxing) for the duration of the wobble animation. The intended effect was a subtle rotation tilt; the unintended effect was the viewport-fit scale being wiped out entirely.
+
+### Root cause
+
+The `.ce-frame` element in `App.tsx` is sized 1024 × 768 (the game's native design resolution) and fit to the viewport via an inline `style={{transform: scale(${p.scale})}}`. The `p.scale` factor is computed on mount + resize from `window.innerWidth / DESIGN_W` to keep the frame filling the viewport.
+
+The 0.3.0 ZOOTED-3 effect added:
+
+```css
+.afroman-zooted-3 .ce-frame { animation: zootedWobble 1.2s ...; }
+@keyframes zootedWobble {
+  0%, 100% { transform: rotate(0deg); }
+  25%      { transform: rotate(0.6deg); }
+  75%      { transform: rotate(-0.6deg); }
+}
+```
+
+Animation keyframes writing `transform: rotate(...)` **replace** the inline `transform: scale(...)` for the animation's entire duration, because both write to the single `transform` shorthand. The scale is only re-applied at 0% if it's explicitly in the keyframe. Result: the frame drops back to its native 1024 × 768 pixel size for the 1.2 s loop, which on larger viewports looks like the playfield just shrank to the middle of the screen.
+
+### Fix
+
+Switched the keyframe to use the individual `rotate` CSS property (independent of the `transform` shorthand):
+
+```css
+@keyframes zootedWobble {
+  0%, 100% { rotate: 0deg; }
+  25%      { rotate: 0.6deg; }
+  75%      { rotate: -0.6deg; }
+}
+```
+
+Per CSS spec, `translate`, `rotate`, and `scale` individual properties compose *after* the `transform` shorthand, so the inline `transform: scale(p.scale)` and the keyframe `rotate: X` stack correctly — the frame stays at viewport-fit scale while the tilt animates. Supported in Chrome 104+ / Firefox 72+ / Safari 14.1+, all fine for the game's browser target.
+
+### Files touched
+
+- `src/index.css` — `zootedWobble` keyframes: `transform: rotate(...)` → `rotate: ...deg`.
+- `package.json` + `src/version.ts` — 0.3.8.
+
+---
+
 ## [0.3.7] — Death-screen fits the frame (Try Again visible, secret gate not clipped)
 
 0.3.5's revamp had a vertical-overflow bug: when the secret-route badge was showing, the total stack (YOU DIED + badge + columns + graph + password gate + Try Again) summed to ~780 px inside a 768 px frame, so the Try Again button fell off the bottom and the password gate's lower border clipped.
