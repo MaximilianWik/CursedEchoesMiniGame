@@ -741,6 +741,7 @@ export default function App() {
     initAudio(); resumeAudio();
     resetRunState();
     setShowDevPanel(false);
+    setPaused(false);
     enterZone(idx);
   }, [enterZone, resetRunState]);
 
@@ -755,6 +756,7 @@ export default function App() {
     setZoneStyling(bgStateRef.current, ZONES[zoneIdx].weather, ZONES[zoneIdx].tintColor, ZONES[zoneIdx].id as BgState['zoneId']);
     statsRef.current.zoneReached = zoneIdx;
     setShowDevPanel(false);
+    setPaused(false);
     if (bossId === 'afroman') {
       statsRef.current.secretBossChosen = true;
       phaseRef.current = 'boss-intro-afroman';
@@ -779,24 +781,38 @@ export default function App() {
     zoneIdxRef.current = ZONES.length - 1;
     setFinalSnapshot(snapshotFromRefs());
     setShowDevPanel(false);
+    setPaused(false);
     phaseRef.current = 'victory';
     setPhase('victory');
     playMusic('victory');
   }, [resetRunState]);
 
-  const devHeal = useCallback(() => { healthRef.current = MAX_HEALTH; }, []);
-  const devGiveEstus = useCallback(() => { estusChargesRef.current = MAX_ESTUS; }, []);
+  // 0.3.17 — cheats that don't change phase still close both the dev
+  // panel and the pause menu so the player can immediately see the
+  // effect land on the live arena. Previously the pause screen stayed
+  // up after a Heal / Give Estus / +Combo / etc., forcing an extra ESC.
+  const devHeal = useCallback(() => {
+    healthRef.current = MAX_HEALTH;
+    setShowDevPanel(false); setPaused(false);
+  }, []);
+  const devGiveEstus = useCallback(() => {
+    estusChargesRef.current = MAX_ESTUS;
+    setShowDevPanel(false); setPaused(false);
+  }, []);
   const devAddCombo = useCallback((n: number) => {
     comboRef.current += n;
     if (comboRef.current > maxComboRef.current) maxComboRef.current = comboRef.current;
+    setShowDevPanel(false); setPaused(false);
   }, []);
   const devKillAllWords = useCallback(() => {
     wordsRef.current = [];
     projectilesRef.current = [];
     activeWordRef.current = null;
+    setShowDevPanel(false); setPaused(false);
   }, []);
   const devTriggerLightning = useCallback(() => {
     triggerLightning(bgStateRef.current, performance.now());
+    setShowDevPanel(false); setPaused(false);
   }, []);
   // ─── 0.3.1 dev actions ───────────────────────────────────────
   /** Wipe the boss-select gate + highscores. Surfaces the fork again on
@@ -805,6 +821,7 @@ export default function App() {
     resetBossSelectGate();
     resetHighscores();
     setHighscores([]);
+    setShowDevPanel(false); setPaused(false);
   }, []);
   /** Force-spawn Jessyka RIGHT NOW (no estus cost). Mirrors the Q-summon
    *  path but bypasses the charge / intro / already-here guards so the
@@ -838,6 +855,7 @@ export default function App() {
     setJessykaDespawning(false);
     bossAnnouncementRef.current = {text: 'DEV · LOVE SUMMONED', life: 120, color: '#ffb8d8'};
     sfxJessykaSummon();
+    setShowDevPanel(false); setPaused(false);
   }, []);
   /** Nudge ZOOTED +1. Caps at ZOOTED_CAP. The timer reschedules so the next
    *  passive tick follows the dev bump by the full ZOOTED_TICK_INTERVAL_SEC. */
@@ -848,6 +866,7 @@ export default function App() {
       ? 0
       : performance.now() + ZOOTED_TICK_INTERVAL_SEC * 1000;
     setZootedLevel(next as 0 | 1 | 2 | 3);
+    setShowDevPanel(false); setPaused(false);
   }, []);
   /** Clear ZOOTED → 0. Resets the timer so the next passive tick is a full
    *  interval away (you get a fresh clean window). */
@@ -855,6 +874,7 @@ export default function App() {
     zootedStacksRef.current = 0;
     zootedDecayAtRef.current = 0;
     setZootedLevel(0);
+    setShowDevPanel(false); setPaused(false);
   }, []);
   /** Instant-skip the current boss intro cutscene so attacks + phrases can
    *  start immediately. Works on every boss; AfroMan's 20 s React overlay
@@ -862,10 +882,11 @@ export default function App() {
    *  canvas-driven silhouette intros of the three canonical bosses. */
   const devSkipBossIntro = useCallback(() => {
     const b = bossRef.current;
-    if (!b || b.introStart === 0) return;
+    if (!b || b.introStart === 0) { setShowDevPanel(false); setPaused(false); return; }
     b.introStart = 0;
     b.nextAttackAt = performance.now() + 400;
     b.nextPhraseAt = performance.now() + 200;
+    setShowDevPanel(false); setPaused(false);
   }, []);
   /** Open the boss-select fork overlay right now — for QA of the choice UX
    *  without having to clear the gate + replay Undead Burg. Resets the
@@ -879,6 +900,7 @@ export default function App() {
     zoneIdxRef.current = Math.max(0, ZONES.findIndex(z => z.bossId === 'taurus'));
     statsRef.current.zoneReached = zoneIdxRef.current;
     setShowDevPanel(false);
+    setPaused(false);
     phaseRef.current = 'boss-select';
     setPhase('boss-select');
   }, [resetRunState]);
