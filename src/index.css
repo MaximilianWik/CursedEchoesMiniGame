@@ -65,6 +65,34 @@
       drop-shadow(0 0 64px rgba(255, 180, 60, 0.55))
       brightness(1.2);
   }
+  /* 0.3.9 — Jessyka's stored-veil glow. Layers a pink drop-shadow over
+     the base orange aura with a breathing 1.6 s pulse. Active whenever
+     her grace shield is available (set from updateSprites based on
+     jessykaRef.graceUsed). Dropped the moment the grace is consumed
+     (tryJessykaGraceShield → graceUsed = true). Reads as the player's
+     shield carrying her love-charge, ready to fire on the next incoming
+     hit. Other state classes (is-drinking / is-estus-godmode) override
+     this filter by animation-order when both are active — expected,
+     those effects are brief. */
+  .player-sprite.has-veil {
+    animation:
+      playerFloat 2.4s ease-in-out infinite,
+      veilShieldPulse 1.6s ease-in-out infinite;
+  }
+  @keyframes veilShieldPulse {
+    0%, 100% {
+      filter:
+        drop-shadow(0 0 14px rgba(255, 120, 40, 0.3))
+        drop-shadow(0 0 18px rgba(255, 130, 210, 0.7))
+        drop-shadow(0 0 34px rgba(255, 80, 180, 0.4));
+    }
+    50% {
+      filter:
+        drop-shadow(0 0 14px rgba(255, 120, 40, 0.3))
+        drop-shadow(0 0 28px rgba(255, 160, 225, 1))
+        drop-shadow(0 0 56px rgba(255, 100, 200, 0.72));
+    }
+  }
 
   /* ═══════════════════════════════════════════════════════════ */
   /* Jessyka companion — lovebomb spawn + angelic despawn         */

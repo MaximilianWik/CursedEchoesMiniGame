@@ -3,7 +3,7 @@
 A gothic typing trial. Four zones. Three bosses. Banish the echoes, parry the spells, type the phrases, kindle the fading flame.
 
 **Live:** https://cursedechoes.vercel.app/
-**Current version:** `0.3.8` — ZOOTED level 3 wobble no longer shrinks the playfield (was clobbering the viewport-fit scale transform). See [CHANGELOG.md](./CHANGELOG.md) for full history. Version is shown in-game on the menu, pause, settings, game-over and victory screens.
+**Current version:** `0.3.9` — Jessyka now auto-protects the player from projectiles in both zones and boss fights, targets summoned minions + caster projectiles, casts a free initial veil on spawn, and the player's shield glows pink while her stored veil is available. See [CHANGELOG.md](./CHANGELOG.md) for full history. Version is shown in-game on the menu, pause, settings, game-over and victory screens.
 
 https://github.com/user-attachments/assets/cc4d2332-4475-4e61-bd31-d33734f54dab
 

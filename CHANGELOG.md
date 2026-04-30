@@ -4,6 +4,60 @@ All notable changes to Cursed Echoes. Format loosely follows [Keep a Changelog](
 
 ---
 
+## [0.3.9] — Jessyka: projectile-priority shielding, broader target pool, welcome veil, stored-veil glow
+
+Four interlocking Jessyka behaviour changes from playtest feedback.
+
+### Unified projectile-priority targeting
+
+Before: the two summon sources had split targeting — `summonSource: 'estus'` (Q) chased boss projectiles OR targeted zone words depending on phase; `summonSource: 'jessyka-word'` only targeted words. Neither intercepted caster projectiles, and neither shielded the player from projectiles while typing a word.
+
+Now a single unified flow runs regardless of summon source:
+
+1. **Priority 1 — projectiles.** Every `JESS_KISS_INTERVAL_MS` tick, scan for any un-deflected projectile (boss AND caster both qualify). If one exists, fire a homing kiss at it. If she was mid-word, drop the word (release `jessykaTarget`, reset `lettersFired`) so the player can pick it up; she'll re-target when the air is clear.
+2. **Priority 2 — word typing.** If nothing is in the air, pick a word target and fire kisses down its letters as before.
+
+This applies in **zones** (where she now shields from caster projectiles — protecting the player was never part of her job before 0.3.9) and in **boss fights** (where she now sees caster projectiles from boss-summoned casters, not just the boss's own projectiles).
+
+Code: the `fromBoss` filter was dropped from `fireJessykaProjectileKiss`'s target search; the split `summonSource === 'estus'` sub-branches in `updateJessyka` were merged into one priority-ordered active/leaving path.
+
+### Expanded word target pool
+
+`tryPickJessykaTarget` previously excluded `chanter` kind, `isBossAttack`, and `isBossSummoned` — so in a boss fight the summoner + caster minions and word-pattern attacks sat untyped while she waited for zone-style words that would never spawn.
+
+New filter: exclude only `isSpecial` (JESSYKA) and `isBossPhrase` (the player's job). Everything else is fair game — chanters, casters, their minion spawns, word-pattern boss attacks.
+
+A new sort priority comes along with this: high-threat targets first (`isBossSummoned` × 2 + `isBossAttack` × 1), then distance-to-player within the same threat tier. Keeps her chewing through summoners and caster words before they pile up.
+
+### Free initial veil on spawn
+
+Every fresh Jessyka spawn now fires **one free grace-veil burst** automatically when she completes her spawn animation (`spawning → active` transition). Same full effect as the stored veil — wall of love particles, expanding shockwave rings, push all hostile words outward, deflect all projectiles, 1.4 s i-frames — but it **does not consume the stored veil**. She arrives, clears the board, and still has one in reserve for the next emergency.
+
+Gated by a new `spawnVeilFired: boolean` flag on `JessykaCompanion` so chained refreshes (player completes JESSYKA while she's still present) don't re-fire the initial — only a truly fresh spawn does. Chained refreshes still reset `graceUsed` to false, so stored-veil behaviour is unchanged.
+
+Implementation: `tryJessykaGraceShield` was renamed to `fireJessykaVeil(d, time, isInitial)` internally; the old name is preserved as a one-liner wrapper for the damage-path call site. When `isInitial=true`, the `state` / `graceUsed` gates are bypassed.
+
+### Player shield glows pink while veil is stored
+
+When a stored veil is available (`jessykaRef.current.graceUsed === false` and she's `state === 'active'`), the player sprite gets a `.has-veil` class that adds a layered pink drop-shadow on top of the base orange aura, breathing on a 1.6 s pulse (`veilShieldPulse` keyframes in `index.css`). Reads as "the shield is humming with her love-charge." Dropped the exact frame `graceUsed` flips to true — so the player gets immediate visual confirmation when her stored veil absorbed a hit.
+
+Toggled from `updateSprites` alongside `is-drinking` — same `classList.add/remove` pattern, no React re-render overhead. Other transient filter states (is-drinking / is-estus-godmode) still override via animation order when active; those effects are brief so they don't mask the veil glow for long.
+
+### Files touched
+
+- `src/App.tsx`
+  - `JessykaCompanion` gains `spawnVeilFired: boolean`; all three spawn sites initialise it.
+  - `tryJessykaGraceShield` refactored → `fireJessykaVeil(d, time, isInitial)` + thin wrapper.
+  - `updateJessyka`'s spawning→active transition fires `fireJessykaVeil(d, time, true)` once.
+  - Active/leaving branch unified: projectile-first priority, word fallback, clean 'leaving'→'despawning' transition.
+  - `fireJessykaProjectileKiss` no longer filters on `fromBoss`.
+  - `tryPickJessykaTarget` no longer excludes chanter kind / `isBossAttack` / `isBossSummoned`; new threat-weighted sort.
+  - `updateSprites` toggles the new `has-veil` class based on stored-veil availability.
+- `src/index.css` — new `.player-sprite.has-veil` + `veilShieldPulse` keyframes.
+- `package.json` + `src/version.ts` — 0.3.9.
+
+---
+
 ## [0.3.8] — ZOOTED 3 wobble no longer shrinks the playfield
 
 Bug: when the AfroMan fight hit ZOOTED level 3, the playable frame visibly snapped to a smaller size (surrounded by black letterboxing) for the duration of the wobble animation. The intended effect was a subtle rotation tilt; the unintended effect was the viewport-fit scale being wiped out entirely.
