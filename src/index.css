@@ -1700,10 +1700,18 @@
     filter: hue-rotate(30deg) saturate(1.4) blur(0.3px);
     animation: zootedWobble 1.2s ease-in-out infinite;
   }
+  /* 0.3.8 — use the individual `rotate` CSS property instead of the
+     `transform: rotate(...)` shorthand. The `.ce-frame` already carries
+     `transform: scale(p.scale)` as an inline style (applied by App.tsx to
+     fit the 1024×768 frame to the viewport). A keyframe that writes
+     `transform: rotate(...)` would replace the inline scale for the
+     duration of the animation, causing the frame to snap back to its
+     native size mid-fight. The individual `rotate` property composes
+     with `transform` rather than replacing it, so the scale persists. */
   @keyframes zootedWobble {
-    0%, 100% { transform: rotate(0deg); }
-    25%      { transform: rotate(0.6deg); }
-    75%      { transform: rotate(-0.6deg); }
+    0%, 100% { rotate: 0deg; }
+    25%      { rotate: 0.6deg; }
+    75%      { rotate: -0.6deg; }
   }
 
   /* Zooted leaf icons floating above the player. */
