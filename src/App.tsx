@@ -2234,15 +2234,12 @@ function updateJessyka(d: LoopDeps, ctx: CanvasRenderingContext2D, time: number)
         const fired = fireJessykaProjectileKiss(d, j, time);
         if (fired) {
           projectileHandled = true;
-          // Drop any sticky word target while she's shielding — she'll
-          // re-pick once projectiles are clear. Release the word's claim
-          // so the player can type it themselves if they want.
-          if (j.targetId !== null) {
-            const wIdx = d.wordsRef.current.findIndex(w => w.id === j.targetId);
-            if (wIdx !== -1) d.wordsRef.current[wIdx].jessykaTarget = false;
-            j.targetId = null;
-            j.lettersFired = 0;
-          }
+          // 0.3.10 — keep targetId + lettersFired + the word's jessykaTarget
+          // claim. When the projectile is dead she resumes the same word
+          // from exactly where she left off (fixes abandoned half-typed
+          // words when a projectile interrupts mid-word). The existing
+          // validation below handles the case where the word died during
+          // shielding (wIdx === -1 → repick).
         }
       }
     }
