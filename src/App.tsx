@@ -116,15 +116,21 @@ type JessykaCompanion = {
   lettersFired: number;     // how many kisses she has fired at the target
   nextKissAt: number;       // performance.now when she fires her next kiss
   castingUntil: number;     // sprite swap to kiss.png while time < this
-  // New in 0.2.6 — boss-fight estus summon variant. When 'estus', she ignores
-  // words entirely and homes kisses onto incoming boss projectiles instead.
+  // New in 0.2.6 — boss-fight estus summon variant (zone-extended in 0.3.1).
+  // The summonSource distinguishes spawn lifecycle (blessed-timer vs. auto-
+  // despawn) but targeting is unified now: she always prioritises shielding
+  // the player from projectiles before typing words (0.3.9).
   summonSource: 'jessyka-word' | 'estus';
   projectileTargetId: number | null;  // Projectile.id currently being chased
   autoDespawnAt: number;              // performance.now at which to force 'leaving' (0 = no auto-despawn)
-  // New in 0.2.8 — grace shield. Triggered automatically when an incoming
-  // projectile/word is about to damage the player. Once per spawn; a second
-  // Jessyka summon resets this flag.
+  // Grace veil (0.2.8 + 0.3.9). The "stored" veil — consumed once per spawn
+  // when incoming damage is about to land. A fresh spawn or chained JESSYKA
+  // refresh sets graceUsed back to false. Separate from spawnVeilFired: the
+  // initial veil on spawn is always free and doesn't touch this flag.
   graceUsed: boolean;
+  // 0.3.9 — whether this companion has already cast her free "hello" veil.
+  // Fires once on the spawning→active transition, NOT on a chained refresh.
+  spawnVeilFired: boolean;
 };
 
 type JessykaKiss = {
@@ -725,6 +731,7 @@ export default function App() {
       autoDespawnAt: now + JESS_SPAWN_MS + JESS_ESTUS_ACTIVE_MS
         * (ZONES[zoneIdxRef.current]?.id === 'kiln' ? 2 : 1),
       graceUsed: false,
+      spawnVeilFired: false,
     };
     setJessykaVisible(true);
     setJessykaDespawning(false);
@@ -1284,6 +1291,17 @@ function updateSprites(d: LoopDeps, time: number): void {
     const hasClass = img.classList.contains('is-drinking');
     if (drinking && !hasClass) img.classList.add('is-drinking');
     else if (!drinking && hasClass) img.classList.remove('is-drinking');
+
+    // 0.3.9 — pink "veil stored" glow on the player sprite. Active whenever
+    // Jessyka is live (post-spawn) AND her grace has not yet been spent.
+    // Renders as an animated pink drop-shadow layered over the normal
+    // orange glow (see `.player-sprite.has-veil` in index.css). Consumed
+    // when tryJessykaGraceShield flips graceUsed → true.
+    const j = d.jessykaRef.current;
+    const veilStored = j !== null && j.state === 'active' && !j.graceUsed;
+    const hasVeilClass = img.classList.contains('has-veil');
+    if (veilStored && !hasVeilClass) img.classList.add('has-veil');
+    else if (!veilStored && hasVeilClass) img.classList.remove('has-veil');
   }
   // Stamina regen.
   const staminaRegen = 0.6;
@@ -2187,91 +2205,84 @@ function updateJessyka(d: LoopDeps, ctx: CanvasRenderingContext2D, time: number)
     }
   }
 
-  // ── Spawn → active transition.
+  // ── Spawn → active transition. On first transition, fire the free
+  //    initial veil (doesn't consume the stored grace). spawnVeilFired
+  //    blocks re-firing on chained refreshes of the same companion.
   if (j.state === 'spawning' && time - j.spawnStart >= JESS_SPAWN_MS) {
     j.state = 'active';
+    if (!j.spawnVeilFired) {
+      j.spawnVeilFired = true;
+      fireJessykaVeil(d, time, true);
+    }
   }
 
   // ── Active / leaving: pick and fire on targets.
+  //    0.3.9 — unified targeting for both summon sources. Priority:
+  //      1. Any un-deflected projectile in flight (boss OR caster) → shoot
+  //         it immediately (protects the player; interrupts word typing).
+  //      2. Otherwise, pick a word target and fire kisses down its letters.
+  //    The JESSYKA-word variant still uses the "finish the word" exit
+  //    semantics (waits for the current word to complete before leaving).
+  //    The Q-summon still honours autoDespawnAt and exits instantly.
   if (j.state === 'active' || j.state === 'leaving') {
-    if (j.summonSource === 'estus') {
-      // 0.3.1 — Q-summon now works in zones too. Split sub-behaviour by
-      // whether there's a live boss firing projectiles:
-      //   - boss fight: chase boss projectiles (original 0.2.6 behaviour)
-      //   - zone:       target falling words (same code path as the
-      //                 word-summon variant, but honouring autoDespawnAt)
-      const hasBossProjectiles = d.phaseRef.current === 'boss'
-        && d.bossRef.current !== null
-        && !d.bossRef.current.defeated;
-
-      if (hasBossProjectiles) {
-        // Boss-fight variant — target boss projectiles. She picks a new
-        // projectile each shot (no sticky target since projectiles die on
-        // deflection). Fires as fast as JESS_KISS_INTERVAL_MS allows, and
-        // waits idle when nothing's in the air.
-        if (time >= j.nextKissAt) {
-          const fired = fireJessykaProjectileKiss(d, j, time);
-          if (!fired) {
-            // Nothing to shoot — short backoff so we don't scan the array every frame.
-            j.nextKissAt = time + 120;
-          }
-        }
-      } else {
-        // Zone variant — identical semantics to the word-summon's targeting
-        // logic: pick a high-up, typable word; fire kisses down the letters;
-        // release on splice / completion; re-pick next frame.
-        if (j.targetId !== null) {
-          const wIdx = d.wordsRef.current.findIndex(w => w.id === j.targetId);
-          if (wIdx === -1) {
+    // Priority 1: projectile shield. Fires every JESS_KISS_INTERVAL_MS if
+    // there's anything un-deflected in the air.
+    let projectileHandled = false;
+    if (time >= j.nextKissAt) {
+      const hasProjectile = d.projectilesRef.current.some(p => !p.deflected);
+      if (hasProjectile) {
+        const fired = fireJessykaProjectileKiss(d, j, time);
+        if (fired) {
+          projectileHandled = true;
+          // Drop any sticky word target while she's shielding — she'll
+          // re-pick once projectiles are clear. Release the word's claim
+          // so the player can type it themselves if they want.
+          if (j.targetId !== null) {
+            const wIdx = d.wordsRef.current.findIndex(w => w.id === j.targetId);
+            if (wIdx !== -1) d.wordsRef.current[wIdx].jessykaTarget = false;
             j.targetId = null;
             j.lettersFired = 0;
-          } else {
-            const w = d.wordsRef.current[wIdx];
-            if (j.lettersFired < w.text.length && time >= j.nextKissAt) {
-              fireJessykaKiss(d, j, w, time);
-            }
           }
-        } else if (j.state !== 'leaving') {
-          tryPickJessykaTarget(d, j);
         }
       }
-      // Auto-despawn trigger applies to BOTH sub-modes.
-      if (j.state === 'active' && j.autoDespawnAt > 0 && time >= j.autoDespawnAt) {
-        j.state = 'leaving';
-      }
-      if (j.state === 'leaving') {
-        // Estus summon exits immediately — no "finish the word" semantics
-        // here (matches the original boss-fight behaviour).
-        j.state = 'despawning';
-        j.despawnStart = time;
-        d.setJessykaDespawning(true);
-        spawnJessykaAngelicBurst(d, time);
-      }
-    } else if (j.targetId !== null) {
-      // Validate current target.
-      const wIdx = d.wordsRef.current.findIndex(w => w.id === j.targetId);
-      if (wIdx === -1) {
-        // Target is gone (contact damage, etc). Release and re-pick next frame.
-        j.targetId = null;
-        j.lettersFired = 0;
-      } else {
-        const w = d.wordsRef.current[wIdx];
-        // Fire next kiss when due, and we still have letters to fire.
-        if (j.lettersFired < w.text.length && time >= j.nextKissAt) {
-          fireJessykaKiss(d, j, w, time);
+    }
+
+    // Priority 2: word target (only if she didn't just fire at a projectile).
+    if (!projectileHandled) {
+      if (j.targetId !== null) {
+        // Validate current target.
+        const wIdx = d.wordsRef.current.findIndex(w => w.id === j.targetId);
+        if (wIdx === -1) {
+          // Target is gone (contact damage, etc). Release and re-pick next frame.
+          j.targetId = null;
+          j.lettersFired = 0;
+        } else {
+          const w = d.wordsRef.current[wIdx];
+          if (j.lettersFired < w.text.length && time >= j.nextKissAt) {
+            fireJessykaKiss(d, j, w, time);
+          }
         }
-        // No further action until the word fully typed + splice happens in arrival handler.
-      }
-    } else {
-      // No target — pick one, unless we're leaving (then despawn).
-      if (j.state === 'leaving') {
-        j.state = 'despawning';
-        j.despawnStart = time;
-        d.setJessykaDespawning(true);
-        spawnJessykaAngelicBurst(d, time);
-      } else {
+      } else if (j.state !== 'leaving') {
+        // No target — pick one (unless leaving, then we fall through to
+        // the despawn transition below).
         tryPickJessykaTarget(d, j);
       }
+    }
+
+    // Auto-despawn trigger (Q-summon's estus variant honours this).
+    if (j.state === 'active' && j.autoDespawnAt > 0 && time >= j.autoDespawnAt) {
+      j.state = 'leaving';
+    }
+
+    // Leaving → despawning transition. The Q-summon exits immediately; the
+    // word-summon only exits when it has no word in flight. Either way, if
+    // she's leaving AND there's no word target AND no projectile just fired,
+    // commit to despawning now.
+    if (j.state === 'leaving' && j.targetId === null && !projectileHandled) {
+      j.state = 'despawning';
+      j.despawnStart = time;
+      d.setJessykaDespawning(true);
+      spawnJessykaAngelicBurst(d, time);
     }
   }
 
@@ -2290,20 +2301,35 @@ function updateJessyka(d: LoopDeps, ctx: CanvasRenderingContext2D, time: number)
 
 /** Prefer a high-up, non-boss, non-special, non-chanter word. Falls back to any. */
 function tryPickJessykaTarget(d: LoopDeps, j: JessykaCompanion): void {
-  // Only consider words that are actually on-screen — otherwise she fires
-  // kisses upward into the void at pre-spawn words at y=-20, which reads as
-  // "shooting at nothing". Lower bound of 10 matches the font baseline; the
-  // word's text is drawn ~15px above y (w.y - 14 in updateWords) so by y >= 10
-  // the glyphs are fully inside the play area.
+  // 0.3.9 — expanded target pool. She now removes boss-summoned chanters +
+  // casters (`isBossSummoned`), their spawned minions (`isBossAttack`), and
+  // word-pattern boss attacks from the trial — anything the player would
+  // otherwise have to manage alongside the boss phrase. The boss phrase
+  // itself (`isBossPhrase`) is still excluded: that's the player's job.
+  // JESSYKA specials (`isSpecial`) are excluded to preserve the chain-
+  // summon interaction. On-screen y-range is preserved so she never fires
+  // kisses upward into the void at pre-spawn words.
   const candidates = d.wordsRef.current.filter(w =>
-    !w.jessykaTarget && !w.isSpecial && !w.isBossPhrase && !w.isBossAttack
-    && w.kind !== 'chanter' && w.typed.length === 0
-    && !w.spawnAnim                                   // never target a word mid-spawn-animation
-    && w.y >= 10 && w.y <= DESIGN_H - 40,             // must be fully on-screen
+    !w.jessykaTarget
+    && !w.isSpecial
+    && !w.isBossPhrase
+    && w.typed.length === 0
+    && !w.spawnAnim
+    && w.y >= 10 && w.y <= DESIGN_H - 40,
   );
   if (candidates.length === 0) return;
-  // Sort by y ASC (topmost first) — "high up" preference.
-  candidates.sort((a, b) => a.y - b.y);
+  // Sort by threat: boss-summoned chanters + casters are a constant source
+  // of pressure, so clear them first. Then prefer anything close to the
+  // player (low on screen), then fall back to topmost for zone cleanup.
+  candidates.sort((a, b) => {
+    const aThreat = (a.isBossSummoned ? 2 : 0) + (a.isBossAttack ? 1 : 0);
+    const bThreat = (b.isBossSummoned ? 2 : 0) + (b.isBossAttack ? 1 : 0);
+    if (aThreat !== bThreat) return bThreat - aThreat;   // higher threat first
+    // Same threat tier — prefer the one closest to the player.
+    const aDist = Math.abs(a.y - PLAYER.y);
+    const bDist = Math.abs(b.y - PLAYER.y);
+    return aDist - bDist;
+  });
   const target = candidates[0];
   target.jessykaTarget = true;
   j.targetId = target.id;
@@ -2351,7 +2377,10 @@ function fireJessykaProjectileKiss(d: LoopDeps, j: JessykaCompanion, time: numbe
   let best: Projectile | null = null;
   let bestDist = Infinity;
   for (const p of d.projectilesRef.current) {
-    if (!p.fromBoss || p.deflected) continue;
+    // 0.3.9 — drop the `fromBoss` filter so she also intercepts caster
+    // projectiles (fromBoss: false, fired by summoner-spawned or zone
+    // casters). Only `deflected` is excluded — those are already doomed.
+    if (p.deflected) continue;
     const dx = p.x - PLAYER.x, dy = p.y - PLAYER.y;
     const dist = dx * dx + dy * dy;
     if (dist < bestDist) { best = p; bestDist = dist; }
@@ -3070,16 +3099,30 @@ function isInvulnerable(d: LoopDeps, time: number): boolean {
   return false;
 }
 
-/** Jessyka grace shield — a once-per-spawn defensive ability. When damage is
- *  about to land on the player, if she is active AND hasn't spent her grace
- *  yet, she veils the player in a love-explosion: cancels the hit, pushes all
- *  hostile words outward from the player, splices in-flight projectiles,
- *  grants brief post-explosion i-frames, and plays a heartwarming chord.
- *  Returns true when grace was spent (caller should skip damage). */
-function tryJessykaGraceShield(d: LoopDeps, time: number): boolean {
+/** Jessyka grace veil — the full "wall of love" defensive burst. Fires in
+ *  two contexts:
+ *    1. `isInitial=true` — the free welcome veil, cast once automatically
+ *       when she spawns in and transitions spawning → active. Does NOT
+ *       consume the stored veil (graceUsed stays false).
+ *    2. `isInitial=false` — the stored veil, consumed at most once per
+ *       spawn when incoming damage is about to land. Flips graceUsed to
+ *       true so it can't fire twice per companion.
+ *
+ *  Either way: cancels any pending hit, pushes all hostile words outward
+ *  from the player, deflects in-flight projectiles, grants brief post-
+ *  explosion i-frames, plays a heartwarming chord. Returns true if the
+ *  veil actually fired (caller of the damage-path variant should then
+ *  skip the normal damage application).
+ */
+function fireJessykaVeil(d: LoopDeps, time: number, isInitial: boolean): boolean {
   const j = d.jessykaRef.current;
-  if (!j || j.state !== 'active' || j.graceUsed) return false;
-  j.graceUsed = true;
+  if (!j) return false;
+  if (!isInitial) {
+    // Damage-path variant — gate on active state + unspent grace.
+    if (j.state !== 'active' || j.graceUsed) return false;
+    j.graceUsed = true;
+  }
+  // Initial variant: no gating. Fires unconditionally for a fresh companion.
 
   // 1.4 s of i-frames after the shield — the extra 200ms beyond 0.2.8 keeps
   // the player safe while the veil is still visibly expanding.
@@ -3298,6 +3341,13 @@ function tryJessykaGraceShield(d: LoopDeps, time: number): boolean {
   }
 
   return true;
+}
+
+/** Thin wrapper kept for the damage-path call site in applyDamageToPlayer.
+ *  Equivalent to fireJessykaVeil(d, time, false). Named after the original
+ *  0.2.8 API so the damage integration reads naturally. */
+function tryJessykaGraceShield(d: LoopDeps, time: number): boolean {
+  return fireJessykaVeil(d, time, false);
 }
 
 /** AfroMan — advance the ZOOTED timer. Increments one stack every
@@ -3543,6 +3593,7 @@ function trySummonEstusJessyka(d: LoopDeps, now: number): boolean {
     autoDespawnAt: now + JESS_SPAWN_MS + JESS_ESTUS_ACTIVE_MS
       * (ZONES[d.zoneIdxRef.current]?.id === 'kiln' ? 2 : 1),
     graceUsed: false,
+    spawnVeilFired: false,
   };
   d.setJessykaVisible(true);
   d.setJessykaDespawning(false);
@@ -3835,6 +3886,7 @@ function completeWord(d: LoopDeps, w: Word, idx: number, now: number): void {
         projectileTargetId: null,
         autoDespawnAt: 0,
         graceUsed: false,
+        spawnVeilFired: false,
       };
       d.setJessykaVisible(true);
       d.setJessykaDespawning(false);
