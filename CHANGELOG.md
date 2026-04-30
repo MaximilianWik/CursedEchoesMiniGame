@@ -4,6 +4,52 @@ All notable changes to Cursed Echoes. Format loosely follows [Keep a Changelog](
 
 ---
 
+## [0.3.14] — Taurus sample call matches AfroMan exactly + procedural fallback when a sample fails
+
+Two changes, both aimed at the "taurusSOUNDTRACK.mp3 doesn't play" report.
+
+### Call-site normalised
+
+`TaurusIntro.tsx` previously called `playMusicSample('taurus', 1.0, 1800)` with explicit volume + fadeInMs arguments; `AfromanIntro.tsx` calls `playMusicSample('afroman')` with just the id and defaults. The code path inside `playMusicSample` is identical regardless of how you call it — defaults fill in the same values — but a stray explicit argument felt like a potential red herring when debugging. Reverted Taurus's call to the bare `playMusicSample('taurus')` so the two intros go through byte-for-byte-identical code.
+
+### Procedural fallback on any sample failure
+
+`playMusicSample`'s audio pipeline now has a single `fallbackToProcedural(reason, detail)` closure wired to:
+
+1. **`audio.error` event** — fires when the file fails to load or decode (wrong codec, truncated file, CORS block).
+2. **`audio.play().catch`** — fires when the play promise rejects (autoplay-policy block, unusable element).
+
+When either fires the function:
+- Logs the cause to `console.warn` with `[audio] sample <id> <reason> <detail>` (previously the warnings were duplicated across two separate listeners with slightly different formats).
+- Tears down the half-built Web Audio graph (`audio.pause()`, `source.disconnect()`, `gain.disconnect()`, `analyser.disconnect()`).
+- Nulls `activeSample` if it still points to this handle.
+- Stops the beat-detection loop.
+- **Calls `playMusic('boss')`** so the fight gets the procedural drone it used to get before sample support existed — never silence.
+
+Self-disarms (`fallbackFired` flag) so the same failure path fires the fallback at most once per sample lifecycle.
+
+### File diagnosis
+
+Binary inspection of the provided `/public/taurusSOUNDTRACK.mp3`:
+
+- **Total size**: 32,768 bytes
+- **Header**: `49 44 33 04 00 00 00 25 0D 6F` — ID3v2.4 tag with a size field of `00 25 0D 6F`
+- The ID3v2.4 spec requires the tag-size field to be **sync-safe** (MSB of each byte must be 0). Byte 3 is `0x6F` = `0b01101111` — MSB is 0, but byte 3 is the LSB of a sync-safe int. The relevant constraint: bytes 0-3 should each have MSB=0. Bytes 0-3 here: `0x00 0x25 0x0D 0x6F` — all MSBs are 0. So the tag size is technically sync-safe-valid, decoding to **616,175 bytes**.
+- The file is 32,768 bytes total. A tag claiming 616 KB of metadata inside a 32 KB file means the tag reaches end-of-file long before it ends.
+- Scanning for MP3 sync-words (`0xFF Exx`) shows them at bytes **344** and **362** — so there IS audio data past the ID3 header.
+
+Tolerant browsers (Chrome, Firefox, Safari's recent builds) scan forward past the malformed header and find the sync-words. Strict browsers give up and throw `MEDIA_ERR_DECODE`. Either way, the fallback now plays the procedural drone so no one gets silence.
+
+**If you want your track to actually play**: re-export the MP3 with a clean ID3 tag. Most DAWs and converter tools (ffmpeg, Audacity, XLD) will write a correct sync-safe tag by default; something in the export chain that produced this file wrote a size field that doesn't match the actual file contents.
+
+### Files touched
+
+- `src/screens/TaurusIntro.tsx` — `playMusicSample('taurus', 1.0, 1800)` → `playMusicSample('taurus')`.
+- `src/game/audio.ts` — unified error + play-rejection paths into a single `fallbackToProcedural` closure that kicks `playMusic('boss')` on any sample failure. Minor restructure so the closure can safely reference the fully-built `SampleHandle`.
+- `package.json` + `src/version.ts` — 0.3.14.
+
+---
+
 ## [0.3.13] — Taurus polish pass: cinematic arena, full-frame intro, charge/stomp SFX, 6.5 s death, music fix
 
 Five interlocked Taurus-fight improvements from playtest feedback.

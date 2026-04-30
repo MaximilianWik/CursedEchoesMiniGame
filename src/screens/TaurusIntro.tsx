@@ -30,10 +30,12 @@ export function TaurusIntro({onComplete}: TaurusIntroProps) {
   const [elapsed, setElapsed] = useState(0);
   const completed = useRef(false);
 
-  // Kick off the music sample at mount. Loops if the source is shorter
-  // than the 20 s cutscene.
+  // Kick off the music sample at mount. Uses the exact same call signature
+  // as AfromanIntro (which works reliably) — no explicit volume/fadeInMs
+  // arguments, defaults only. Loops if the source is shorter than the
+  // 20 s cutscene.
   useEffect(() => {
-    playMusicSample('taurus', 1.0, 1800);
+    playMusicSample('taurus');
     return () => {
       if (!completed.current) stopMusicSample();
     };

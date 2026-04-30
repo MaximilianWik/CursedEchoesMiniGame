@@ -52,6 +52,11 @@ export type Word = {
   isBossAttack?: boolean;             // word-projectile fired by a boss
   isBossPhrase?: boolean;             // stationary phrase that damages the boss when completed
   isBossSummoned?: boolean;           // summoner/caster spawned by a boss pattern
+  // 0.3.14 — Taurus final-spectacle meteor. Renders as a huge fiery orb
+  // instead of the regular phrase frame; contact with the player is an
+  // instant-kill; typing completes him. Treated as a boss phrase so the
+  // normal completion fireball routes damage to the boss.
+  isFinisher?: boolean;
   // 0.3.0 — AfroMan "munchie" word. Doesn't damage HP on contact; instead
   // applies a stack of the ZOOTED debuff. Renders with a greenish haze.
   isMunchie?: boolean;
