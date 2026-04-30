@@ -713,13 +713,6 @@ export function playMusicSample(id: MusicSampleId, volume: number = 1, fadeInMs:
   // explicit `Access-Control-Allow-Origin` response header. Same-origin
   // resources load cleanly without it.
   audio.preload = 'auto';
-  // Error surface — log anything the browser complains about so a dead
-  // file (or an unplayable codec) shows up in devtools instead of silently
-  // disappearing into a .catch.
-  audio.addEventListener('error', () => {
-    // eslint-disable-next-line no-console
-    console.warn('[audio] sample failed to load/decode:', SAMPLE_SRC[id], audio.error);
-  });
   const source = ctx.createMediaElementSource(audio);
   const gain = ctx.createGain();
   gain.gain.value = 0;
@@ -738,14 +731,37 @@ export function playMusicSample(id: MusicSampleId, volume: number = 1, fadeInMs:
   gain.gain.setValueAtTime(0, now);
   gain.gain.linearRampToValueAtTime(volume, now + fadeInMs / 1000);
 
+  // Error surface + fallback. If the sample file is broken (truncated,
+  // wrong codec, CORS block, anything), log the cause + kick the
+  // procedural boss drone so the fight still has music instead of
+  // silence. Self-disarms so it fires at most once per lifecycle.
+  let fallbackFired = false;
+  const fallbackToProcedural = (reason: string, detail?: unknown) => {
+    if (fallbackFired) return;
+    fallbackFired = true;
+    // eslint-disable-next-line no-console
+    console.warn('[audio] sample', id, reason, detail ?? '');
+    try {
+      handle.audio.pause();
+      handle.source.disconnect();
+      handle.gain.disconnect();
+      handle.analyser.disconnect();
+    } catch { /* ignore */ }
+    if (activeSample === handle) activeSample = null;
+    stopBeatLoop();
+    playMusic('boss');
+  };
+  audio.addEventListener('error', () => {
+    fallbackToProcedural('load/decode error:', audio.error);
+  });
+
   // Force an explicit load — modern browsers auto-load on first property
   // access, but a dead `src` never triggers the error listener without
   // a kick. Then attempt play, logging any rejection so a broken file or
   // autoplay block reaches devtools instead of silent failure.
   try { audio.load(); } catch { /* ignore */ }
   void audio.play().catch((err) => {
-    // eslint-disable-next-line no-console
-    console.warn('[audio] play() rejected for sample', id, '-', err?.name ?? err);
+    fallbackToProcedural('play() rejected:', err?.name ?? err);
   });
 
   startBeatLoop();

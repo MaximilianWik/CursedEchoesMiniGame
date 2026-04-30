@@ -172,6 +172,14 @@ type BossRuntime = {
   defeated: boolean;
   deathStart: number;
   introStart: number;          // performance.now at intro start; 0 once intro finishes
+  // 0.3.14 — Taurus-only final spectacle. When HP drops below the
+  // threshold, flip finisherActive=true and spawn the meteor word. Normal
+  // phrase + attack spawning is suppressed while the finisher plays out —
+  // the meteor is the only threat on the field. Resolves either by the
+  // player typing it (→ defeatBoss with bonus explosion) or by the meteor
+  // touching the player (→ triggerDeath).
+  finisherActive: boolean;
+  finisherStart: number;
   // Cooldowns for the expensive summoner/caster patterns — prevents them from
   // back-to-back spawning whenever they come up in the rotation. A pattern
   // that's on cooldown is skipped (scheduler advances) just like a capped one.
