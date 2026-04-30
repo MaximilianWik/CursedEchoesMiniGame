@@ -4,6 +4,86 @@ All notable changes to Cursed Echoes. Format loosely follows [Keep a Changelog](
 
 ---
 
+## [0.3.13] — Taurus polish pass: cinematic arena, full-frame intro, charge/stomp SFX, 6.5 s death, music fix
+
+Five interlocked Taurus-fight improvements from playtest feedback.
+
+### Cinematic arena — `TaurusArena.tsx` (new)
+
+The dark-gothic counterpart to `AfromanArena`. Mounts whenever `taurusBossPhase !== 'hidden'` (intro → idle → attack → dying). All layers sit below the action canvas (`z < 5`) so projectiles + the Taurus sprite still render on top:
+
+- **Moonlit sky** — vertical gradient fading from deep purple-red to charred brown at the floor line, with a subtle red haze bleeding down from the top.
+- **Distant rampart silhouette** — faint, low-contrast background wall at mid-height.
+- **Rear rampart wall** with real crenellation notches (CSS `mask-image` cuts the tooth pattern along the top edge) + mortar texture.
+- **Three swinging chains** hanging from the top, independent swing rhythms (5–6.6 s, staggered delays).
+- **Four torches** braced at the wings (two per side, staggered heights) with flickering flame elements (`tarenaTorchFlicker`).
+- **Perspective stone floor** with horizontal mortar lines.
+- **Ground crack** — the signature glowing rift beneath Taurus, jagged branching strokes via stacked linear-gradients, pulsing slowly (`tarenaCrackPulse`). When the `hit` prop flips true (phrase damage landed), it flares brighter for 520 ms (`tarenaCrackFlare`) — the earth shakes when he's wounded.
+- **Ember storm** rising across the full arena width, 240% tall background for continuous scroll.
+- **Rare distant lightning** — red-strobe every 7.5 s.
+- **Red vignette** centered on the boss pedestal, dimming toward the edges.
+
+### TaurusIntro fix — effects fill the frame, no more eye-dots
+
+- **Removed the `.tar-eye-left` / `.tar-eye-right` red dots.** They looked like a pair of eyes on the silhouette in screenshots when the user actually wanted the sprite's own features to read. The DOM elements are gone; the dead CSS rules stay for now in case of rollback.
+- **`.tar-bg` reworked** — was a circle-centred radial fading to pitch-black at 92%, leaving the frame corners dead. Now a **130% × 110% ellipse** with a deep-ember stop at 100% so the corners read dark-purple-red instead of black.
+- **New rotating `.tar-fire-conic` layer** — 200% oversized, `transform-origin: 50% 50%`, 52 s rotation. Dark-red + ember-orange wedges over the static radial. Fades in per phase (0.45 at silhouette → 0.65 at reveal → 0.85 at roar) so the whole frame reads as burning by the time he roars.
+- **Denser ember stream** — 10 radial-gradient specks (was 7), 240% tall background, faster 9 s rise, higher opacity (0.95 from 0.7).
+- **Sprite wrap bumped** 420 × 500 → 520 × 580.
+- **Fire ring at his feet** scales up on `.is-flaring` (the roar phase): 540 × 120 → 860 × 200 with `brightness(1.55)`, reading as the whole arena igniting.
+
+### Music playback hardened
+
+`playMusicSample` now:
+- **Drops `audio.crossOrigin = 'anonymous'`** — the sample file is served same-origin from Vercel, so CORS isn't required. Some browsers refused to play when the file lacked an `Access-Control-Allow-Origin` response header; removing the attribute loads the resource as a regular same-origin request.
+- **Calls `audio.load()` explicitly** before play so the error listener fires on dead `src` (otherwise a never-loaded file silently hangs).
+- **Logs `play()` rejections + `error` events** to `console.warn` with the sample id and failure reason. Silent failures used to disappear into a throwaway `.catch`; now devtools surfaces the cause.
+
+The user-provided `taurusSOUNDTRACK.mp3` is 32 KB with a valid ID3v2 header — likely a short clip that loops. With the hardened code path, if it still fails in production the console will tell us why (and you can verify the file opens in a normal audio player; if it won't play there, it won't play in the game).
+
+### Extended Taurus death cutscene — 3.2 s → 6.5 s
+
+The canonical cadence (Ornstein / Gwyn / AfroMan) stays at 3.2 s. Taurus specifically gets four extra beats:
+
+| Offset | Beat |
+|---|---|
+| 0 ms | Scream + 60-particle explosion + souls text + *"THE RAMPART IS YOURS"* banner (existing) |
+| 900 ms | First collapse rumble + shockwave (existing) |
+| **1800 ms** | Banner flips to *"SILENCE SETTLES"*; 48-particle sustained ember pour from the corpse trailing upward |
+| **3200 ms** | Second heavy collapse + red shockwave + ground-crack flare via the `taurusBossHit` pulse |
+| **4600 ms** | Banner flips to *"THE BURG CAN BREATHE"* |
+| **5600 ms** | `sfxBossFinale` + `sfxBossDefeated` + brightest flash shockwave |
+| **6500 ms** | `beginBonfire` — hand-off to the interlude |
+
+Player invulnerability bumped 3.2 s → 6.8 s to cover the full cutscene. Other bosses unchanged.
+
+### Charge + stomp SFX + projectile particle bursts
+
+Two new procedural SFX in `audio.ts`:
+
+- **`sfxTaurusCharge`** — sub-bass horn sawtooth sliding 100 → 55 Hz over 0.6 s, tritone dissonant layer at 155 Hz, sweeping bandpass noise whoosh over 0.7 s, initial 60 Hz sub-thud kick. Fires on each charge cast.
+- **`sfxTaurusStomp`** — deep 42 Hz sub-thud, sharp 220 Hz stone-crack transient, high-pass debris-noise tail over 0.5 s, and a low 60 Hz rumble tail over 0.8 s. Fires on the stomp windup (before the 5-projectile cascade).
+
+Each **charge** projectile now drops a 6-particle ember fan spraying backward (opposite the sweep direction) on spawn, so the sweep visibly ignites the air it passes through. Each **stomp** projectile drops a 5-particle fire puff on spawn, plus an 18-particle ground-ash burst at the windup telegraph. `shakeMag` on stomp windup bumped 6 → 8 and duration 220 ms → 260 ms so the thud feels heavier.
+
+### Files touched
+
+- `src/screens/TaurusIntro.tsx` — removed eye-dot elements, added `.tar-fire-conic` layer div.
+- `src/screens/TaurusArena.tsx` — new, ~20 elements, ~260 lines of companion CSS.
+- `src/App.tsx` — `TaurusArena` import + mount under the `taurusBossPhase !== 'hidden'` gate (passes the `hit` prop from `taurusBossHit`); charge/stomp patterns now call `sfxTaurusCharge` / `sfxTaurusStomp` and spawn the ember particle bursts described above; `defeatBoss`'s Taurus branch extended with four new staged timeouts + extended i-frame window.
+- `src/game/audio.ts` — `sfxTaurusCharge` + `sfxTaurusStomp` added; `playMusicSample` hardened (explicit `load()`, removed `crossOrigin`, `error` + `play()` catch logging).
+- `src/index.css` — `.tar-fire-conic` + `tarFireConicSpin`; `.tar-bg` widened; `.tar-embers` denser; `.tar-sprite-wrap` + `.tar-fire-ring` bigger; full `.tarena-*` family (arena, wall, chains, torches, floor, crack, embers, lightning, vignette) added.
+- `package.json` + `src/version.ts` — 0.3.13.
+
+### Note on the music file
+
+The attached `taurusSOUNDTRACK.mp3` is 32 KB — a valid ID3-tagged MP3 but very short. If the track still doesn't audibly play after this patch, check the devtools console for the new `[audio]` warnings. Common causes if it's silent:
+
+- File is truncated / too short to have an audible audio frame after the ID3 header → re-export or trim.
+- Browser's autoplay policy blocked the first play — dropping `crossOrigin` fixes one class of this; the other class requires a user gesture to have been captured (menu click → type → enter boss).
+
+---
+
 ## [0.3.12] — Taurus Demon: sprite + 20 s intro cutscene + soundtrack + death + two new special moves
 
 Taurus gets the full AfroMan treatment. The old canvas-drawn silhouette is retired in favour of three authored sprites (TaurusIDLE / TaurusATTACK / TaurusDEAD), a dedicated dark-gothic intro cutscene that takes cues from AfroMan's 20 s reveal, a new soundtrack that plays through the fight, a theatrical death sequence, and two new boss patterns that feel appropriately bestial — a horizontal **charge** and a vertical **stomp**. HP bumped from 14 → 18 to accommodate the richer fight.

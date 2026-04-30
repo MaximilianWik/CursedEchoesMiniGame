@@ -3,7 +3,7 @@
 A gothic typing trial. Four zones. Three bosses. Banish the echoes, parry the spells, type the phrases, kindle the fading flame.
 
 **Live:** https://cursedechoes.vercel.app/
-**Current version:** `0.3.12` — Taurus Demon gets his own sprite set, 20 s dark-gothic intro cutscene, soundtrack, death cutscene, and two new special moves (horizontal charge, vertical stomp). See [CHANGELOG.md](./CHANGELOG.md) for full history. Version is shown in-game on the menu, pause, settings, game-over and victory screens.
+**Current version:** `0.3.13` — Taurus fight polish: custom gothic arena, TaurusIntro no longer has eye-dots + effects fill the frame, dedicated charge + stomp SFX with projectile spark bursts, extended 6.5 s death cutscene, music playback hardened. See [CHANGELOG.md](./CHANGELOG.md) for full history. Version is shown in-game on the menu, pause, settings, game-over and victory screens.
 
 https://github.com/user-attachments/assets/cc4d2332-4475-4e61-bd31-d33734f54dab
 

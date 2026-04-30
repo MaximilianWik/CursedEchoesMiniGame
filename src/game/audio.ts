@@ -561,6 +561,42 @@ export function sfxJessykaSummon(): void {
   subThud(88, 0.28, 0.3);
 }
 
+/** Taurus 'charge' pattern — deep animal horn blast + sweeping air whoosh.
+ *  Fires when he kicks off a horizontal sweep across the arena. */
+export function sfxTaurusCharge(): void {
+  if (!ctx || !sfxGain) return;
+  // Sub-bass horn — slow downward slide from 100 → 55 Hz.
+  const horn = ctx.createOscillator();
+  horn.type = 'sawtooth';
+  const now = ctx.currentTime;
+  horn.frequency.setValueAtTime(100, now);
+  horn.frequency.exponentialRampToValueAtTime(55, now + 0.6);
+  const hornG = expDecay(0.8, 0.32);
+  horn.connect(hornG).connect(sfxGain);
+  horn.start(); horn.stop(now + 0.9);
+  // Dissonant second layer — tritone above the root for menace.
+  tone(155, 0.6, 'sawtooth', 0.14);
+  // Sweeping air whoosh — bandpass noise swept across the mid-range.
+  noise(0.7, 'bandpass', 520, 2.5, 0.22);
+  // Initial thud kicks it off.
+  subThud(60, 0.35, 0.45);
+}
+
+/** Taurus 'stomp' pattern — earth-shaking low boom + debris patter.
+ *  Fires when his hammer-stomp rains the 5-projectile cluster. */
+export function sfxTaurusStomp(): void {
+  if (!ctx || !sfxGain) return;
+  // Massive low thud — the stomp itself.
+  subThud(42, 0.6, 0.55);
+  // Short clack layer — like cracking stone.
+  tone(220, 0.12, 'square', 0.12, 'dry');
+  // Falling debris — high-frequency noise burst decaying over the full
+  // projectile cascade (5 × 80 ms = ~400 ms).
+  noise(0.5, 'highpass', 3200, 1.6, 0.18, 'dry');
+  // Deep rumble tail.
+  tone(60, 0.8, 'triangle', 0.18);
+}
+
 // ─────────────────────────────────────────────────────────────
 // Music — dark dissonant drone per zone.
 // Three detuned saws: root + flat-5th + octave, low-pass + slow LFO on cutoff.
@@ -671,8 +707,19 @@ export function playMusicSample(id: MusicSampleId, volume: number = 1, fadeInMs:
 
   const audio = new Audio(SAMPLE_SRC[id]);
   audio.loop = true;
-  audio.crossOrigin = 'anonymous';
+  // 0.3.13 — dropped `crossOrigin = 'anonymous'`. Since the sample file is
+  // served from the same Vercel origin as the app, CORS isn't required, and
+  // setting it made some browsers refuse to play when the file lacked an
+  // explicit `Access-Control-Allow-Origin` response header. Same-origin
+  // resources load cleanly without it.
   audio.preload = 'auto';
+  // Error surface — log anything the browser complains about so a dead
+  // file (or an unplayable codec) shows up in devtools instead of silently
+  // disappearing into a .catch.
+  audio.addEventListener('error', () => {
+    // eslint-disable-next-line no-console
+    console.warn('[audio] sample failed to load/decode:', SAMPLE_SRC[id], audio.error);
+  });
   const source = ctx.createMediaElementSource(audio);
   const gain = ctx.createGain();
   gain.gain.value = 0;
@@ -691,7 +738,15 @@ export function playMusicSample(id: MusicSampleId, volume: number = 1, fadeInMs:
   gain.gain.setValueAtTime(0, now);
   gain.gain.linearRampToValueAtTime(volume, now + fadeInMs / 1000);
 
-  void audio.play().catch(() => { /* autoplay block — user gesture will retry */ });
+  // Force an explicit load — modern browsers auto-load on first property
+  // access, but a dead `src` never triggers the error listener without
+  // a kick. Then attempt play, logging any rejection so a broken file or
+  // autoplay block reaches devtools instead of silent failure.
+  try { audio.load(); } catch { /* ignore */ }
+  void audio.play().catch((err) => {
+    // eslint-disable-next-line no-console
+    console.warn('[audio] play() rejected for sample', id, '-', err?.name ?? err);
+  });
 
   startBeatLoop();
   return handle;

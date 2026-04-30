@@ -35,6 +35,7 @@ import {
   sfxJessykaGrace, sfxBossSummonChanter, sfxBossSummonCaster,
   sfxLichSplit, sfxEstusGodmode, sfxWordSwitch,
   sfxJessykaKissImpact, sfxJessykaSummon,
+  sfxTaurusCharge, sfxTaurusStomp,
 } from './game/audio';
 
 import {Hud, type HudStats} from './hud/Hud';
@@ -52,6 +53,7 @@ import {BossSelect} from './screens/BossSelect';
 import {AfromanIntro} from './screens/AfromanIntro';
 import {AfromanArena} from './screens/AfromanArena';
 import {TaurusIntro} from './screens/TaurusIntro';
+import {TaurusArena} from './screens/TaurusArena';
 
 // ─────────────────────────────────────────────────────────────
 // Constants
@@ -1801,7 +1803,10 @@ function spawnBossAttack(d: LoopDeps, pattern: BossPattern, _letters: string, ti
     // screen-wide lightning flash so the player can pre-position / pre-
     // parry. Direction alternates per cast (stored via patternRotationIdx
     // parity) so consecutive charges don't come from the same side.
+    // 0.3.13 — deep horn blast + sweeping noise SFX, plus a fire-spark
+    // burst at each projectile spawn so the sweep visibly ignites the air.
     triggerLightning(d.bgStateRef.current, time);
+    sfxTaurusCharge();
     const leftToRight = ((b?.patternRotationIdx ?? 0) & 1) === 0;
     const sweepY = 380 + (Math.random() - 0.5) * 60;
     const count = 5;
@@ -1809,17 +1814,32 @@ function spawnBossAttack(d: LoopDeps, pattern: BossPattern, _letters: string, ti
     const startX = leftToRight ? -40 : DESIGN_W + 40;
     for (let i = 0; i < count; i++) {
       const spacing = 90;
+      const px = startX - dir * spacing * i;
+      const py = sweepY + (Math.random() - 0.5) * 20;
       d.projectilesRef.current.push({
         id: nextProjectileId(),
-        x: startX - dir * spacing * i,
-        y: sweepY + (Math.random() - 0.5) * 20,
+        x: px, y: py,
         vx: dir * 6.5,
-        vy: 0.2,                 // slight drift downward so the sweep doesn't feel rigid
+        vy: 0.2,
         char: pick(),
         fromBoss: true,
-        life: 220,               // ample time to cross the full 1024 px arena at vx=6.5
+        life: 220,
         spawnedAt: performance.now(),
       });
+      // Ember spark burst at the projectile spawn — 6 small red/orange
+      // particles fanning out backward so the sweep trails flame.
+      for (let k = 0; k < 6; k++) {
+        if (d.particlesRef.current.length >= PARTICLE_CAP) break;
+        const ang = Math.PI + (Math.random() - 0.5) * 1.4;
+        const spd = 1.2 + Math.random() * 2.8;
+        d.particlesRef.current.push({
+          x: px, y: py,
+          vx: dir * (Math.cos(ang) * spd),
+          vy: Math.sin(ang) * spd - 0.4,
+          life: 22, maxLife: 22, size: 2 + Math.random() * 1.5,
+          color: Math.random() < 0.4 ? '#ffcc40' : Math.random() < 0.7 ? '#ff5818' : '#c01408',
+        });
+      }
     }
     return true;
   } else if (pattern === 'stomp') {
@@ -1828,17 +1848,35 @@ function spawnBossAttack(d: LoopDeps, pattern: BossPattern, _letters: string, ti
     // as a "column of doom" rather than an instant volley. Each can still
     // be parried individually — chaining five matching digits in quick
     // succession is the skill check.
+    // 0.3.13 — thud + debris SFX at windup, and each falling projectile
+    // drops a short ember trail at spawn so the column visibly burns.
+    sfxTaurusStomp();
     const targetX = PLAYER.x + (Math.random() - 0.5) * 30;
-    d.shakeMagRef.current = Math.max(d.shakeMagRef.current, 6);
-    d.shakeUntilRef.current = Math.max(d.shakeUntilRef.current, time + 220);
+    d.shakeMagRef.current = Math.max(d.shakeMagRef.current, 8);
+    d.shakeUntilRef.current = Math.max(d.shakeUntilRef.current, time + 260);
+    // Initial ground-ash burst at the windup.
+    for (let k = 0; k < 18; k++) {
+      if (d.particlesRef.current.length >= PARTICLE_CAP) break;
+      const ang = -Math.PI / 2 + (Math.random() - 0.5) * 1.8;
+      const spd = 1.5 + Math.random() * 3.5;
+      d.particlesRef.current.push({
+        x: targetX + (Math.random() - 0.5) * 80,
+        y: DESIGN_H - 40,
+        vx: Math.cos(ang) * spd,
+        vy: Math.sin(ang) * spd,
+        life: 34, maxLife: 34, size: 2 + Math.random() * 1.5,
+        color: Math.random() < 0.5 ? '#ffa040' : '#c01408',
+      });
+    }
     for (let i = 0; i < 5; i++) {
       const spawnAt = time + i * 80;
       window.setTimeout(() => {
         if (!d.bossRef.current || d.bossRef.current.defeated || d.bossRef.current.def.id !== 'taurus') return;
+        const px = targetX + (Math.random() - 0.5) * 40;
+        const py = BOSS_BODY_Y - 20;
         d.projectilesRef.current.push({
           id: nextProjectileId(),
-          x: targetX + (Math.random() - 0.5) * 40,
-          y: BOSS_BODY_Y - 20,
+          x: px, y: py,
           vx: (Math.random() - 0.5) * 0.3,
           vy: 1.4,
           char: pick(),
@@ -1846,6 +1884,19 @@ function spawnBossAttack(d: LoopDeps, pattern: BossPattern, _letters: string, ti
           life: 500,
           spawnedAt: performance.now(),
         });
+        // Fire trail puff at each drop.
+        for (let k = 0; k < 5; k++) {
+          if (d.particlesRef.current.length >= PARTICLE_CAP) break;
+          const ang = Math.PI / 2 + (Math.random() - 0.5) * 0.8;
+          const spd = 0.6 + Math.random() * 1.4;
+          d.particlesRef.current.push({
+            x: px, y: py,
+            vx: Math.cos(ang) * spd,
+            vy: Math.sin(ang) * spd - 0.4,
+            life: 18, maxLife: 18, size: 1.8 + Math.random() * 1.4,
+            color: Math.random() < 0.5 ? '#ffaa28' : '#c82010',
+          });
+        }
       }, spawnAt - time);
     }
     return true;
@@ -2132,7 +2183,9 @@ function defeatBoss(d: LoopDeps, time: number): void {
   d.projectilesRef.current = [];
   d.wordsRef.current = [];
   d.activeWordRef.current = null;
-  d.iFramesUntilRef.current = time + 3200;    // invulnerability for the duration
+  // Invulnerability covers the full cutscene — longer for Taurus (6.5 s
+  // extended beats) than the canonical 3.2 s cadence.
+  d.iFramesUntilRef.current = time + (isTaurus ? 6800 : 3200);
   d.bossAnnouncementRef.current = {
     text: isSecret ? 'THE SET IS OVER' : isTaurus ? 'THE RAMPART IS YOURS' : b.def.name + ' FELLED',
     life: 180,
@@ -2158,19 +2211,78 @@ function defeatBoss(d: LoopDeps, time: number): void {
     d.shakeUntilRef.current = Math.max(d.shakeUntilRef.current, performance.now() + 600);
   }, 900);
 
-  // Final beat: resolving chord + brightest flash + transition to bonfire.
-  window.setTimeout(() => {
-    if (!d.bossRef.current || !d.bossRef.current.defeated) return;
-    sfxBossFinale();
-    sfxBossDefeated();
-    triggerLightning(d.bgStateRef.current, performance.now());
-    d.shockwavesRef.current.push({x: BOSS_AIM.x, y: BOSS_AIM.y, radius: 12, maxRadius: 380, color: 'rgba(255, 220, 140, ALPHA)'});
-  }, 2400);
+  if (isTaurus) {
+    // 0.3.13 — extended Taurus death cutscene. Three extra staged beats
+    // stretch the moment from the canonical 3.2 s cadence out to 6.5 s,
+    // giving the fallen rampart-beast room to breathe.
 
-  window.setTimeout(() => {
-    if (!d.bossRef.current || !d.bossRef.current.defeated) return;
-    d.beginBonfire('boss-defeated', d.zoneIdxRef.current + 1, b.def.name);
-  }, 3200);
+    // Beat 1 (1.8 s) — sustained ember pour from the corpse + flavour line.
+    window.setTimeout(() => {
+      if (!d.bossRef.current || !d.bossRef.current.defeated) return;
+      d.bossAnnouncementRef.current = {text: 'SILENCE SETTLES', life: 180, color: '#ffb878'};
+      for (let i = 0; i < 48; i++) {
+        if (d.particlesRef.current.length >= PARTICLE_CAP) break;
+        const ang = -Math.PI / 2 + (Math.random() - 0.5) * 1.6;
+        const spd = 1.2 + Math.random() * 3.5;
+        d.particlesRef.current.push({
+          x: BOSS_AIM.x + (Math.random() - 0.5) * 140,
+          y: BOSS_AIM.y + (Math.random() - 0.5) * 50,
+          vx: Math.cos(ang) * spd,
+          vy: Math.sin(ang) * spd,
+          life: 70, maxLife: 70, size: 2 + Math.random() * 2,
+          color: Math.random() < 0.4 ? '#ffa040' : '#d02018',
+        });
+      }
+    }, 1800);
+
+    // Beat 2 (3.2 s) — second heavy collapse + ground-crack flare.
+    window.setTimeout(() => {
+      if (!d.bossRef.current || !d.bossRef.current.defeated) return;
+      sfxBossCollapse();
+      triggerLightning(d.bgStateRef.current, performance.now());
+      d.shockwavesRef.current.push({x: BOSS_AIM.x, y: BOSS_AIM.y, radius: 14, maxRadius: 360, color: 'rgba(220, 70, 30, ALPHA)'});
+      d.shakeMagRef.current = Math.max(d.shakeMagRef.current, 12);
+      d.shakeUntilRef.current = Math.max(d.shakeUntilRef.current, performance.now() + 500);
+      // Pulse the arena crack (reuse the hit flash).
+      d.setTaurusBossHit(true);
+      window.setTimeout(() => d.setTaurusBossHit(false), 600);
+    }, 3200);
+
+    // Beat 3 (4.6 s) — resolved flavour line, embers still rising.
+    window.setTimeout(() => {
+      if (!d.bossRef.current || !d.bossRef.current.defeated) return;
+      d.bossAnnouncementRef.current = {text: 'THE BURG CAN BREATHE', life: 180, color: '#ffd08a'};
+    }, 4600);
+
+    // Beat 4 (5.6 s) — final brightest flash + resolving chord.
+    window.setTimeout(() => {
+      if (!d.bossRef.current || !d.bossRef.current.defeated) return;
+      sfxBossFinale();
+      sfxBossDefeated();
+      triggerLightning(d.bgStateRef.current, performance.now());
+      d.shockwavesRef.current.push({x: BOSS_AIM.x, y: BOSS_AIM.y, radius: 16, maxRadius: 420, color: 'rgba(255, 220, 140, ALPHA)'});
+    }, 5600);
+
+    // Hand-off (6.5 s).
+    window.setTimeout(() => {
+      if (!d.bossRef.current || !d.bossRef.current.defeated) return;
+      d.beginBonfire('boss-defeated', d.zoneIdxRef.current + 1, b.def.name);
+    }, 6500);
+  } else {
+    // Canonical cadence for Ornstein / Gwyn / AfroMan — 3.2 s to bonfire.
+    window.setTimeout(() => {
+      if (!d.bossRef.current || !d.bossRef.current.defeated) return;
+      sfxBossFinale();
+      sfxBossDefeated();
+      triggerLightning(d.bgStateRef.current, performance.now());
+      d.shockwavesRef.current.push({x: BOSS_AIM.x, y: BOSS_AIM.y, radius: 12, maxRadius: 380, color: 'rgba(255, 220, 140, ALPHA)'});
+    }, 2400);
+
+    window.setTimeout(() => {
+      if (!d.bossRef.current || !d.bossRef.current.defeated) return;
+      d.beginBonfire('boss-defeated', d.zoneIdxRef.current + 1, b.def.name);
+    }, 3200);
+  }
 }
 
 function updateProjectiles(d: LoopDeps, ctx: CanvasRenderingContext2D, time: number, dt: number): void {
@@ -4275,6 +4387,14 @@ function renderAppTree(p: RenderProps) {
           {p.afromanBossPhase !== 'hidden' && (
             <div className="absolute inset-0 z-[1] pointer-events-none">
               <AfromanArena zootedLevel={p.zootedLevel} grooving={p.afromanGrooving} />
+            </div>
+          )}
+          {/* Taurus custom arena — ruined rampart, torches, chains, cracks.
+              Mounts whenever the Taurus sprite is on stage (intro→idle→
+              attack→dying) so the scene is live for the whole fight. */}
+          {p.taurusBossPhase !== 'hidden' && (
+            <div className="absolute inset-0 z-[1] pointer-events-none">
+              <TaurusArena hit={p.taurusBossHit} />
             </div>
           )}
           <canvas ref={p.canvasRef} width={DESIGN_W} height={DESIGN_H} className="absolute top-0 left-0 z-10" />
