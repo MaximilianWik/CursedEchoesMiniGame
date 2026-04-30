@@ -4,6 +4,35 @@ All notable changes to Cursed Echoes. Format loosely follows [Keep a Changelog](
 
 ---
 
+## [0.3.16] — Mobile soft-keyboard fix: VisualViewport-aware scaling + container sizing
+
+Bug: on mobile, opening the soft keyboard (via tapping into the play area) covered roughly half the game frame. Typing still worked, but the player couldn't see the bottom half of the action — where the player sprite, bottom-of-screen projectiles, and half the words live.
+
+### Root cause
+
+The game's viewport-fit scaling only listened to `window.resize`. Two problems with that:
+
+1. **iOS Safari doesn't fire `window.resize` when the soft keyboard opens.** Only `visualViewport.resize` does. So the scale stayed at its pre-keyboard value, and the 768 px frame remained at that height — the keyboard just painted on top of the bottom half.
+2. Even on Android (where `window.resize` does fire), the outer wrapper was `h-[100dvh]` — dynamic viewport height — which doesn't necessarily shrink for the keyboard either. With `flex items-center`, the scaled frame was centered vertically in the FULL viewport, meaning the lower half still sat behind the keyboard.
+
+Secondary issue: the hidden mobile-input relay lived at `top: -100px` (above the viewport). When focus landed on it, browsers tried to scroll it into view, pushing the game frame further down.
+
+### Fix — three parts
+
+1. **`window.visualViewport.resize` + `scroll` listeners.** The viewport-fit effect now reads `window.visualViewport?.height ?? window.innerHeight` and recomputes scale on both the VisualViewport resize + scroll events (iOS fires `scroll` when the keyboard slides in/out).
+2. **Outer wrapper height tracks the visible viewport.** New `viewportH` state tracked alongside `scale`; the outer wrapper's inline `height` is `${viewportH}px` instead of `h-[100dvh]`. When the keyboard covers 40 % of the screen, the wrapper shrinks to the remaining 60 %, and `flex items-center` centers the scaled frame in that reduced area — no more content behind the keyboard.
+3. **Mobile input repositioned + taken out of focus-scroll path.** Moved from `top: -100px; left: 0` to `top: 50%; left: 50%; w-px h-px opacity-0 pointer-events-none -z-10`. It's still fully invisible, still gets focus programmatically when the play area is tapped (App's `onClick` handler calls `mobileInputRef.current.focus()`), but the browser no longer has to scroll to bring it into view.
+
+Also added `interactive-widget=resizes-content` to the `<meta viewport>` in `index.html` as a hint to Chrome/Android to shrink the visual viewport when the keyboard appears.
+
+### Files touched
+
+- `index.html` — viewport meta gains `interactive-widget=resizes-content`.
+- `src/App.tsx` — viewport-fit effect listens to `visualViewport.resize` + `scroll`, tracks `viewportH` state; `RenderProps.viewportH`; outer wrapper's `h-[100dvh]` replaced with inline `style={{height: `${viewportH}px`}}` (falls back to `100dvh` if SSR); mobile relay input repositioned.
+- `package.json` + `src/version.ts` — 0.3.16.
+
+---
+
 ## [0.3.15] — Taurus final spectacle: WRATH OF IZALITH meteor
 
 Taurus Demon's last move is no longer just "another phrase that happens to finish him" — it's a full cinematic. When his HP drops to the finisher threshold, the arena turns dire, he charges up, and summons a fiery meteor bearing the word that will end the fight. Hit by it: instant death. Type it out: pyroclastic explosion + boss death cutscene.
