@@ -2217,32 +2217,67 @@
     animation: tarBackdropFade 1800ms ease-out both;
   }
   /* Deep-red radial haze + heavy vignette. Static (no rotation) so
-     the gloom at the edges never swings. */
+     the gloom at the edges never swings. 0.3.13 — widened to a 130% ×
+     110% ellipse + deep-ember stop at 100% so the frame corners aren't
+     pitch-dark. The rotating fire-conic layer sits on top. */
   .tar-bg {
     position: absolute; inset: 0;
     background:
-      radial-gradient(circle at 50% 62%,
-        rgba(150, 22, 12, 0.55) 0%,
-        rgba(80, 8, 6, 0.45) 22%,
-        rgba(30, 4, 6, 0.7) 55%,
-        #020101 92%);
+      radial-gradient(ellipse 130% 110% at 50% 58%,
+        rgba(220, 60, 18, 0.6) 0%,
+        rgba(150, 30, 14, 0.55) 22%,
+        rgba(90, 10, 10, 0.55) 48%,
+        rgba(50, 6, 8, 0.65) 75%,
+        rgba(24, 4, 6, 0.85) 100%);
     transition: opacity 900ms ease-out;
   }
-  /* Rising embers — many layered radial-gradient specks drifting upward. */
+  /* Rotating fire-wedge conic — 200% oversized so rotation never shows
+     the frame corners. Wedges in deep reds + ember oranges, blending over
+     the static radial so the whole frame reads hot + alive. */
+  .tar-fire-conic {
+    position: absolute;
+    top: -50%; left: -50%;
+    width: 200%; height: 200%;
+    background:
+      repeating-conic-gradient(from 0deg at 50% 50%,
+        rgba(180, 30, 10, 0.38) 0deg 18deg,
+        rgba(255, 90, 30, 0.32) 18deg 36deg,
+        rgba(100, 10, 6, 0.35) 36deg 54deg,
+        rgba(220, 50, 20, 0.3) 54deg 72deg);
+    filter: hue-rotate(0deg) saturate(1.05);
+    animation: tarFireConicSpin 52s linear infinite;
+    transform-origin: 50% 50%;
+    mix-blend-mode: screen;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 2000ms ease-out;
+  }
+  .tar-root[data-phase="silhouette"] .tar-fire-conic { opacity: 0.45; }
+  .tar-root[data-phase="reveal"]     .tar-fire-conic { opacity: 0.65; }
+  .tar-root[data-phase="roar"]       .tar-fire-conic { opacity: 0.85; }
+  @keyframes tarFireConicSpin {
+    from { rotate: 0deg; }
+    to   { rotate: 360deg; }
+  }
+  /* Rising embers — many layered radial-gradient specks drifting upward.
+     0.3.13 — denser + taller so the whole frame reads as burning. */
   .tar-embers {
     position: absolute; inset: 0;
     background-image:
-      radial-gradient(2px 2px at 8%  100%, #ff3612 0, transparent 55%),
-      radial-gradient(1.5px 1.5px at 22% 100%, #c00 0, transparent 50%),
-      radial-gradient(2px 2px at 40% 100%, #ff6428 0, transparent 55%),
-      radial-gradient(1.5px 1.5px at 58% 100%, #a01008 0, transparent 50%),
-      radial-gradient(2px 2px at 72% 100%, #ff8040 0, transparent 55%),
-      radial-gradient(1.5px 1.5px at 86% 100%, #d0280c 0, transparent 50%),
-      radial-gradient(2px 2px at 95% 100%, #ff4010 0, transparent 55%);
-    background-size: 100% 220%;
+      radial-gradient(2.4px 2.4px at 4%  100%, #ff5420 0, transparent 55%),
+      radial-gradient(2px 2px at 14% 100%, #ff3820 0, transparent 55%),
+      radial-gradient(2.5px 2.5px at 24% 100%, #ff7a30 0, transparent 55%),
+      radial-gradient(1.8px 1.8px at 34% 100%, #d01808 0, transparent 50%),
+      radial-gradient(2.4px 2.4px at 46% 100%, #ff6430 0, transparent 55%),
+      radial-gradient(2px 2px at 56% 100%, #b00a08 0, transparent 50%),
+      radial-gradient(2.8px 2.8px at 66% 100%, #ff7028 0, transparent 55%),
+      radial-gradient(2px 2px at 78% 100%, #e02814 0, transparent 55%),
+      radial-gradient(2.4px 2.4px at 88% 100%, #ff5010 0, transparent 55%),
+      radial-gradient(2px 2px at 96% 100%, #c01408 0, transparent 50%);
+    background-size: 100% 240%;
     mix-blend-mode: screen;
-    animation: tarEmberRise 11s linear infinite;
-    opacity: 0.7;
+    animation: tarEmberRise 9s linear infinite;
+    opacity: 0.95;
   }
   /* Gothic cracks — a single SVG-style pattern via conic + radial masks.
      Grows outward from center via `scale()` driven inline by elapsed. */
@@ -2280,10 +2315,10 @@
   .tar-sprite-wrap {
     position: absolute;
     left: 50%;
-    top: 12%;
+    top: 8%;
     transform: translateX(-50%);
-    width: 420px;
-    height: 500px;
+    width: 520px;
+    height: 580px;
     pointer-events: none;
   }
   .tar-sprite {
@@ -2324,27 +2359,29 @@
   .tar-eye-left  { top: 32%; left: 38%; animation-delay: 0s; }
   .tar-eye-right { top: 32%; left: 56%; animation-delay: 0.08s; }
 
-  /* Fire ring — curved flame arc at his feet. Uses an elliptical
-     clip-mask so the fire only shows as a band around the base. */
+  /* Fire ring — now screen-spanning when flaring, so the roar reads as
+     the whole arena igniting instead of a tiny puff at his feet. */
   .tar-fire-ring {
     position: absolute;
     left: 50%;
-    bottom: 4%;
+    bottom: 3%;
     transform: translateX(-50%);
-    width: 340px;
-    height: 90px;
+    width: 540px;
+    height: 120px;
     pointer-events: none;
     background:
-      radial-gradient(ellipse 60% 100% at 50% 100%, rgba(255, 140, 40, 0.55) 0%, rgba(255, 60, 20, 0.3) 35%, transparent 70%),
-      radial-gradient(ellipse 80% 100% at 30% 80%, rgba(255, 120, 60, 0.25), transparent 60%),
-      radial-gradient(ellipse 80% 100% at 72% 75%, rgba(255, 160, 60, 0.3), transparent 60%);
+      radial-gradient(ellipse 60% 100% at 50% 100%, rgba(255, 160, 50, 0.75) 0%, rgba(255, 60, 20, 0.45) 35%, transparent 75%),
+      radial-gradient(ellipse 80% 100% at 26% 80%, rgba(255, 140, 80, 0.5), transparent 65%),
+      radial-gradient(ellipse 80% 100% at 74% 75%, rgba(255, 190, 80, 0.5), transparent 65%);
     mix-blend-mode: screen;
     filter: blur(2px);
     animation: tarFireFlicker 0.32s ease-in-out infinite;
   }
   .tar-fire-ring.is-flaring {
+    width: 860px;
+    height: 200px;
     animation: tarFireFlicker 0.18s ease-in-out infinite;
-    filter: blur(1.5px) brightness(1.4);
+    filter: blur(2px) brightness(1.55);
   }
 
   /* Gothic corner brackets — four ornate angle frames (SVG via inline-like
@@ -2516,5 +2553,284 @@
     0%, 100% { transform: translateX(-50%) scaleY(1) scaleX(1);       opacity: 0.85; }
     33%      { transform: translateX(-50%) scaleY(1.12) scaleX(0.98); opacity: 1; }
     66%      { transform: translateX(-50%) scaleY(0.94) scaleX(1.02); opacity: 0.9; }
+  }
+
+  /* ═══════════════════════════════════════════════════════════ */
+  /* Taurus Demon arena — ruined rampart, torches, chains, cracks */
+  /* ═══════════════════════════════════════════════════════════ */
+
+  .tarena-root {
+    position: absolute; inset: 0;
+    overflow: hidden;
+    pointer-events: none;
+  }
+
+  /* Moonlit sky fading to charred ground */
+  .tarena-sky {
+    position: absolute; inset: 0;
+    background:
+      radial-gradient(ellipse 90% 60% at 50% 0%, rgba(80, 20, 30, 0.55) 0%, transparent 55%),
+      linear-gradient(180deg,
+        #0a0307 0%,
+        #160810 35%,
+        #22070c 62%,
+        #180408 82%,
+        #0a0204 100%);
+  }
+
+  /* Distant mountain/rampart silhouette — low contrast, deep background */
+  .tarena-distant {
+    position: absolute;
+    left: 0; right: 0;
+    top: 38%;
+    height: 120px;
+    background:
+      linear-gradient(to top, rgba(8, 4, 8, 0.9) 35%, transparent 60%),
+      repeating-linear-gradient(90deg,
+        rgba(20, 8, 12, 0.7) 0 60px,
+        rgba(12, 6, 10, 0.7) 60px 110px,
+        rgba(18, 10, 14, 0.7) 110px 175px);
+    mask-image: linear-gradient(to top,
+      #000 45%,
+      transparent 75%);
+    -webkit-mask-image: linear-gradient(to top,
+      #000 45%,
+      transparent 75%);
+    opacity: 0.85;
+  }
+
+  /* Rear rampart wall with crenellation teeth + arrow-slits */
+  .tarena-wall {
+    position: absolute;
+    left: -4px; right: -4px;
+    top: 44%;
+    height: 220px;
+    background:
+      /* Crenellation notches — rectangular step-pattern along the top */
+      linear-gradient(to top,
+        transparent 30%,
+        rgba(14, 8, 10, 0.95) 30%),
+      /* Mortar block texture in the body */
+      repeating-linear-gradient(90deg,
+        rgba(14, 8, 10, 1) 0 92px,
+        rgba(24, 14, 16, 1) 92px 94px,
+        rgba(14, 8, 10, 1) 94px 186px,
+        rgba(24, 14, 16, 1) 186px 188px);
+    /* Crenellation mask — alternating tall/short along the top edge */
+    mask-image:
+      linear-gradient(to right,
+        #000 0 56px, transparent 56px 94px,
+        #000 94px 150px, transparent 150px 188px,
+        #000 188px 244px, transparent 244px 282px,
+        #000 282px 338px, transparent 338px 376px,
+        #000 376px 432px, transparent 432px 470px,
+        #000 470px 526px, transparent 526px 564px,
+        #000 564px 620px, transparent 620px 658px,
+        #000 658px 714px, transparent 714px 752px,
+        #000 752px 808px, transparent 808px 846px,
+        #000 846px 902px, transparent 902px 940px,
+        #000 940px 1024px);
+    -webkit-mask-image:
+      linear-gradient(to right,
+        #000 0 56px, transparent 56px 94px,
+        #000 94px 150px, transparent 150px 188px,
+        #000 188px 244px, transparent 244px 282px,
+        #000 282px 338px, transparent 338px 376px,
+        #000 376px 432px, transparent 432px 470px,
+        #000 470px 526px, transparent 526px 564px,
+        #000 564px 620px, transparent 620px 658px,
+        #000 658px 714px, transparent 714px 752px,
+        #000 752px 808px, transparent 808px 846px,
+        #000 846px 902px, transparent 902px 940px,
+        #000 940px 1024px);
+    box-shadow: 0 -8px 28px rgba(0, 0, 0, 0.8), inset 0 -30px 40px rgba(0, 0, 0, 0.6);
+    opacity: 0.95;
+  }
+
+  /* Chains hanging from the top, swinging gently */
+  .tarena-chain {
+    position: absolute;
+    top: 0;
+    width: 4px;
+    height: 280px;
+    background: repeating-linear-gradient(to bottom,
+      rgba(12, 8, 10, 1) 0 6px,
+      rgba(50, 34, 32, 1) 6px 10px,
+      rgba(12, 8, 10, 1) 10px 14px);
+    border-left: 1px solid rgba(0, 0, 0, 0.9);
+    border-right: 1px solid rgba(60, 40, 36, 0.4);
+    filter: drop-shadow(1px 2px 2px rgba(0, 0, 0, 0.7));
+    transform-origin: top center;
+    animation: tarenaChainSway 5.5s ease-in-out infinite;
+  }
+  .tarena-chain-1 { left: 22%;  height: 260px; animation-duration: 6s;   animation-delay: 0s; }
+  .tarena-chain-2 { left: 54%;  height: 200px; animation-duration: 5s;   animation-delay: -1.2s; }
+  .tarena-chain-3 { left: 80%;  height: 290px; animation-duration: 6.6s; animation-delay: -2.4s; }
+  @keyframes tarenaChainSway {
+    0%, 100% { rotate: -2deg; }
+    50%      { rotate: 2deg; }
+  }
+
+  /* Torches — wall-mounted fire sconces at the wings */
+  .tarena-torch {
+    position: absolute;
+    width: 14px;
+    height: 50px;
+    background: linear-gradient(180deg, #2a1a12 0%, #1a0f08 100%);
+    border: 1px solid rgba(0, 0, 0, 0.8);
+    box-shadow: 2px 0 0 rgba(0, 0, 0, 0.6);
+  }
+  .tarena-torch::before {
+    /* Mount bracket */
+    content: '';
+    position: absolute;
+    left: -4px; right: -4px;
+    bottom: 0;
+    height: 4px;
+    background: #1a1008;
+    border: 1px solid #000;
+  }
+  .tarena-torch-1 { left: 6%;  top: 31%; }
+  .tarena-torch-2 { left: 6%;  top: 46%; height: 42px; }
+  .tarena-torch-3 { right: 6%; top: 31%; }
+  .tarena-torch-4 { right: 6%; top: 46%; height: 42px; }
+  .tarena-torch-flame {
+    position: absolute;
+    left: 50%;
+    top: -42px;
+    width: 30px;
+    height: 52px;
+    margin-left: -15px;
+    background:
+      radial-gradient(ellipse 60% 100% at 50% 100%, #ff8824 0%, #f05010 40%, transparent 75%),
+      radial-gradient(ellipse 50% 80% at 50% 60%, #ffd060 0%, transparent 70%);
+    mix-blend-mode: screen;
+    filter: blur(2px) drop-shadow(0 0 14px rgba(255, 120, 40, 0.7)) drop-shadow(0 0 28px rgba(255, 80, 20, 0.4));
+    border-radius: 50% 50% 40% 40%;
+    transform-origin: 50% 100%;
+    animation: tarenaTorchFlicker 0.28s ease-in-out infinite;
+  }
+  .tarena-torch-1 .tarena-torch-flame { animation-delay: -0.05s; }
+  .tarena-torch-2 .tarena-torch-flame { animation-delay: -0.12s; }
+  .tarena-torch-3 .tarena-torch-flame { animation-delay: -0.18s; }
+  .tarena-torch-4 .tarena-torch-flame { animation-delay: -0.25s; }
+  @keyframes tarenaTorchFlicker {
+    0%, 100% { transform: scaleY(1) scaleX(1) rotate(-2deg);   opacity: 0.95; }
+    50%      { transform: scaleY(1.22) scaleX(0.92) rotate(3deg); opacity: 1; }
+  }
+
+  /* Stone floor — perspective-warped slabs */
+  .tarena-floor {
+    position: absolute;
+    left: 0; right: 0;
+    bottom: 0;
+    height: 40%;
+    background:
+      /* Subtle embers glow along the floor line */
+      radial-gradient(ellipse 90% 45% at 50% 100%, rgba(180, 60, 28, 0.32), transparent 60%),
+      /* Slabs receding to center via trapezoidal gradient bands */
+      linear-gradient(180deg,
+        rgba(18, 10, 14, 0.95) 0%,
+        rgba(14, 6, 10, 0.92) 45%,
+        rgba(10, 4, 8, 1) 100%);
+  }
+  .tarena-floor::after {
+    /* Faint horizontal mortar lines */
+    content: '';
+    position: absolute; inset: 0;
+    background: repeating-linear-gradient(180deg,
+      transparent 0 36px,
+      rgba(0, 0, 0, 0.45) 36px 37px,
+      transparent 37px 74px);
+    opacity: 0.55;
+  }
+
+  /* Ground crack — the signature glowing rift under the boss */
+  .tarena-crack {
+    position: absolute;
+    left: 50%;
+    top: 46%;
+    transform: translateX(-50%);
+    width: 520px;
+    height: 220px;
+    background:
+      /* Central hot core */
+      radial-gradient(ellipse 50% 18% at 50% 80%, rgba(255, 180, 60, 0.9) 0%, rgba(255, 80, 20, 0.55) 30%, transparent 65%),
+      /* Outer red bloom */
+      radial-gradient(ellipse 80% 55% at 50% 80%, rgba(220, 40, 12, 0.5), transparent 70%);
+    mix-blend-mode: screen;
+    filter: blur(3px);
+    animation: tarenaCrackPulse 2.4s ease-in-out infinite;
+  }
+  .tarena-crack::before {
+    /* Jagged crack lines radiating from center */
+    content: '';
+    position: absolute;
+    left: 50%; bottom: 8%;
+    width: 460px; height: 40px;
+    margin-left: -230px;
+    background:
+      /* Branching crack — 5 jagged strokes */
+      linear-gradient(86deg, transparent 12%, rgba(255, 140, 40, 0.9) 12%, rgba(255, 180, 80, 1) 24%, rgba(255, 80, 20, 0.85) 28%, transparent 32%),
+      linear-gradient(92deg, transparent 20%, rgba(255, 100, 30, 0.75) 38%, rgba(255, 160, 60, 0.9) 48%, transparent 60%),
+      linear-gradient(88deg, transparent 50%, rgba(255, 120, 40, 0.9) 62%, rgba(255, 80, 20, 0.7) 72%, transparent 80%);
+    mix-blend-mode: screen;
+    filter: blur(1px);
+  }
+  .tarena-root.is-hit .tarena-crack {
+    animation: tarenaCrackFlare 0.52s ease-out;
+  }
+  @keyframes tarenaCrackPulse {
+    0%, 100% { filter: blur(3px) brightness(1);   opacity: 0.85; }
+    50%      { filter: blur(2.5px) brightness(1.35); opacity: 1; }
+  }
+  @keyframes tarenaCrackFlare {
+    0%   { filter: blur(2px) brightness(2.4); opacity: 1; transform: translateX(-50%) scale(1.06); }
+    100% { filter: blur(3px) brightness(1);   opacity: 0.85; transform: translateX(-50%) scale(1); }
+  }
+
+  /* Rising embers across the whole arena width — dense, fast */
+  .tarena-embers {
+    position: absolute; inset: 0;
+    background-image:
+      radial-gradient(2px 2px at 4%   100%, #ff4818 0, transparent 55%),
+      radial-gradient(2px 2px at 18%  100%, #ff6020 0, transparent 55%),
+      radial-gradient(2.4px 2.4px at 32% 100%, #ff3010 0, transparent 55%),
+      radial-gradient(1.8px 1.8px at 46% 100%, #e01a08 0, transparent 50%),
+      radial-gradient(2px 2px at 60%  100%, #ff7030 0, transparent 55%),
+      radial-gradient(2.4px 2.4px at 74% 100%, #ff4020 0, transparent 55%),
+      radial-gradient(1.8px 1.8px at 86% 100%, #c01408 0, transparent 50%),
+      radial-gradient(2px 2px at 96%  100%, #ff5818 0, transparent 55%);
+    background-size: 100% 240%;
+    mix-blend-mode: screen;
+    animation: tarenaEmberRise 8s linear infinite;
+    opacity: 0.7;
+  }
+  @keyframes tarenaEmberRise {
+    from { background-position-y: 0; }
+    to   { background-position-y: -240%; }
+  }
+
+  /* Distant lightning flash — rare red strobe */
+  .tarena-lightning {
+    position: absolute; inset: 0;
+    background: radial-gradient(ellipse 80% 55% at 50% 35%, rgba(255, 200, 140, 0.55), transparent 70%);
+    opacity: 0;
+    mix-blend-mode: screen;
+    animation: tarenaLightning 7.5s ease-out infinite;
+  }
+  @keyframes tarenaLightning {
+    0%, 93%, 100% { opacity: 0; }
+    94%           { opacity: 0.75; }
+    95%           { opacity: 0.2; }
+    96%           { opacity: 0.6; }
+    98%           { opacity: 0; }
+  }
+
+  /* Red vignette centered on the boss pedestal, dimming toward edges */
+  .tarena-vignette {
+    position: absolute; inset: 0;
+    background: radial-gradient(ellipse 70% 60% at 50% 42%, transparent 30%, rgba(30, 6, 8, 0.55) 80%, rgba(6, 2, 4, 0.88) 100%);
+    pointer-events: none;
   }
 }

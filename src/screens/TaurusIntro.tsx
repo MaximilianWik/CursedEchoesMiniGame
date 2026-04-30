@@ -83,6 +83,10 @@ export function TaurusIntro({onComplete}: TaurusIntroProps) {
         aria-hidden
       />
 
+      {/* 0.3.13 — rotating fire-conic, 200% oversized so rotation never
+          reveals the frame corners. Fades in across the phases. */}
+      <div className="tar-fire-conic" aria-hidden />
+
       {/* Rising ember stream — constant through the whole intro. */}
       <div className="tar-embers" aria-hidden />
 
@@ -120,13 +124,6 @@ export function TaurusIntro({onComplete}: TaurusIntroProps) {
         {/* Fire ring at his feet — appears with the silhouette, intensifies on roar */}
         {phase !== 'gloom' && (
           <div className={`tar-fire-ring ${phase === 'roar' ? 'is-flaring' : ''}`} aria-hidden />
-        )}
-        {/* Red eye glints — only during silhouette + reveal, hidden on full roar */}
-        {phase === 'silhouette' && (
-          <>
-            <div className="tar-eye tar-eye-left" aria-hidden />
-            <div className="tar-eye tar-eye-right" aria-hidden />
-          </>
         )}
       </div>
 
