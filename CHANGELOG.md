@@ -4,6 +4,41 @@ All notable changes to Cursed Echoes. Format loosely follows [Keep a Changelog](
 
 ---
 
+## [0.3.11] — Player typing steals from Jessyka (no more combo breaks on shared targets)
+
+Bug: pressing the first letter of a word Jessyka had claimed (`jessykaTarget: true`) triggered a miss + combo break because the `typable` filter in `handleCharLive` excluded Jessyka-claimed words from both the word-match lookup and the word-switch fallback. On a busy screen the player would press a letter, it happened to match a word she had just picked, and their combo evaporated with no useful feedback.
+
+### Fix — player priority via steal-on-type
+
+Two-phase lookup in both word-matching code paths (no-active-word and active-word-switch fallback):
+
+1. **Prefer unclaimed words** — the existing behaviour, unchanged for the common case.
+2. **Fall back to Jessyka-claimed words** — if nothing unclaimed matches, accept the Jessyka-claimed word that accepts this char. The player "steals" her target:
+   - `w.jessykaTarget` → `false`
+   - `j.targetId` → `null`, `lettersFired` → `0` (only if she was targeting this specific word)
+   - `j.nextKissAt` bumped by 200 ms so she doesn't immediately re-grab the same word on the very next frame — gives a clear handed-over beat
+   - Any in-flight kisses with `wordId === w.id` are spliced from `jessykaKissesRef` so they don't auto-advance the player's typing after arrival
+
+The typing path then applies the letter normally — no miss, no combo break. Jessyka's `updateJessyka` runs next frame, validates her (now-null) target, and re-picks from the updated word pool.
+
+### Implementation note — two-phase lookup
+
+The old `typable()` predicate `(w) => !w.jessykaTarget && !w.spawnAnim` was replaced with `canTypeNow()` `(w) => !w.spawnAnim` plus the explicit two-phase `findIndex`. This keeps the common "unclaimed first" priority intact while unlocking the steal path as a deterministic fallback — the order is stable (never dependent on array iteration order favouring a Jessyka word over an unclaimed one). Applies to:
+
+- The no-active-word match path (fresh keystroke, no word in progress).
+- The word-switch rescue inside the active-word branch (player mid-word, types a char that doesn't match their current word).
+
+### Relationship to 0.3.10
+
+0.3.10 preserved Jessyka's word target across projectile-shielding interrupts so she wouldn't abandon half-typed words. The side effect noted there — *"the player cannot steal-type it mid-shield"* — is reversed by 0.3.11: the player can now always steal a Jessyka-claimed word by typing its next letter, regardless of whether she's currently shielding. Her target preservation across projectile interrupts still stands; the steal just takes precedence when the player actively engages.
+
+### Files touched
+
+- `src/App.tsx` — `handleCharLive` letter branch rewritten: `typable()` → `canTypeNow()`; two-phase `findIndex` in both the fresh-word and switch paths; `stealFromJessyka()` helper releases the claim, nulls her target, applies the 200 ms back-off, splices in-flight kisses.
+- `package.json` + `src/version.ts` — 0.3.11.
+
+---
+
 ## [0.3.10] — Jessyka: remember word target across projectile shielding
 
 Fix for a targeting regression introduced by 0.3.9's projectile-priority shielding.

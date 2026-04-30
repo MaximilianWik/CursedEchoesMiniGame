@@ -3726,9 +3726,40 @@ function handleCharLive(d: LoopDeps, rawChar: string): void {
   } else {
     // ── Letter keystroke (A-Z): word typing ONLY. Projectiles use digits so
     //    a letter press can never parry.
-    // Helper — skip words that can't be typed right now (claimed by Jessyka
-    // or still playing a spawn-in animation).
-    const typable = (w: Word) => !w.jessykaTarget && !w.spawnAnim;
+    // 0.3.10 — player typing now has PRIORITY over Jessyka. The pass order
+    // is: (1) non-Jessyka words first — the common case, (2) fallback to
+    // Jessyka-claimed words if nothing else matches, stealing her target
+    // away so she re-picks next frame. Before this, pressing the first
+    // letter of a Jessyka-claimed word triggered a miss + combo break.
+    //
+    // `skipSpawning` is always true — words mid-spawn-anim aren't typable
+    // by anyone (Jessyka's tryPickJessykaTarget filters them out too).
+    const canTypeNow = (w: Word) => !w.spawnAnim;
+    /** Release a Jessyka claim on `w` if present. Called whenever the
+     *  player steals a word she was targeting. Keeps her internal state
+     *  consistent so she re-picks cleanly next frame, AND cancels any
+     *  in-flight kisses already aimed at this word — otherwise a kiss for
+     *  letter N would arrive and auto-advance `w.typed` while the player
+     *  is typing it themselves, breaking their rhythm. */
+    const stealFromJessyka = (w: Word) => {
+      if (!w.jessykaTarget) return;
+      w.jessykaTarget = false;
+      const j = d.jessykaRef.current;
+      if (j && j.targetId === w.id) {
+        j.targetId = null;
+        j.lettersFired = 0;
+        // Tiny backoff so she doesn't immediately re-grab the same word
+        // on the very next frame — gives the player a clear "handed over"
+        // beat.
+        j.nextKissAt = now + 200;
+      }
+      // Drop any kisses still in flight toward this word. drawKissHeart
+      // won't render them anymore; no particles or arrival handlers fire.
+      const kisses = d.jessykaKissesRef.current;
+      for (let k = kisses.length - 1; k >= 0; k--) {
+        if (kisses[k].wordId === w.id) kisses.splice(k, 1);
+      }
+    };
 
     if (d.activeWordRef.current !== null) {
       const w = words[d.activeWordRef.current];
@@ -3751,15 +3782,21 @@ function handleCharLive(d: LoopDeps, rawChar: string): void {
           //
           // For boss phrases we preserve `typed` — the phrase remains
           // resumable by typing its next letter later. Non-phrase active
-          // words get reset on switch (existing behaviour). This fixes the
-          // bug where the boss phrase would silently reset mid-way when the
-          // player's keystroke coincided with another word's first letter.
-          const switchIdx = words.findIndex(ww =>
-            ww !== w && typable(ww) && ww.text.charAt(ww.typed.length) === char,
-          );
+          // words get reset on switch (existing behaviour).
+          //
+          // Two-phase lookup: prefer unclaimed words, fall back to
+          // Jessyka-claimed ones (stealing the claim). Keeps player
+          // momentum from dying because she got there first.
+          const acceptsChar = (ww: Word) =>
+            ww !== w && canTypeNow(ww) && ww.text.charAt(ww.typed.length) === char;
+          let switchIdx = words.findIndex(ww => acceptsChar(ww) && !ww.jessykaTarget);
+          if (switchIdx === -1) {
+            switchIdx = words.findIndex(ww => acceptsChar(ww) && ww.jessykaTarget);
+          }
           if (switchIdx !== -1) {
             if (!w.isBossPhrase) w.typed = '';     // preserve phrase progress for later resume
             const nw = words[switchIdx];
+            stealFromJessyka(nw);
             // Only advance the target's typed if we're starting it fresh;
             // a half-typed word we're switching to gets its next letter.
             nw.typed = nw.typed + char;
@@ -3780,12 +3817,17 @@ function handleCharLive(d: LoopDeps, rawChar: string): void {
       }
     } else {
       // Match any word that can accept this char NEXT — not just fresh ones.
-      // This lets the player resume a half-typed boss phrase that was
-      // dropped via the rescue-switch above. The char is appended, not
-      // overwritten, so progress is preserved.
-      const idx = words.findIndex(w => typable(w) && w.text.charAt(w.typed.length) === char);
+      // Same two-phase lookup as the switch path: prefer unclaimed, then
+      // steal from Jessyka if nothing unclaimed matches.
+      const acceptsChar = (w: Word) =>
+        canTypeNow(w) && w.text.charAt(w.typed.length) === char;
+      let idx = words.findIndex(w => acceptsChar(w) && !w.jessykaTarget);
+      if (idx === -1) {
+        idx = words.findIndex(w => acceptsChar(w) && w.jessykaTarget);
+      }
       if (idx !== -1) {
         const w = words[idx];
+        stealFromJessyka(w);
         w.typed = w.typed + char;
         d.correctKeyRef.current += 1;
         d.statsRef.current.correctLetters += 1;
