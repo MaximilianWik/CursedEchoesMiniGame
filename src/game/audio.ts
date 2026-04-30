@@ -597,6 +597,74 @@ export function sfxTaurusStomp(): void {
   tone(60, 0.8, 'triangle', 0.18);
 }
 
+/** Taurus finisher — deep chest-swell roar as he summons the meteor.
+ *  Long, layered: sub-thud + dropping horn + bandpass noise "breath". */
+export function sfxTaurusFinisherRoar(): void {
+  if (!ctx || !sfxGain) return;
+  // Beastial low horn sliding down over 1.4 s — the chant that calls the fire.
+  const horn = ctx.createOscillator();
+  horn.type = 'sawtooth';
+  const now = ctx.currentTime;
+  horn.frequency.setValueAtTime(85, now);
+  horn.frequency.exponentialRampToValueAtTime(40, now + 1.4);
+  const hornG = expDecay(1.6, 0.38);
+  horn.connect(hornG).connect(sfxGain);
+  horn.start(); horn.stop(now + 1.8);
+  // Dissonant overlay — minor-third above.
+  const overtone = ctx.createOscillator();
+  overtone.type = 'sawtooth';
+  overtone.frequency.setValueAtTime(101, now);
+  overtone.frequency.exponentialRampToValueAtTime(48, now + 1.4);
+  const overG = expDecay(1.5, 0.2);
+  overtone.connect(overG).connect(sfxGain);
+  overtone.start(); overtone.stop(now + 1.8);
+  // Big chest-thud at start.
+  subThud(50, 0.8, 0.6);
+  // Fire-breath noise.
+  noise(1.2, 'bandpass', 420, 2.2, 0.28);
+}
+
+/** Taurus finisher — the meteor crashing into the player. Catastrophic.
+ *  Three-stage: sharp impact crack, massive low boom, smoldering tail. */
+export function sfxTaurusFinisherImpact(): void {
+  if (!ctx || !sfxGain) return;
+  // Stage 1 — sharp impact crack (stone shattering).
+  tone(330, 0.08, 'square', 0.18, 'dry');
+  noise(0.12, 'highpass', 5200, 1.2, 0.28, 'dry');
+  // Stage 2 — massive low boom (the ground bucks).
+  subThud(35, 1.2, 0.7);
+  subThud(62, 0.7, 0.45);
+  // Stage 3 — smoldering tail (bandpass noise decaying).
+  noise(1.4, 'bandpass', 320, 1.8, 0.3);
+  // Dissonant minor-second piled on top for dread.
+  tone(70, 1, 'sawtooth', 0.22);
+  tone(74, 1, 'sawtooth', 0.18);
+}
+
+/** Taurus finisher — the meteor EXPLODING when the player types the
+ *  final word. Huge, triumphant, pyroclastic. Three layered bursts. */
+export function sfxTaurusFinisherExplode(): void {
+  if (!ctx || !sfxGain) return;
+  // Layer 1 — sharp crack of the shell shattering.
+  noise(0.18, 'highpass', 4800, 1.3, 0.32, 'dry');
+  tone(420, 0.1, 'square', 0.16, 'dry');
+  // Layer 2 — massive bass boom as the fire expands.
+  subThud(40, 1.4, 0.75);
+  subThud(72, 0.9, 0.5);
+  // Layer 3 — sustained low rumble with a rising fifth for triumph.
+  const now = ctx.currentTime;
+  const rumble = ctx.createOscillator();
+  rumble.type = 'sawtooth';
+  rumble.frequency.setValueAtTime(55, now);
+  rumble.frequency.exponentialRampToValueAtTime(82, now + 0.8);
+  const rumbleG = expDecay(1.8, 0.28);
+  rumble.connect(rumbleG).connect(sfxGain);
+  rumble.start(); rumble.stop(now + 2);
+  // Wide fire-whoosh noise carrying the explosion energy outward.
+  noise(1.6, 'bandpass', 820, 1.4, 0.32);
+  noise(1.2, 'highpass', 2200, 1.1, 0.22);
+}
+
 // ─────────────────────────────────────────────────────────────
 // Music — dark dissonant drone per zone.
 // Three detuned saws: root + flat-5th + octave, low-pass + slow LFO on cutoff.

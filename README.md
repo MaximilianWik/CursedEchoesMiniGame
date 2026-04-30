@@ -3,7 +3,7 @@
 A gothic typing trial. Four zones. Three bosses. Banish the echoes, parry the spells, type the phrases, kindle the fading flame.
 
 **Live:** https://cursedechoes.vercel.app/
-**Current version:** `0.3.14` — Taurus sample call signature matches AfroMan exactly; any sample-playback failure now falls back to the procedural boss drone so the fight always has music. See [CHANGELOG.md](./CHANGELOG.md) for full history. Version is shown in-game on the menu, pause, settings, game-over and victory screens.
+**Current version:** `0.3.15` — Taurus Demon final-spectacle move: when his HP drops below the threshold he summons a fiery meteor bearing the word that will kill him; contact = instant death, typing it out triggers a pyroclastic explosion + extended death cutscene. See [CHANGELOG.md](./CHANGELOG.md) for full history. Version is shown in-game on the menu, pause, settings, game-over and victory screens.
 
 https://github.com/user-attachments/assets/cc4d2332-4475-4e61-bd31-d33734f54dab
 
