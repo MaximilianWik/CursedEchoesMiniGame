@@ -630,7 +630,7 @@ export function stopMusic(fade: number = 0.8): void {
 // secret AfroMan boss fight for now.
 // ─────────────────────────────────────────────────────────────
 
-export type MusicSampleId = 'afroman';
+export type MusicSampleId = 'afroman' | 'taurus';
 
 type SampleHandle = {
   id: MusicSampleId;
@@ -642,6 +642,7 @@ type SampleHandle = {
 
 const SAMPLE_SRC: Record<MusicSampleId, string> = {
   afroman: '/TallCans.mp3',
+  taurus: '/taurusSOUNDTRACK.mp3',
 };
 
 let activeSample: SampleHandle | null = null;
