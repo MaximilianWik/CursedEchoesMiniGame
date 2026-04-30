@@ -4,6 +4,67 @@ All notable changes to Cursed Echoes. Format loosely follows [Keep a Changelog](
 
 ---
 
+## [0.3.18] — Bonfire interlude cathedral redesign
+
+The between-zones / post-boss bonfire screen was a small CSS blob with a flat title + subtitle + tiny fire. 0.3.18 rebuilds it as a proper cinematic resting beat — night sky, ruined skyline silhouette, soul wisps, multi-layer bonfire centrepiece. Matches the production level of the Victory + GameOver revamps so the three end-of-beat screens now feel like a coherent trilogy.
+
+### Atmospheric backdrop (7 stacked layers)
+
+All fill the whole frame. All staggered-revealed:
+
+- **`.bf-sky`** — deep indigo-to-charred-amber vertical gradient with a soft amber glow radiating up from the bonfire line. 1.5 s fade-in.
+- **`.bf-stars`** — 13 radial-gradient star specks across the upper 55 % of the sky, gently twinkling on a 4 s opacity loop.
+- **`.bf-ruins`** — distant ruined-skyline silhouette via `clip-path: polygon(...)` with a dozen tooth-notches and tower peaks. Dark stone gradient, rises from below on mount.
+- **`.bf-horizon-glow`** — backlit amber glow where the ruins meet the sky, `mix-blend-mode: screen`, 6 s pulse.
+- **`.bf-fog`** — translucent horizontal band of ground fog drifting across the floor on an 18 s loop.
+- **`.bf-embers`** — 9 rising ember specks across the full width, 11 s vertical scroll.
+- **`.bf-souls`** — 4 larger pale-blue "soul wisps" drifting upward on a 24 s scroll, blurred + `mix-blend-mode: screen`, reading as the great souls this beat celebrates.
+
+### Bonfire centrepiece (13 elements)
+
+Replaces the old 120 × 180 CSS blob with a proper shrine:
+
+- **`.bf-bonfire-shadow`** — dark pool under the logs grounding the whole thing.
+- **`.bf-stone-1/2/3/4`** — four CSS-shaped shrine stones (radial-gradient + blobby border-radius) stacked at the base left + right, rotated slightly.
+- **`.bf-bonfire-halo`** — outer blurred radial glow, 3.4 s pulse.
+- **`.bf-bonfire-rays`** — 680 × 680 rotating conic sunburst (34 s loop) behind the flame, radial-masked.
+- **`.bf-bonfire-core`** — 56 × 56 hot white-amber scaling core, 0.5 s pulse.
+- **`.bf-bonfire-flame-1/2/3`** — three teardrop flame silhouettes at decreasing sizes (132 / 88 / 46 wide) with staggered flicker delays — inner flames read as the hottest.
+- **`.bf-bonfire-sword`** — broken sword CSS shape: blade gradient + `::before` crossguard + `::after` pommel. The classic DS bonfire icon.
+- **`.bf-bonfire-logs`** — 110 × 22 log base with repeating-linear-gradient wood striping + a warm drop-shadow cast upward.
+- **`.bf-bonfire-ember-1/2/3/4`** — four drifting embers on staggered 3.2 s upward paths.
+
+### Title + flavour
+
+- **`.bf-title`** — 52 px Cinzel with a gold-to-rust `background-clip: text` gradient (`#fff2c4 → #ffc878 → #b97820`), new `bfTitleReveal` keyframe (scale 0.7 → 1.06 → 1 with blur-in) over 1.6 s starting 500 ms in, then a 5 s `bfTitlePulse` loop.
+- **`.bf-sigil`** above the title — `✦ line ◆ line ✦` in soft gold, fades in at 300 ms.
+- **`.bf-sub`** — italic subtitle fading in at 1.4 s.
+- **`.bf-defeated-badge`** — sigil-flanked `★ BOSS NAME FELLED ★` pill between rules, shown only on `reason === 'boss-defeated'`, red-tinted to distinguish it from the gold titling.
+
+### Next trial card
+
+`.bf-next-card` — framed parchment panel (corner brackets matching the Victory / GameOver cards) showing:
+
+- Sigil-flanked `◈ NEXT TRIAL ◈` small-caps label
+- Zone name at 26 px Cinzel in gold
+- Italic subtitle in muted gold
+
+### Continue hint
+
+`.bf-continue` — `❯ Press any key to continue ❮` fades in after the 1.4 s advance-grace-window with a pulsing 1.6 s opacity + text-shadow loop so the "click/press to advance" affordance reads cleanly.
+
+### Title rename: `VICTORY ACHIEVED` → `SOUL CLAIMED` for `reason: 'boss-defeated'`
+
+The bonfire between bosses used to show the same `VICTORY ACHIEVED` title the final Victory screen uses. Confusing — there are still zones to go after a boss fight, it's not a victory yet. Renamed to **`SOUL CLAIMED`** with a Dark-Souls-flavoured sub: *"A great soul is yours. Rest, then rise."*. `zone-cleared` (between non-boss zones) stays as `BONFIRE LIT`; `new-zone` stays as `ONWARD`.
+
+### Files touched
+
+- `src/screens/BonfireInterlude.tsx` — complete rewrite. Backdrop layer stack, bonfire centrepiece markup (13 elements), defeated-boss badge, framed next-trial card, animated continue hint. Same prop contract, same advance-grace-window behaviour.
+- `src/index.css` — `.bf-*` family (~320 LOC new): sky + stars + ruins clip-path + horizon glow + fog + embers + souls + title + sub + sigil + defeated badge + 13-element bonfire + next-card + continue hint + keyframes (`bfSkyFade`, `bfStarTwinkle`, `bfRuinsRise`, `bfHorizonPulse`, `bfFogDrift`, `bfEmberRise`, `bfSoulsRise`, `bfTitleReveal`, `bfTitlePulse`, `bfContinuePulse`). Reuses the `vicBonfireHaloPulse` / `vicBonfireRaysSpin` / `vicBonfireCorePulse` / `vicBonfireFlame` / `vicBonfireEmber` keyframes from 0.3.17 so the two bonfires breathe in sync.
+- `package.json` + `src/version.ts` — 0.3.18.
+
+---
+
 ## [0.3.17] — Victory screen cathedral redesign + dev-menu auto-unpauses
 
 Two parallel tasks: the post-Gwyn reveal gets the same cathedral-level production polish the rest of the game has, and dev-menu actions no longer leave you stuck on the pause screen.

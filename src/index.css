@@ -3582,4 +3582,485 @@
     font-size: 12px;
     text-shadow: 0 0 12px rgba(255, 200, 100, 0.95);
   }
+
+  /* ═══════════════════════════════════════════════════════════ */
+  /* Bonfire interlude — cathedral revamp (0.3.18)               */
+  /* ═══════════════════════════════════════════════════════════ */
+
+  .bf-root {
+    color: #ffe2a0;
+    font-family: "EB Garamond", serif;
+    user-select: none;
+    background: #000;
+    cursor: pointer;
+  }
+
+  /* Night sky — deep indigo fading to charred amber at the horizon. */
+  .bf-sky {
+    position: absolute; inset: 0;
+    background:
+      radial-gradient(ellipse 80% 40% at 50% 70%, rgba(180, 80, 30, 0.25) 0%, transparent 65%),
+      linear-gradient(180deg,
+        #020106 0%,
+        #080412 22%,
+        #100816 46%,
+        #160a14 68%,
+        #1a0c0a 85%,
+        #0e0606 100%);
+    animation: bfSkyFade 1500ms ease-out both;
+  }
+  @keyframes bfSkyFade {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+  }
+
+  /* Scattered stars in the upper half — small white radial specks,
+     gently twinkling via opacity loop. */
+  .bf-stars {
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 55%;
+    pointer-events: none;
+    background:
+      radial-gradient(1.2px 1.2px at 4%  12%, rgba(255, 245, 220, 0.95), transparent 55%),
+      radial-gradient(1px 1px at 11%   22%, rgba(255, 235, 200, 0.8), transparent 55%),
+      radial-gradient(1.5px 1.5px at 18% 8%, rgba(255, 250, 230, 1), transparent 55%),
+      radial-gradient(1px 1px at 26%   28%, rgba(255, 220, 180, 0.75), transparent 55%),
+      radial-gradient(1.2px 1.2px at 34% 14%, rgba(255, 240, 210, 0.9), transparent 55%),
+      radial-gradient(1px 1px at 42%   6%,  rgba(255, 235, 200, 0.7), transparent 55%),
+      radial-gradient(1.6px 1.6px at 52% 20%, rgba(255, 250, 230, 1), transparent 55%),
+      radial-gradient(1px 1px at 58%   10%, rgba(255, 225, 190, 0.7), transparent 55%),
+      radial-gradient(1.2px 1.2px at 66% 24%, rgba(255, 240, 210, 0.9), transparent 55%),
+      radial-gradient(1px 1px at 74%   8%,  rgba(255, 230, 195, 0.75), transparent 55%),
+      radial-gradient(1.5px 1.5px at 82% 18%, rgba(255, 245, 220, 0.95), transparent 55%),
+      radial-gradient(1px 1px at 90%   26%, rgba(255, 225, 185, 0.75), transparent 55%),
+      radial-gradient(1.3px 1.3px at 96% 12%, rgba(255, 240, 210, 0.9), transparent 55%);
+    animation: bfStarTwinkle 4s ease-in-out infinite, bfSkyFade 2000ms ease-out 200ms both;
+  }
+  @keyframes bfStarTwinkle {
+    0%, 100% { opacity: 0.75; }
+    50%      { opacity: 1; }
+  }
+
+  /* Distant ruins silhouette — tilted towers + broken walls along the
+     horizon line. Built from stacked linear-gradient columns masked
+     to leave gaps (archways / missing wall sections). */
+  .bf-ruins {
+    position: absolute;
+    left: 0; right: 0;
+    bottom: 28%;
+    height: 220px;
+    background: linear-gradient(180deg, rgba(18, 10, 16, 0.9) 0%, rgba(8, 4, 8, 1) 100%);
+    /* Silhouette shape via clip-path — jagged ruined skyline */
+    clip-path: polygon(
+      0 100%,
+      0 68%,
+      4% 66%, 5% 46%, 7% 44%, 8% 58%, 11% 56%,
+      13% 60%, 15% 30%, 17% 28%, 19% 56%, 21% 54%,
+      24% 62%, 26% 24%, 28% 22%, 29% 60%,
+      32% 58%, 34% 70%, 36% 68%, 37% 52%, 39% 50%, 40% 68%,
+      44% 66%, 46% 40%, 47% 18%, 50% 16%, 52% 38%, 54% 66%,
+      58% 68%, 60% 42%, 62% 40%, 64% 64%, 67% 62%,
+      70% 66%, 72% 34%, 74% 32%, 76% 60%, 79% 58%,
+      82% 64%, 84% 28%, 85% 26%, 87% 58%,
+      90% 60%, 92% 48%, 94% 46%, 96% 66%, 100% 64%,
+      100% 100%
+    );
+    opacity: 0;
+    animation: bfRuinsRise 1600ms cubic-bezier(0.2, 0.8, 0.2, 1) 300ms both;
+  }
+  @keyframes bfRuinsRise {
+    from { opacity: 0; transform: translateY(40px); }
+    to   { opacity: 0.9; transform: translateY(0); }
+  }
+
+  /* Horizon glow — soft amber band where the ruins meet the sky.
+     Sits BEHIND the ruins but ABOVE the sky so the silhouette is
+     backlit. */
+  .bf-horizon-glow {
+    position: absolute;
+    left: 0; right: 0;
+    bottom: 40%;
+    height: 180px;
+    background: radial-gradient(ellipse 60% 100% at 50% 100%,
+      rgba(255, 150, 60, 0.45) 0%,
+      rgba(220, 90, 40, 0.25) 30%,
+      rgba(120, 40, 20, 0.12) 60%,
+      transparent 80%);
+    mix-blend-mode: screen;
+    filter: blur(6px);
+    animation: bfHorizonPulse 6s ease-in-out infinite, bfSkyFade 2000ms ease-out 500ms both;
+  }
+  @keyframes bfHorizonPulse {
+    0%, 100% { opacity: 0.85; }
+    50%      { opacity: 1; }
+  }
+
+  /* Ground fog — translucent horizontal band drifting across the
+     floor, mid-screen vertically. */
+  .bf-fog {
+    position: absolute;
+    left: -20%; right: -20%;
+    bottom: 12%;
+    height: 120px;
+    background:
+      radial-gradient(ellipse 40% 60% at 20% 50%, rgba(180, 140, 120, 0.22), transparent 70%),
+      radial-gradient(ellipse 45% 60% at 55% 50%, rgba(200, 160, 140, 0.2), transparent 70%),
+      radial-gradient(ellipse 35% 60% at 82% 50%, rgba(180, 140, 120, 0.22), transparent 70%);
+    mix-blend-mode: screen;
+    filter: blur(10px);
+    animation: bfFogDrift 18s ease-in-out infinite, bfSkyFade 2000ms ease-out 700ms both;
+  }
+  @keyframes bfFogDrift {
+    0%, 100% { transform: translateX(0); }
+    50%      { transform: translateX(80px); }
+  }
+
+  /* Continuous ember rain rising from the bottom across the full
+     frame width. Layered radial specks drifting upward. */
+  .bf-embers {
+    position: absolute; inset: 0;
+    pointer-events: none;
+    background-image:
+      radial-gradient(1.8px 1.8px at 6%   100%, rgba(255, 180, 80, 0.9), transparent 55%),
+      radial-gradient(1.5px 1.5px at 16%  100%, rgba(255, 140, 60, 0.85), transparent 55%),
+      radial-gradient(2px 2px at 28%      100%, rgba(255, 200, 100, 0.9), transparent 55%),
+      radial-gradient(1.3px 1.3px at 38%  100%, rgba(230, 100, 40, 0.8), transparent 55%),
+      radial-gradient(1.8px 1.8px at 50%  100%, rgba(255, 180, 80, 0.9), transparent 55%),
+      radial-gradient(1.5px 1.5px at 62%  100%, rgba(255, 160, 70, 0.85), transparent 55%),
+      radial-gradient(2px 2px at 74%      100%, rgba(255, 210, 120, 0.9), transparent 55%),
+      radial-gradient(1.3px 1.3px at 84%  100%, rgba(230, 100, 40, 0.8), transparent 55%),
+      radial-gradient(1.8px 1.8px at 94%  100%, rgba(255, 180, 80, 0.9), transparent 55%);
+    background-size: 100% 220%;
+    mix-blend-mode: screen;
+    animation: bfEmberRise 11s linear infinite, bfSkyFade 1600ms ease-out 400ms both;
+    opacity: 0;
+  }
+  @keyframes bfEmberRise {
+    from { background-position-y: 0; }
+    to   { background-position-y: -220%; }
+  }
+
+  /* Soul wisps — larger glowing orbs drifting slowly upward at
+     varied positions. Fewer than embers, bigger + softer. */
+  .bf-souls {
+    position: absolute; inset: 0;
+    pointer-events: none;
+    background-image:
+      radial-gradient(3px 3px at 12% 100%, rgba(200, 240, 255, 0.65), transparent 60%),
+      radial-gradient(2.5px 2.5px at 35% 100%, rgba(180, 220, 255, 0.55), transparent 60%),
+      radial-gradient(3.5px 3.5px at 58% 100%, rgba(220, 240, 255, 0.65), transparent 60%),
+      radial-gradient(2.5px 2.5px at 78% 100%, rgba(200, 230, 255, 0.55), transparent 60%);
+    background-size: 100% 300%;
+    mix-blend-mode: screen;
+    filter: blur(1.5px);
+    animation: bfSoulsRise 24s linear infinite, bfSkyFade 2000ms ease-out 900ms both;
+    opacity: 0;
+  }
+  @keyframes bfSoulsRise {
+    from { background-position-y: 0; }
+    to   { background-position-y: -300%; }
+  }
+
+  /* ─── Title block ─────────────────────────────────────────── */
+  .bf-sigil {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    color: rgba(255, 200, 120, 0.8);
+    font-size: 11px;
+    margin-bottom: 6px;
+    text-shadow: 0 0 10px rgba(255, 180, 70, 0.7);
+    opacity: 0;
+    animation: bsFadeIn 800ms ease-out 300ms both;
+  }
+  .bf-sigil-line {
+    width: 54px; height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(255, 190, 90, 0.5), transparent);
+  }
+  .bf-title {
+    font-family: "Cinzel", serif;
+    font-weight: 700;
+    font-size: 52px;
+    letter-spacing: 0.22em;
+    line-height: 1;
+    margin: 0;
+    background: linear-gradient(180deg, #fff2c4 0%, #ffc878 45%, #b97820 100%);
+    background-clip: text;
+    -webkit-background-clip: text;
+    color: transparent;
+    filter: drop-shadow(0 0 20px rgba(255, 160, 60, 0.65)) drop-shadow(0 0 4px rgba(0, 0, 0, 0.9));
+    opacity: 0;
+    animation: bfTitleReveal 1.6s cubic-bezier(0.2, 0.7, 0.2, 1) 500ms forwards,
+               bfTitlePulse 5s ease-in-out 2500ms infinite;
+  }
+  .bf-sub {
+    font-style: italic;
+    font-size: 13px;
+    letter-spacing: 0.16em;
+    color: rgba(255, 210, 150, 0.7);
+    margin: 6px 0 0;
+    opacity: 0;
+    animation: vicSubFade 1200ms ease-out 1400ms forwards;
+  }
+  @keyframes bfTitleReveal {
+    0%   { opacity: 0; letter-spacing: 0.04em; transform: scale(0.7); filter: drop-shadow(0 0 30px rgba(255, 160, 60, 0.2)) blur(14px); }
+    45%  { opacity: 1; letter-spacing: 0.14em; transform: scale(1.06); filter: drop-shadow(0 0 40px rgba(255, 200, 90, 0.9)) blur(4px); }
+    70%  { opacity: 1; letter-spacing: 0.2em;  transform: scale(1.02); filter: drop-shadow(0 0 30px rgba(255, 180, 70, 0.75)) blur(0); }
+    100% { opacity: 1; letter-spacing: 0.22em; transform: scale(1);    filter: drop-shadow(0 0 20px rgba(255, 160, 60, 0.65)) drop-shadow(0 0 4px rgba(0, 0, 0, 0.9)) blur(0); }
+  }
+  @keyframes bfTitlePulse {
+    0%, 100% { filter: drop-shadow(0 0 20px rgba(255, 160, 60, 0.55)) drop-shadow(0 0 4px rgba(0, 0, 0, 0.9)); }
+    50%      { filter: drop-shadow(0 0 36px rgba(255, 200, 100, 0.8)) drop-shadow(0 0 4px rgba(0, 0, 0, 0.9)); }
+  }
+
+  /* Defeated-boss badge — shown when reason === 'boss-defeated'. */
+  .bf-defeated-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 14px;
+    margin-top: 10px;
+    padding: 6px 22px;
+    border-top: 1px solid rgba(255, 80, 80, 0.45);
+    border-bottom: 1px solid rgba(255, 80, 80, 0.45);
+    font-family: "Cinzel", serif;
+    font-size: 11px;
+    letter-spacing: 0.42em;
+    text-transform: uppercase;
+    color: #ffb0a0;
+    text-shadow: 0 0 14px rgba(220, 40, 20, 0.85), 0 0 4px rgba(0, 0, 0, 0.9);
+  }
+  .bf-defeated-sigil {
+    color: #ff6040;
+    font-size: 13px;
+    text-shadow: 0 0 10px rgba(255, 80, 40, 0.9);
+  }
+
+  /* ─── Bonfire centrepiece ──────────────────────────────────── */
+  .bf-bonfire {
+    position: relative;
+    width: 320px;
+    height: 260px;
+    margin: 18px 0 10px;
+    opacity: 0;
+    animation: bsFadeIn 1400ms ease-out 700ms both;
+  }
+  /* Dark pool of shadow under the logs — grounds the bonfire so it
+     doesn't float. */
+  .bf-bonfire-shadow {
+    position: absolute;
+    left: 50%; bottom: -4px;
+    width: 220px; height: 30px;
+    margin-left: -110px;
+    background: radial-gradient(ellipse 50% 100% at 50% 100%,
+      rgba(0, 0, 0, 0.7) 0%, transparent 70%);
+    filter: blur(3px);
+  }
+  /* Shrine stones at the base — small stacked rocks. */
+  .bf-stone {
+    position: absolute;
+    background:
+      radial-gradient(ellipse 50% 60% at 40% 30%, rgba(80, 60, 56, 1) 0%, rgba(40, 28, 26, 1) 60%, rgba(20, 12, 12, 1) 100%);
+    border-radius: 40% 60% 50% 50% / 50% 50% 60% 40%;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.8), inset -3px -2px 6px rgba(0, 0, 0, 0.6);
+  }
+  .bf-stone-1 { left: 20%;  bottom: 0;  width: 48px; height: 32px; transform: rotate(-4deg); }
+  .bf-stone-2 { left: 14%;  bottom: 22px; width: 38px; height: 24px; transform: rotate(6deg); }
+  .bf-stone-3 { right: 20%; bottom: 0;  width: 48px; height: 32px; transform: rotate(3deg); }
+  .bf-stone-4 { right: 14%; bottom: 22px; width: 38px; height: 24px; transform: rotate(-5deg); }
+
+  .bf-bonfire-halo {
+    position: absolute;
+    inset: -100px;
+    background: radial-gradient(circle at 50% 70%,
+      rgba(255, 200, 130, 0.85) 0%,
+      rgba(255, 140, 50, 0.45) 16%,
+      rgba(180, 70, 20, 0.22) 38%,
+      transparent 76%);
+    mix-blend-mode: screen;
+    filter: blur(8px);
+    animation: vicBonfireHaloPulse 3.4s ease-in-out infinite;
+  }
+  .bf-bonfire-rays {
+    position: absolute;
+    left: 50%; top: 72%;
+    width: 680px; height: 680px;
+    margin-left: -340px; margin-top: -340px;
+    background:
+      repeating-conic-gradient(from 0deg at 50% 50%,
+        rgba(255, 190, 90, 0.15) 0deg 4deg,
+        transparent 4deg 16deg);
+    mix-blend-mode: screen;
+    animation: vicBonfireRaysSpin 34s linear infinite;
+    opacity: 0.68;
+    mask-image: radial-gradient(circle at 50% 50%, transparent 6%, #000 24%, transparent 82%);
+    -webkit-mask-image: radial-gradient(circle at 50% 50%, transparent 6%, #000 24%, transparent 82%);
+  }
+  .bf-bonfire-core {
+    position: absolute;
+    left: 50%; bottom: 28px;
+    width: 56px; height: 56px;
+    margin-left: -28px;
+    background: radial-gradient(circle at 50% 50%, #fff4d0 0%, #ffc06a 35%, #ff6a18 70%, transparent 100%);
+    border-radius: 50%;
+    mix-blend-mode: screen;
+    filter: blur(3px);
+    animation: vicBonfireCorePulse 0.5s ease-in-out infinite;
+  }
+  .bf-bonfire-flame {
+    position: absolute;
+    left: 50%;
+    transform-origin: 50% 100%;
+    background: radial-gradient(ellipse 60% 100% at 50% 100%,
+      rgba(255, 230, 160, 0.95) 0%,
+      rgba(255, 160, 60, 0.85) 30%,
+      rgba(200, 60, 20, 0.5) 65%,
+      transparent 100%);
+    filter: blur(4px);
+    mix-blend-mode: screen;
+    border-radius: 50% 50% 40% 40%;
+    animation: vicBonfireFlame 1.4s ease-in-out infinite;
+  }
+  .bf-bonfire-flame-1 { bottom: 28px; width: 132px; height: 210px; margin-left: -66px; animation-delay: 0s; }
+  .bf-bonfire-flame-2 { bottom: 28px; width:  88px; height: 170px; margin-left: -44px; animation-delay: -0.4s; filter: blur(3px) brightness(1.1); }
+  .bf-bonfire-flame-3 { bottom: 28px; width:  46px; height: 130px; margin-left: -23px; animation-delay: -0.8s; filter: blur(2px) brightness(1.25); }
+
+  .bf-bonfire-sword {
+    position: absolute;
+    left: 50%; bottom: 38px;
+    width: 4px; height: 118px;
+    margin-left: -2px;
+    background: linear-gradient(180deg, #d8c88a 0%, #a09060 30%, #3a2a1a 100%);
+    box-shadow: 0 0 8px rgba(0, 0, 0, 0.8), 0 0 4px rgba(255, 200, 120, 0.35);
+  }
+  .bf-bonfire-sword::before {
+    content: '';
+    position: absolute;
+    left: 50%; top: 20px;
+    width: 24px; height: 3px;
+    margin-left: -12px;
+    background: #2a1a10;
+    box-shadow: 0 0 6px rgba(0, 0, 0, 0.9);
+  }
+  .bf-bonfire-sword::after {
+    content: '';
+    position: absolute;
+    left: 50%; top: 9px;
+    width: 6px; height: 9px;
+    margin-left: -3px;
+    background: #5a4028;
+    border-radius: 2px;
+  }
+  .bf-bonfire-logs {
+    position: absolute;
+    left: 50%; bottom: 8px;
+    width: 110px; height: 22px;
+    margin-left: -55px;
+    background:
+      linear-gradient(180deg, #3a2010 0%, #1a0e06 100%),
+      repeating-linear-gradient(90deg,
+        rgba(60, 32, 18, 1) 0 10px,
+        rgba(30, 16, 8, 1) 10px 14px);
+    border-radius: 4px;
+    box-shadow: 0 3px 6px rgba(0, 0, 0, 0.9), 0 0 32px rgba(255, 140, 60, 0.5);
+  }
+  .bf-bonfire-ember {
+    position: absolute;
+    width: 3px; height: 3px;
+    border-radius: 50%;
+    background: #ffcc70;
+    box-shadow: 0 0 8px #ff8830, 0 0 16px #ff6018;
+    mix-blend-mode: screen;
+    animation: vicBonfireEmber 3.2s ease-out infinite;
+  }
+  .bf-bonfire-ember-1 { left: 38%; bottom: 42%; animation-delay: 0s; }
+  .bf-bonfire-ember-2 { left: 55%; bottom: 52%; animation-delay: -0.8s; }
+  .bf-bonfire-ember-3 { left: 48%; bottom: 35%; animation-delay: -1.6s; }
+  .bf-bonfire-ember-4 { left: 60%; bottom: 38%; animation-delay: -2.4s; }
+
+  /* ─── Next trial card ─────────────────────────────────────── */
+  .bf-next-card {
+    margin-top: 6px;
+    padding: 14px 40px 16px;
+    text-align: center;
+    background:
+      radial-gradient(ellipse 120% 60% at 50% 0%, rgba(255, 180, 80, 0.12) 0%, transparent 70%),
+      linear-gradient(180deg, rgba(22, 14, 14, 0.82), rgba(10, 6, 6, 0.88));
+    border: 1px solid rgba(255, 200, 120, 0.35);
+    box-shadow:
+      0 0 24px rgba(0, 0, 0, 0.55),
+      inset 0 0 32px rgba(50, 24, 10, 0.3);
+    position: relative;
+  }
+  .bf-next-card::before, .bf-next-card::after {
+    content: '';
+    position: absolute;
+    width: 12px; height: 12px;
+    border: 1px solid rgba(255, 200, 100, 0.6);
+  }
+  .bf-next-card::before { top: 3px; left: 3px;    border-right: none; border-bottom: none; }
+  .bf-next-card::after  { bottom: 3px; right: 3px; border-left: none;  border-top: none; }
+  .bf-next-label {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    font-family: "Cinzel", serif;
+    font-size: 10px;
+    letter-spacing: 0.5em;
+    text-transform: uppercase;
+    color: rgba(255, 200, 120, 0.7);
+    margin-bottom: 4px;
+  }
+  .bf-next-sigil {
+    color: rgba(255, 200, 100, 0.8);
+    font-size: 9px;
+    text-shadow: 0 0 6px rgba(255, 180, 60, 0.7);
+  }
+  .bf-next-name {
+    font-family: "Cinzel", serif;
+    font-weight: 700;
+    font-size: 26px;
+    letter-spacing: 0.28em;
+    text-transform: uppercase;
+    color: #ffd280;
+    text-shadow: 0 0 18px rgba(255, 180, 60, 0.6), 0 0 4px rgba(0, 0, 0, 0.9);
+    line-height: 1.1;
+  }
+  .bf-next-sub {
+    font-family: "EB Garamond", serif;
+    font-style: italic;
+    font-size: 13px;
+    letter-spacing: 0.1em;
+    color: rgba(255, 220, 160, 0.65);
+    margin-top: 4px;
+  }
+
+  /* ─── Continue hint ──────────────────────────────────────── */
+  .bf-continue {
+    margin-top: 28px;
+    display: inline-flex;
+    align-items: center;
+    gap: 14px;
+    font-family: "Cinzel", serif;
+    font-size: 12px;
+    letter-spacing: 0.35em;
+    text-transform: uppercase;
+    color: rgba(255, 180, 90, 0.55);
+    opacity: 0;
+    transition: opacity 600ms ease-out;
+  }
+  .bf-continue.is-ready {
+    opacity: 1;
+    animation: bfContinuePulse 1.6s ease-in-out infinite;
+  }
+  .bf-continue-arrow {
+    color: rgba(255, 200, 100, 0.85);
+    font-size: 11px;
+    text-shadow: 0 0 8px rgba(255, 180, 60, 0.8);
+  }
+  @keyframes bfContinuePulse {
+    0%, 100% { opacity: 0.6;  text-shadow: 0 0 6px rgba(255, 180, 60, 0.3); }
+    50%      { opacity: 1;    text-shadow: 0 0 14px rgba(255, 200, 100, 0.8); }
+  }
 }

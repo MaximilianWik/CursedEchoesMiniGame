@@ -1,6 +1,15 @@
 /**
- * Bonfire interlude — shown between zones and after boss defeats.
- * HP and estus are refilled by the caller before this mounts.
+ * BonfireInterlude — the resting beat between zones and after boss
+ * defeats. HP + estus are refilled by the caller before this mounts.
+ *
+ * 0.3.18 — cathedral-level redesign. Night-sky backdrop with stars,
+ * distant ruined spires silhouetted on the horizon, drifting ground
+ * fog, rising embers + soul-wisps, and a proper multi-layer bonfire
+ * centrepiece with the broken-sword icon + shrine stones at its base.
+ * Boss defeats get a dedicated SOUL CLAIMED badge; every exit gets a
+ * framed "next trial" card with the upcoming zone's name + subtitle.
+ *
+ * Same prop contract as before.
  */
 
 import {useEffect, useState} from 'react';
@@ -16,9 +25,13 @@ export type BonfireInterludeProps = {
 };
 
 const LINES: Record<BonfireReason, {title: string; sub: string}> = {
-  'zone-cleared':   {title: 'BONFIRE LIT',      sub: 'Warmth returns. The flame strengthens you.'},
-  'boss-defeated':  {title: 'VICTORY ACHIEVED', sub: 'A great soul is claimed.'},
-  'new-zone':       {title: 'ONWARD',           sub: 'A new trial awaits.'},
+  // 0.3.18 — renamed 'boss-defeated' from "VICTORY ACHIEVED" to "SOUL
+  // CLAIMED" so the bonfire interlude doesn't collide with the actual
+  // VictoryScreen title that runs after the final boss. Bonfire is for
+  // between-boss resting; Victory is for the end of the run.
+  'zone-cleared':   {title: 'BONFIRE LIT',  sub: 'Warmth returns. The flame strengthens you.'},
+  'boss-defeated':  {title: 'SOUL CLAIMED', sub: 'A great soul is yours. Rest, then rise.'},
+  'new-zone':       {title: 'ONWARD',       sub: 'A new trial awaits in the dark.'},
 };
 
 export function BonfireInterlude({reason, nextZoneName, nextZoneSubtitle, defeatedBossName, onContinue}: BonfireInterludeProps) {
@@ -38,38 +51,87 @@ export function BonfireInterlude({reason, nextZoneName, nextZoneSubtitle, defeat
 
   return (
     <div
-      className="absolute top-0 left-0 w-full h-full z-[56] flex flex-col items-center justify-center ce-bonfire-bg fade-in"
+      className="absolute top-0 left-0 w-full h-full z-[56] overflow-hidden fade-in bf-root"
       onClick={() => canAdvance && onContinue()}
     >
-      {defeatedBossName && reason === 'boss-defeated' && (
-        <div className="font-[Cinzel] text-lg text-red-300/70 tracking-[0.4em] uppercase mb-2 slide-in" style={{animationDelay: '200ms'}}>
-          {defeatedBossName} FELLED
+      {/* ─── Atmospheric backdrop layers ──────────────────────── */}
+      <div className="bf-sky" aria-hidden />
+      <div className="bf-stars" aria-hidden />
+      <div className="bf-ruins" aria-hidden />
+      <div className="bf-horizon-glow" aria-hidden />
+      <div className="bf-fog" aria-hidden />
+      <div className="bf-embers" aria-hidden />
+      <div className="bf-souls" aria-hidden />
+
+      {/* ─── Content stack ────────────────────────────────────── */}
+      <div className="relative z-[2] h-full w-full flex flex-col items-center justify-start pt-10 px-6">
+        {/* Sigil divider above the title */}
+        <div className="bf-sigil" aria-hidden>
+          <span>✦</span>
+          <span className="bf-sigil-line" />
+          <span>◆</span>
+          <span className="bf-sigil-line" />
+          <span>✦</span>
         </div>
-      )}
-      <h1
-        className="font-[Cinzel] font-bold text-5xl md:text-6xl text-amber-500 tracking-[0.3em] mb-4 ce-bonfire-title"
-      >
-        {lines.title}
-      </h1>
-      <p className="text-amber-200/70 text-sm font-serif italic tracking-wide mb-10 slide-in" style={{animationDelay: '400ms'}}>
-        {lines.sub}
-      </p>
 
-      {/* Animated bonfire made of CSS layers */}
-      <div className="ce-bonfire-sprite" aria-hidden>
-        <div className="ce-bonfire-flame" />
-        <div className="ce-bonfire-flame" style={{animationDelay: '-0.4s'}} />
-        <div className="ce-bonfire-flame" style={{animationDelay: '-0.8s'}} />
-      </div>
+        <h1 className="bf-title">{lines.title}</h1>
+        <p className="bf-sub">{lines.sub}</p>
 
-      <div className="mt-10 text-center slide-in" style={{animationDelay: '800ms'}}>
-        <div className="text-xs text-amber-700/60 tracking-[0.5em] uppercase">Next trial</div>
-        <div className="text-2xl font-[Cinzel] text-amber-400 tracking-[0.3em] mt-1">{nextZoneName}</div>
-        <div className="text-xs text-amber-400/50 tracking-widest italic mt-1">{nextZoneSubtitle}</div>
-      </div>
+        {defeatedBossName && reason === 'boss-defeated' && (
+          <div className="bf-defeated-badge slide-in" style={{animationDelay: '300ms'}}>
+            <span className="bf-defeated-sigil">★</span>
+            <span>{defeatedBossName} FELLED</span>
+            <span className="bf-defeated-sigil">★</span>
+          </div>
+        )}
 
-      <div className={`mt-12 text-amber-600/70 font-[Cinzel] tracking-[0.4em] uppercase text-xs transition-opacity ${canAdvance ? 'opacity-100 animate-pulse' : 'opacity-0'}`}>
-        Press any key to continue
+        {/* ─── Bonfire centrepiece ────────────────────────────── */}
+        <div className="bf-bonfire slide-in" style={{animationDelay: '600ms'}} aria-hidden>
+          {/* Ground shadow pool */}
+          <div className="bf-bonfire-shadow" />
+          {/* Stacked shrine stones at the base */}
+          <div className="bf-stone bf-stone-1" />
+          <div className="bf-stone bf-stone-2" />
+          <div className="bf-stone bf-stone-3" />
+          <div className="bf-stone bf-stone-4" />
+          {/* Outer halo */}
+          <div className="bf-bonfire-halo" />
+          {/* Rotating light rays */}
+          <div className="bf-bonfire-rays" />
+          {/* Hot center core */}
+          <div className="bf-bonfire-core" />
+          {/* Layered flames */}
+          <div className="bf-bonfire-flame bf-bonfire-flame-1" />
+          <div className="bf-bonfire-flame bf-bonfire-flame-2" />
+          <div className="bf-bonfire-flame bf-bonfire-flame-3" />
+          {/* Broken sword in the pile — DS iconography */}
+          <div className="bf-bonfire-sword" />
+          {/* Log base */}
+          <div className="bf-bonfire-logs" />
+          {/* Floating embers */}
+          <div className="bf-bonfire-ember bf-bonfire-ember-1" />
+          <div className="bf-bonfire-ember bf-bonfire-ember-2" />
+          <div className="bf-bonfire-ember bf-bonfire-ember-3" />
+          <div className="bf-bonfire-ember bf-bonfire-ember-4" />
+        </div>
+
+        {/* ─── Next trial card ────────────────────────────────── */}
+        <div className="bf-next-card slide-in" style={{animationDelay: '900ms'}}>
+          <div className="bf-next-label">
+            <span className="bf-next-sigil">◈</span>
+            <span>Next Trial</span>
+            <span className="bf-next-sigil">◈</span>
+          </div>
+          <div className="bf-next-name">{nextZoneName}</div>
+          <div className="bf-next-sub">{nextZoneSubtitle}</div>
+        </div>
+
+        {/* Continue hint — only clickable after the 1.4 s grace window */}
+        <div className={`bf-continue ${canAdvance ? 'is-ready' : ''}`}>
+          <span className="bf-continue-arrow">❯</span>
+          <span>Press any key to continue</span>
+          <span className="bf-continue-arrow">❮</span>
+        </div>
       </div>
     </div>
   );
