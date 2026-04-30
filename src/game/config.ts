@@ -219,7 +219,7 @@ export const ZONES: ZoneDef[] = [
 // Bosses
 // ─────────────────────────────────────────────────────────────
 
-export type BossPattern = 'single' | 'volley' | 'wave' | 'word' | 'summoner' | 'caster' | 'munchie' | 'beat-volley';
+export type BossPattern = 'single' | 'volley' | 'wave' | 'word' | 'summoner' | 'caster' | 'munchie' | 'beat-volley' | 'charge' | 'stomp';
 
 export type BossPhase = {
   hpPctThreshold: number;    // entered when currentHp/maxHp ≤ this
@@ -245,6 +245,12 @@ export type BossDef = {
    *  the canvas silhouette renderer (AfroMan is a DOM sprite) and to route
    *  to the 20 s intro cutscene + sample-playback audio path. */
   secret?: boolean;
+  /** Optional — when set, the fight plays this audio sample instead of the
+   *  procedural 'boss' drone. The sample is started by the boss's dedicated
+   *  intro cutscene and continues through the fight; defeatBoss ducks it
+   *  and beginBonfire stops it. Bosses with a sampleId also skip the short
+   *  4.5 s canvas silhouette intro (the dedicated cutscene replaces it). */
+  sampleId?: 'afroman' | 'taurus';
 };
 
 export const BOSSES: Record<string, BossDef> = {
@@ -253,15 +259,16 @@ export const BOSSES: Record<string, BossDef> = {
     name: 'TAURUS DEMON',
     title: 'Beast of the Ramparts',
     introLore: 'Long-stirred in the rubble. The stones yet remember its charge.',
-    maxHp: 14,
+    maxHp: 18,
     phases: [
-      {hpPctThreshold: 1.0,  phraseBank: BOSS_PHRASES_TAURUS, phraseSpawnCooldown: 1.2, patterns: ['single'],              patternInterval: 3.2, projectileLetters: 'AEIOUNRST'},
-      {hpPctThreshold: 0.66, phraseBank: BOSS_PHRASES_TAURUS, phraseSpawnCooldown: 1.0, patterns: ['single', 'volley'],    patternInterval: 3.4, projectileLetters: 'AEIOUNRSTK'},
-      {hpPctThreshold: 0.33, phraseBank: BOSS_PHRASES_TAURUS, phraseSpawnCooldown: 0.9, patterns: ['volley', 'summoner', 'word'], patternInterval: 3.0, projectileLetters: 'AEIOUNRSTKD', announcement: 'RAGE AWAKENS'},
+      {hpPctThreshold: 1.0,  phraseBank: BOSS_PHRASES_TAURUS, phraseSpawnCooldown: 1.2, patterns: ['single', 'charge'],                              patternInterval: 3.2, projectileLetters: 'AEIOUNRST'},
+      {hpPctThreshold: 0.66, phraseBank: BOSS_PHRASES_TAURUS, phraseSpawnCooldown: 1.0, patterns: ['single', 'volley', 'charge', 'stomp'],           patternInterval: 3.0, projectileLetters: 'AEIOUNRSTK', announcement: 'HE FINDS HIS FOOTING'},
+      {hpPctThreshold: 0.33, phraseBank: BOSS_PHRASES_TAURUS, phraseSpawnCooldown: 0.9, patterns: ['volley', 'charge', 'stomp', 'word'],              patternInterval: 2.6, projectileLetters: 'AEIOUNRSTKD', announcement: 'RAGE AWAKENS'},
     ],
     silhouette: 'taurus',
     themeColor: '#b4501c',
     soulsReward: 1500,
+    sampleId: 'taurus',
   },
   ornstein: {
     id: 'ornstein',
@@ -313,6 +320,7 @@ export const BOSSES: Record<string, BossDef> = {
     themeColor: '#ff4fb3',
     soulsReward: 4200,
     secret: true,
+    sampleId: 'afroman',
   },
 };
 

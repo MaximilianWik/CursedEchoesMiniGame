@@ -2023,9 +2023,11 @@ export function drawBoss(
   state: BossRenderState,
   time: number,
 ): void {
-  // AfroMan is rendered as a DOM <img> sprite (AfroManIDLE.png / AfroManATTACK.png).
-  // The canvas path here skips drawing him so the DOM layer is authoritative.
-  if (state.silhouette === 'afroman') return;
+  // AfroMan + Taurus are rendered as DOM <img> sprites (AfroManIDLE/ATTACK
+  // + TaurusIDLE/ATTACK/DEAD .png files). The canvas path here skips both
+  // so the DOM layer is authoritative. Ornstein + Gwyn still draw their
+  // canvas silhouettes here.
+  if (state.silhouette === 'afroman' || state.silhouette === 'taurus') return;
   const cx = 512, baseY = 440;
   const breath = Math.sin(time * 0.002) * 6;
   const hpT = state.currentHp / state.maxHp;
@@ -2254,9 +2256,11 @@ export function drawBossMinionSprite(
   scale: number,
   time: number,
 ): void {
-  // AfroMan doesn't summon minions (no chanter/caster patterns) so we never
-  // hit this branch in practice — short-circuit defensively anyway.
-  if (silhouette === 'afroman') return;
+  // AfroMan + Taurus don't summon minions (no chanter/caster patterns in
+  // their phase configs) so we never hit this branch in practice — short-
+  // circuit defensively anyway so a future config tweak can't drag the
+  // dead canvas silhouette into the scene.
+  if (silhouette === 'afroman' || silhouette === 'taurus') return;
   // Minimal boss state just to drive the silhouette-draw helpers.
   const state: BossRenderState = {
     silhouette,

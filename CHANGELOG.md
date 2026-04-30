@@ -4,6 +4,76 @@ All notable changes to Cursed Echoes. Format loosely follows [Keep a Changelog](
 
 ---
 
+## [0.3.12] — Taurus Demon: sprite + 20 s intro cutscene + soundtrack + death + two new special moves
+
+Taurus gets the full AfroMan treatment. The old canvas-drawn silhouette is retired in favour of three authored sprites (TaurusIDLE / TaurusATTACK / TaurusDEAD), a dedicated dark-gothic intro cutscene that takes cues from AfroMan's 20 s reveal, a new soundtrack that plays through the fight, a theatrical death sequence, and two new boss patterns that feel appropriately bestial — a horizontal **charge** and a vertical **stomp**. HP bumped from 14 → 18 to accommodate the richer fight.
+
+### Sprite transition — canvas → DOM img
+
+`drawBoss` now skips the canvas renderer for `silhouette === 'taurus'` the same way it does for `'afroman'`. In its place the App render tree mounts a `<img class="taurus-boss-sprite">` element inside the shake wrapper, at `top: 90 px, left: 50%, width: 320 px`. The `src` is driven by a new `taurusBossPhase` React state: `'hidden'` (non-Taurus phases), `'idle'` (default breathing), `'attack'` (1.2 s flash on every `spawnBossAttack` call — same cadence AfroMan uses), `'dying'` (swaps to TaurusDEAD.png with a slump-and-fade animation over 3 s during the death cutscene).
+
+A secondary `<div class="taurus-fire-ring">` sits at the boss's feet (y ≈ 430) with a three-layer radial-gradient flame arc flickering at 0.36 s intervals. `mix-blend-mode: screen` so it lights up the stage rather than painting over it.
+
+`drawBossMinionSprite` also short-circuits for `'taurus'` now — Taurus no longer runs the `summoner` pattern (it's been dropped from his phase config in favour of the new moves), so a canvas silhouette of himself could never appear as a chanter's minion overlay and go visually out of sync with the DOM img.
+
+### TaurusIntro.tsx — dark-gothic 20 s cutscene
+
+Full parallel to `AfromanIntro.tsx` in structure — single rAF timer, four banner beats, phase-scoped visual layers — but every palette choice is inverted toward dread:
+
+- **0–5 s — gloom.** Black frame with a static radial red-haze vignette; embers rising continuously from the bottom; small banner at the top reading *"THE RAMPART STIRS"*. No sprite visible yet.
+- **5–10 s — silhouette.** Near-black Taurus silhouette rises from below with a deep-red rim glow, eye-glints pulsing at the helmet. Gothic cracks spread outward from the centre. Banner: *"SOMETHING BREATHES"*.
+- **10–16 s — reveal.** Silhouette resolves into the full TaurusIDLE.png with a fire ring lit at his feet. Distant lightning flashes the red vignette. Banner: *"TAURUS DEMON APPROACHES"*.
+- **16–20 s — roar.** Sprite shakes continuously (`tarRoarShake`, 300 ms loop), fire ring intensifies (`is-flaring`), screen flash at 19.4 s. Banner: *"THE BURG REMEMBERS FIRE"*.
+- **20 s — hand-off** to `enterBoss('taurus')`.
+
+Static UI detail: four gothic corner brackets frame the viewport (`tar-frame-tl/tr/bl/br`) with a deep-red glow, so the intro feels like a framed painting. Cannot be skipped — the global keydown router is already gated on `phase === 'zone' | 'boss'`.
+
+### Soundtrack — `/public/taurusSOUNDTRACK.mp3`
+
+Added `'taurus'` to `MusicSampleId` + SAMPLE_SRC in `audio.ts`. TaurusIntro calls `playMusicSample('taurus', 1.0, 1800)` at mount; `enterBoss` detects the new `sampleId` field on `BossDef` and ramps the sample to full instead of starting the procedural `'boss'` drone. `defeatBoss` ducks the sample to 0.15 during the death cutscene; `beginBonfire` fades + stops it.
+
+The same `sampleId` field was added to AfroMan for consistency (previously he was detected via `secret: true`; now both use the generic `sampleId` check and the `secret` flag is purely for the route-tracking stat).
+
+### Two new special moves
+
+Added to `BossPattern` union in `config.ts`: `'charge'` and `'stomp'`.
+
+**`charge`** — horizontal sweep. Taurus rears up, a full-screen lightning flash telegraphs the direction, then five projectiles tear across the arena at a fixed y-line with `vx = 6.5 px/frame`, spaced 90 px apart. The horizontal direction alternates per cast via `b.patternRotationIdx & 1` parity so consecutive charges come from opposite sides. Slight downward drift (`vy: 0.2`) keeps the sweep from reading as pure computer-geometry.
+
+**`stomp`** — vertical hammer. Five projectiles cluster on the player's current x position (±30 px jitter at pick-time, ±40 px jitter per projectile) and rain down from the boss's y, **staggered 80 ms apart** via `setTimeout` so they read as a column-of-doom that requires chaining 5 parry digits in quick succession. Screen shake on the windup (mag 6, 220 ms) so the stomp feels weighty.
+
+### Phase rework
+
+| Phase | HP band | Patterns | Announcement |
+|-------|---------|----------|--------------|
+| P1    | 100–66 % | `single`, `charge` | — |
+| P2    | 66–33 %  | `single`, `volley`, `charge`, `stomp` | "HE FINDS HIS FOOTING" |
+| P3    | 33–0 %   | `volley`, `charge`, `stomp`, `word` | "RAGE AWAKENS" |
+
+`summoner` dropped (was in P3). Pattern interval tightened (3.2 / 3.0 / 2.6 s) to compensate for the heavier HP pool.
+
+### Death cutscene
+
+`defeatBoss` now recognises `bossId === 'taurus'` alongside afroman and does three things:
+1. Swaps the sprite state to `'dying'` → JSX picks `/TaurusDEAD.png` as the src → `.is-dying` animation slumps him forward, tilts 6°, drops 70 px, fades to 0 over 3 s (`taurusBossDie` keyframes).
+2. Ducks the music sample to 0.15 over 1 s (`setMusicSampleVolume`), matching the existing AfroMan duck.
+3. Updates the defeat banner to *"THE RAMPART IS YOURS"* in amber (`#ffa870`) — the canon bosses get the generic *"TAURUS DEMON FELLED"* string only if they aren't wired into this branch.
+
+Existing defeat cadence (scream → mid-cutscene rumble → finale flash → bonfire at 3.2 s) is preserved — the new sprite work layers on top.
+
+### Files touched
+
+- `public/TaurusIDLE.png` / `TaurusATTACK.png` / `TaurusDEAD.png` / `taurusSOUNDTRACK.mp3` — assets (provided).
+- `src/screens/TaurusIntro.tsx` — new.
+- `src/game/audio.ts` — `'taurus'` added to `MusicSampleId` + SAMPLE_SRC.
+- `src/game/config.ts` — `BossPattern` union expanded; `sampleId?: 'afroman' | 'taurus'` added to `BossDef`; Taurus phases rewritten (new moves, tighter intervals, 14 → 18 HP); AfroMan gains `sampleId: 'afroman'` for consistency.
+- `src/graphics.ts` — `drawBoss` + `drawBossMinionSprite` short-circuit for `'taurus'` silhouette.
+- `src/App.tsx` — new `'boss-intro-taurus'` phase; `taurusBossPhase` / `taurusBossHit` state mirrors; `enterBoss` refactored to key off `def.sampleId` rather than `def.secret`; `commitBossChoice` routes Taurus through the new cutscene phase; `startBossEntryFlow` remembered-taurus path mirrors; `devJumpToBoss` gains the taurus branch; render tree mounts `<TaurusIntro>` during the intro phase and the Taurus sprite + fire-ring during the fight; `spawnBossAttack` gains `charge` + `stomp` branches + Taurus attack-pose flash + post-fireball hit flash; `defeatBoss` handles Taurus's sprite swap and music duck; reset / bonfire / tryAgain / abandon all sync Taurus state to hidden.
+- `src/index.css` — `.tar-*` family for the intro (≈180 LOC) and `.taurus-boss-sprite` + `.taurus-fire-ring` + their keyframes for the in-fight sprite.
+- `package.json` + `src/version.ts` — 0.3.12.
+
+---
+
 ## [0.3.11] — Player typing steals from Jessyka (no more combo breaks on shared targets)
 
 Bug: pressing the first letter of a word Jessyka had claimed (`jessykaTarget: true`) triggered a miss + combo break because the `typable` filter in `handleCharLive` excluded Jessyka-claimed words from both the word-match lookup and the word-switch fallback. On a busy screen the player would press a letter, it happened to match a word she had just picked, and their combo evaporated with no useful feedback.

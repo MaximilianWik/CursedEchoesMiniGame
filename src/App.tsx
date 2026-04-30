@@ -51,6 +51,7 @@ import {DevPanel} from './screens/DevPanel';
 import {BossSelect} from './screens/BossSelect';
 import {AfromanIntro} from './screens/AfromanIntro';
 import {AfromanArena} from './screens/AfromanArena';
+import {TaurusIntro} from './screens/TaurusIntro';
 
 // ─────────────────────────────────────────────────────────────
 // Constants
@@ -155,7 +156,7 @@ function hexA(hex: string, alpha: number): string {
   return 'rgba(' + r + ',' + g + ',' + b + ',' + alpha.toFixed(3) + ')';
 }
 
-type Phase = 'menu' | 'zone' | 'boss-select' | 'boss-intro-afroman' | 'boss' | 'bonfire' | 'victory' | 'gameover';
+type Phase = 'menu' | 'zone' | 'boss-select' | 'boss-intro-afroman' | 'boss-intro-taurus' | 'boss' | 'bonfire' | 'victory' | 'gameover';
 
 type BossRuntime = {
   def: BossDef;
@@ -321,6 +322,13 @@ export default function App() {
   const [afromanBossPhase, setAfromanBossPhase] = useState<'hidden' | 'idle' | 'attack' | 'dying'>('hidden');
   const [afromanBossHit, setAfromanBossHit] = useState(false);
   const [afromanGrooving, setAfromanGrooving] = useState(false);
+  // Taurus uses the same DOM-sprite pattern as AfroMan: a single <img>
+  // that swaps through three source files (IDLE / ATTACK / DEAD). 'hidden'
+  // during non-Taurus phases, 'idle' for the base breathing state,
+  // 'attack' for 1.2 s bursts when spawnBossAttack fires, 'dying' during
+  // the death cutscene (swap to TaurusDEAD.png + slump animation).
+  const [taurusBossPhase, setTaurusBossPhase] = useState<'hidden' | 'idle' | 'attack' | 'dying'>('hidden');
+  const [taurusBossHit, setTaurusBossHit] = useState(false);
 
   // Jessyka companion + kisses.
   const jessykaRef = useRef<JessykaCompanion | null>(null);
@@ -433,6 +441,9 @@ export default function App() {
     setAfromanBossPhase('hidden');
     setAfromanBossHit(false);
     setAfromanGrooving(false);
+    // 0.3.12 — Taurus fight state reset.
+    setTaurusBossPhase('hidden');
+    setTaurusBossHit(false);
     stopMusicSample(200);
   }, []);
 
@@ -470,6 +481,8 @@ export default function App() {
     setAfromanBossPhase('hidden');
     setAfromanBossHit(false);
     setAfromanGrooving(false);
+    setTaurusBossPhase('hidden');
+    setTaurusBossHit(false);
     stopMusicSample(600);
     sfxBonfire();
     setBonfireInfo({reason, nextZoneIdx, defeatedBossName});
@@ -495,22 +508,24 @@ export default function App() {
     const def = BOSSES[bossId];
     if (!def) { beginBonfire('zone-cleared', zoneIdxRef.current + 1); return; }
     const nowMs = performance.now();
-    const isSecret = !!def.secret;
+    // Bosses that own an audio sample (afroman, taurus) skip the short
+    // 4.5 s canvas silhouette intro that ships with the other bosses —
+    // their dedicated 20 s cutscene phase has already handled the reveal
+    // and started the music sample. Other bosses still run the classic
+    // short silhouette rise + name flourish via `introStart`.
+    const hasSample = !!def.sampleId;
     bossRef.current = {
       def,
       currentHp: def.maxHp,
       phaseIdx: 0,
-      // Secret boss has its own 20s intro cutscene — by the time we call
-      // enterBoss for him, it's already finished. Skip the default boss
-      // intro window so attacks + phrases can spawn immediately.
-      nextAttackAt: nowMs + (isSecret ? 800 : BOSS_INTRO_MS + 1200),
-      nextPhraseAt: nowMs + (isSecret ? 400 : BOSS_INTRO_MS + 400),
+      nextAttackAt: nowMs + (hasSample ? 800 : BOSS_INTRO_MS + 1200),
+      nextPhraseAt: nowMs + (hasSample ? 400 : BOSS_INTRO_MS + 400),
       patternRotationIdx: 0,
       enraged: false,
       attackWindupT: 0,
       defeated: false,
       deathStart: 0,
-      introStart: isSecret ? 0 : nowMs,
+      introStart: hasSample ? 0 : nowMs,
       summonerCooldownUntil: 0,
       casterCooldownUntil: 0,
       recentPhrases: [],
@@ -520,15 +535,25 @@ export default function App() {
     projectilesRef.current = [];
     zootedStacksRef.current = 0;
     zootedDecayAtRef.current = 0;
-    if (isSecret) {
-      // Music sample is already playing from the intro — just ensure it's at
-      // full volume. Don't stop procedural music (already stopped by sample).
-      setMusicSampleVolume(1.0, 400);
+    // Sync the DOM-sprite state for each sample-backed boss. The sprite
+    // <img> is wired in the render tree to show/hide off this state.
+    if (def.id === 'afroman') {
       setAfromanBossPhase('idle');
+      setTaurusBossPhase('hidden');
+    } else if (def.id === 'taurus') {
+      setTaurusBossPhase('idle');
+      setAfromanBossPhase('hidden');
+    } else {
+      setAfromanBossPhase('hidden');
+      setTaurusBossPhase('hidden');
+    }
+    if (hasSample) {
+      // The dedicated intro phase already started the sample — just ramp
+      // it to full volume for the fight proper.
+      setMusicSampleVolume(1.0, 400);
     } else {
       sfxBossAppear();
       playMusic('boss');
-      setAfromanBossPhase('hidden');
     }
     phaseRef.current = 'boss';
     setPhase('boss');
@@ -557,15 +582,21 @@ export default function App() {
   const commitBossChoice = useCallback((choice: BossSelectChoice) => {
     persistBossChoice(choice);
     statsRef.current.secretBossChosen = choice === 'afroman';
+    // Both choices now route through a dedicated 20 s cutscene phase — the
+    // AfromanIntro (pink/psychedelic) and the TaurusIntro (dark/eerie).
+    // Each component owns its audio sample playback and calls enterBoss
+    // for the correct boss on completion.
+    wordsRef.current = [];
+    projectilesRef.current = [];
+    activeWordRef.current = null;
     if (choice === 'afroman') {
-      // The 20 s cutscene phase handles music fade-in + sprite reveal.
-      // It then hands off to enterBoss('afroman') on completion.
       phaseRef.current = 'boss-intro-afroman';
       setPhase('boss-intro-afroman');
     } else {
-      enterBoss('taurus');
+      phaseRef.current = 'boss-intro-taurus';
+      setPhase('boss-intro-taurus');
     }
-  }, [enterBoss]);
+  }, []);
 
   const triggerDeath = useCallback(() => {
     if (phaseRef.current === 'gameover' || phaseRef.current === 'victory') return;
@@ -617,6 +648,7 @@ export default function App() {
     setJessykaDespawning(false);
     setAfromanBossPhase('hidden');
     setZootedLevel(0);
+    setTaurusBossPhase('hidden');
     phaseRef.current = 'menu';
     setPhase('menu');
   }, []);
@@ -636,6 +668,7 @@ export default function App() {
     setJessykaDespawning(false);
     setAfromanBossPhase('hidden');
     setZootedLevel(0);
+    setTaurusBossPhase('hidden');
     phaseRef.current = 'menu';
     setPhase('menu');
   }, []);
@@ -660,10 +693,15 @@ export default function App() {
     statsRef.current.zoneReached = zoneIdx;
     setShowDevPanel(false);
     if (bossId === 'afroman') {
-      // Jumping straight into the intro cutscene so the dev can QA it end-to-end.
       statsRef.current.secretBossChosen = true;
       phaseRef.current = 'boss-intro-afroman';
       setPhase('boss-intro-afroman');
+    } else if (bossId === 'taurus') {
+      // 0.3.12 — taurus now owns a dedicated intro cutscene (TaurusIntro)
+      // that starts the taurus soundtrack. Dev jump routes through it so
+      // the dev can QA the reveal end-to-end.
+      phaseRef.current = 'boss-intro-taurus';
+      setPhase('boss-intro-taurus');
     } else {
       enterBoss(bossId);
     }
@@ -976,6 +1014,7 @@ export default function App() {
       zoneIdxRef, zoneStartTimeRef, zoneElapsedRef, bossRef, bossAnnouncementRef,
       zootedStacksRef, zootedDecayAtRef, lastBeatNowRef, beatPulseRef,
       setZootedLevel, setAfromanBossPhase, setAfromanBossHit,
+      setTaurusBossPhase, setTaurusBossHit,
       statsRef,
       jessykaRef, jessykaKissesRef, jessykaImgRef,
       setJessykaVisible, setJessykaDespawning,
@@ -985,6 +1024,7 @@ export default function App() {
   }, [phase, enterBoss, startBossEntryFlow, beginBonfire, triggerDeath, triggerRankUp]);
 
   const afromanIntroEnd = useCallback(() => enterBoss('afroman'), [enterBoss]);
+  const taurusIntroEnd = useCallback(() => enterBoss('taurus'), [enterBoss]);
 
   // ─── Render ──────────────────────────────────────────────────
   // RENDER_PLACEHOLDER
@@ -1008,10 +1048,13 @@ export default function App() {
     devResetSaveData, devSpawnJessyka, devAddZooted, devClearZooted, devSkipBossIntro, devOpenBossSelect,
     commitBossChoice,
     onAfromanIntroEnd: afromanIntroEnd,
+    onTaurusIntroEnd: taurusIntroEnd,
     zootedLevel,
     afromanBossPhase,
     afromanBossHit,
     afromanGrooving,
+    taurusBossPhase,
+    taurusBossHit,
   });
 }
 
@@ -1100,6 +1143,8 @@ type LoopDeps = {
   setZootedLevel: (v: 0 | 1 | 2 | 3) => void;
   setAfromanBossPhase: (p: 'hidden' | 'idle' | 'attack' | 'dying') => void;
   setAfromanBossHit: (v: boolean) => void;
+  setTaurusBossPhase: (p: 'hidden' | 'idle' | 'attack' | 'dying') => void;
+  setTaurusBossHit: (v: boolean) => void;
   statsRef: React.RefObject<RunStats>;
   jessykaRef: React.RefObject<JessykaCompanion | null>;
   jessykaKissesRef: React.RefObject<JessykaKiss[]>;
@@ -1543,6 +1588,7 @@ function spawnBossAttack(d: LoopDeps, pattern: BossPattern, _letters: string, ti
   // floating digit motes. Pure cosmetic flag — mechanics are unchanged except
   // for the beat-volley path which also sets onBeat for perfect-parry scoring.
   const isAfroman = d.bossRef.current?.def.id === 'afroman';
+  const isTaurus = d.bossRef.current?.def.id === 'taurus';
   // Flash the AfroMan sprite to its attack pose briefly whenever he spawns
   // anything — matches Jessyka's idle↔kiss swap for the other bosses.
   // 0.3.3: held for ~1.2 s (was 420 ms) so the attack pose actually reads on
@@ -1552,6 +1598,16 @@ function spawnBossAttack(d: LoopDeps, pattern: BossPattern, _letters: string, ti
     window.setTimeout(() => {
       if (d.bossRef.current && !d.bossRef.current.defeated && d.bossRef.current.def.id === 'afroman') {
         d.setAfromanBossPhase('idle');
+      }
+    }, 1200);
+  }
+  // 0.3.12 — same pattern for Taurus. TaurusATTACK.png held for ~1.2 s
+  // during every attack spawn so the pose reads as a clear telegraph.
+  if (isTaurus) {
+    d.setTaurusBossPhase('attack');
+    window.setTimeout(() => {
+      if (d.bossRef.current && !d.bossRef.current.defeated && d.bossRef.current.def.id === 'taurus') {
+        d.setTaurusBossPhase('idle');
       }
     }, 1200);
   }
@@ -1738,6 +1794,60 @@ function spawnBossAttack(d: LoopDeps, pattern: BossPattern, _letters: string, ti
     d.bossAnnouncementRef.current = {text: 'A CASTER EMERGES', life: 140};
     sfxBossSummonCaster();
     triggerLightning(d.bgStateRef.current, time);
+    return true;
+  } else if (pattern === 'charge') {
+    // TAURUS — horizontal sweep. Taurus rears up and five projectiles
+    // tear across the screen at a fixed y-line. Telegraphed with a
+    // screen-wide lightning flash so the player can pre-position / pre-
+    // parry. Direction alternates per cast (stored via patternRotationIdx
+    // parity) so consecutive charges don't come from the same side.
+    triggerLightning(d.bgStateRef.current, time);
+    const leftToRight = ((b?.patternRotationIdx ?? 0) & 1) === 0;
+    const sweepY = 380 + (Math.random() - 0.5) * 60;
+    const count = 5;
+    const dir = leftToRight ? 1 : -1;
+    const startX = leftToRight ? -40 : DESIGN_W + 40;
+    for (let i = 0; i < count; i++) {
+      const spacing = 90;
+      d.projectilesRef.current.push({
+        id: nextProjectileId(),
+        x: startX - dir * spacing * i,
+        y: sweepY + (Math.random() - 0.5) * 20,
+        vx: dir * 6.5,
+        vy: 0.2,                 // slight drift downward so the sweep doesn't feel rigid
+        char: pick(),
+        fromBoss: true,
+        life: 220,               // ample time to cross the full 1024 px arena at vx=6.5
+        spawnedAt: performance.now(),
+      });
+    }
+    return true;
+  } else if (pattern === 'stomp') {
+    // TAURUS — vertical hammer. Five projectiles cluster on the player's
+    // current x position and rain down, staggered 80 ms apart so they read
+    // as a "column of doom" rather than an instant volley. Each can still
+    // be parried individually — chaining five matching digits in quick
+    // succession is the skill check.
+    const targetX = PLAYER.x + (Math.random() - 0.5) * 30;
+    d.shakeMagRef.current = Math.max(d.shakeMagRef.current, 6);
+    d.shakeUntilRef.current = Math.max(d.shakeUntilRef.current, time + 220);
+    for (let i = 0; i < 5; i++) {
+      const spawnAt = time + i * 80;
+      window.setTimeout(() => {
+        if (!d.bossRef.current || d.bossRef.current.defeated || d.bossRef.current.def.id !== 'taurus') return;
+        d.projectilesRef.current.push({
+          id: nextProjectileId(),
+          x: targetX + (Math.random() - 0.5) * 40,
+          y: BOSS_BODY_Y - 20,
+          vx: (Math.random() - 0.5) * 0.3,
+          vy: 1.4,
+          char: pick(),
+          fromBoss: true,
+          life: 500,
+          spawnedAt: performance.now(),
+        });
+      }, spawnAt - time);
+    }
     return true;
   } else if (pattern === 'munchie') {
     // AfroMan — drop one slow "munchie" word from the top. Contact with the
@@ -1939,6 +2049,13 @@ function updateFireballs(d: LoopDeps, ctx: CanvasRenderingContext2D, time: numbe
           d.bossRef.current.currentHp = Math.max(0, d.bossRef.current.currentHp - dmg);
           d.shakeMagRef.current = Math.max(d.shakeMagRef.current, 10 + dmg * 2);
           d.shakeUntilRef.current = Math.max(d.shakeUntilRef.current, time + 260);
+          // 0.3.12 — Taurus sprite flinches on phrase damage too, same
+          // pattern AfroMan uses for perfect parries. The hit class fades
+          // out after 520 ms and the sprite resumes its idle sway.
+          if (d.bossRef.current.def.id === 'taurus') {
+            d.setTaurusBossHit(true);
+            window.setTimeout(() => d.setTaurusBossHit(false), 520);
+          }
           // Big impact burst at the boss.
           for (let j = 0; j < 24 + dmg * 8; j++) {
             if (d.particlesRef.current.length >= PARTICLE_CAP) break;
@@ -1981,11 +2098,15 @@ function defeatBoss(d: LoopDeps, time: number): void {
   d.scoreRef.current += b.def.soulsReward;
   d.statsRef.current.bossesDefeated += 1;
   // 0.3.0 — secret-route marker + sprite death transition for AfroMan.
+  // 0.3.12 — Taurus gets the same sprite swap + music duck.
   const isSecret = b.def.id === 'afroman';
+  const isTaurus = b.def.id === 'taurus';
   if (isSecret) {
     d.statsRef.current.secretBossDefeated = true;
     d.setAfromanBossPhase('dying');
-    // Duck the music sample during the death cutscene.
+    setMusicSampleVolume(0.15, 1000);
+  } else if (isTaurus) {
+    d.setTaurusBossPhase('dying');
     setMusicSampleVolume(0.15, 1000);
   }
 
@@ -2013,9 +2134,9 @@ function defeatBoss(d: LoopDeps, time: number): void {
   d.activeWordRef.current = null;
   d.iFramesUntilRef.current = time + 3200;    // invulnerability for the duration
   d.bossAnnouncementRef.current = {
-    text: isSecret ? 'THE SET IS OVER' : b.def.name + ' FELLED',
+    text: isSecret ? 'THE SET IS OVER' : isTaurus ? 'THE RAMPART IS YOURS' : b.def.name + ' FELLED',
     life: 180,
-    color: isSecret ? '#ffd6ec' : undefined,
+    color: isSecret ? '#ffd6ec' : isTaurus ? '#ffa870' : undefined,
   };
 
   // Floating "souls earned" text — flies up from the boss's chest.
@@ -4101,10 +4222,13 @@ type RenderProps = {
   devOpenBossSelect: () => void;
   commitBossChoice: (choice: BossSelectChoice) => void;
   onAfromanIntroEnd: () => void;
+  onTaurusIntroEnd: () => void;
   zootedLevel: 0 | 1 | 2 | 3;
   afromanBossPhase: 'hidden' | 'idle' | 'attack' | 'dying';
   afromanBossHit: boolean;
   afromanGrooving: boolean;
+  taurusBossPhase: 'hidden' | 'idle' | 'attack' | 'dying';
+  taurusBossHit: boolean;
 };
 
 function renderAppTree(p: RenderProps) {
@@ -4186,6 +4310,27 @@ function renderAppTree(p: RenderProps) {
               draggable={false}
             />
           )}
+          {/* Taurus — DOM sprite layer for the Undead Burg boss fight.
+              Swaps between TaurusIDLE.png / TaurusATTACK.png / TaurusDEAD.png
+              driven by taurusBossPhase. The dying state swaps the src AND
+              applies a slump + fade animation via `.is-dying`. A static
+              fire-ring at his feet burns the whole time he's on stage
+              (drops with `is-dying`). */}
+          {p.taurusBossPhase !== 'hidden' && (
+            <>
+              <div className="taurus-fire-ring" aria-hidden />
+              <img
+                src={
+                  p.taurusBossPhase === 'dying' ? '/TaurusDEAD.png'
+                  : p.taurusBossPhase === 'attack' ? '/TaurusATTACK.png'
+                  : '/TaurusIDLE.png'
+                }
+                alt="Taurus Demon"
+                className={`taurus-boss-sprite ${p.taurusBossHit ? 'is-hit' : ''} ${p.taurusBossPhase === 'dying' ? 'is-dying' : ''}`}
+                draggable={false}
+              />
+            </>
+          )}
           {/* ZOOTED debuff — cannabis-leaf icons floating above the player. */}
           {p.zootedLevel > 0 && (p.phase === 'zone' || p.phase === 'boss') && (
             <div className="zooted-leaves" style={{left: PLAYER.x + 'px'}} aria-hidden>
@@ -4254,6 +4399,11 @@ function renderAppTree(p: RenderProps) {
         {/* AfroMan 20s intro cutscene — sprite reveal + music fade-in */}
         {p.phase === 'boss-intro-afroman' && (
           <AfromanIntro onComplete={p.onAfromanIntroEnd} />
+        )}
+
+        {/* Taurus 20s intro cutscene — dark/eerie variant with fire + cracks. */}
+        {p.phase === 'boss-intro-taurus' && (
+          <TaurusIntro onComplete={p.onTaurusIntroEnd} />
         )}
 
         {/* Bonfire interlude */}
