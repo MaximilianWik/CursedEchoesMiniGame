@@ -18,6 +18,12 @@ const HMAC_SECRET: string = (import.meta.env.VITE_SCORE_HMAC_SECRET as string | 
 
 /** HMAC-SHA256 over `message` using the shared secret, hex-encoded. */
 async function hmacHex(message: string): Promise<string> {
+  if (!HMAC_SECRET) {
+    throw new Error(
+      'Leaderboard misconfigured: VITE_SCORE_HMAC_SECRET is not set in this build. ' +
+      'Set it in Vercel env vars and redeploy.',
+    );
+  }
   const enc = new TextEncoder();
   const key = await crypto.subtle.importKey(
     'raw',

@@ -6,10 +6,9 @@
  */
 
 import {neon} from '@neondatabase/serverless';
+import type {IncomingMessage, ServerResponse} from 'node:http';
 
-export const config = {runtime: 'nodejs'};
-
-export default async function handler(_req: Request) {
+export default async function handler(_req: IncomingMessage, res: ServerResponse) {
   try {
     const sql = neon(process.env.DATABASE_URL!);
     const rows = await sql`
@@ -18,17 +17,14 @@ export default async function handler(_req: Request) {
       order by souls desc, created_at asc
       limit 10
     `;
-    return new Response(JSON.stringify(rows), {
-      headers: {
-        'content-type': 'application/json',
-        'cache-control': 'public, s-maxage=10, stale-while-revalidate=30',
-      },
-    });
+    res.statusCode = 200;
+    res.setHeader('content-type', 'application/json');
+    res.setHeader('cache-control', 'public, s-maxage=10, stale-while-revalidate=30');
+    res.end(JSON.stringify(rows));
   } catch (err) {
     console.error('leaderboard error', err);
-    return new Response(JSON.stringify({error: 'internal'}), {
-      status: 500,
-      headers: {'content-type': 'application/json'},
-    });
+    res.statusCode = 500;
+    res.setHeader('content-type', 'application/json');
+    res.end(JSON.stringify({error: 'internal'}));
   }
 }
