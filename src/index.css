@@ -543,6 +543,186 @@
     font-weight: 700;
   }
 
+  /* Global Hall of Souls — banner above the combo graph. Mirrors the
+     gothic ledger styling but pushes a slightly cooler sigil-cyan accent
+     so it reads as "world" vs the warm amber "self/local" sections. */
+  .go-global-frame {
+    margin-top: 10px;
+    padding: 10px 18px 12px;
+    border: 1px solid rgba(180, 120, 60, 0.32);
+    background: linear-gradient(180deg, rgba(20, 10, 12, 0.78), rgba(8, 4, 8, 0.82));
+    box-shadow: 0 0 22px rgba(0, 0, 0, 0.55), inset 0 0 26px rgba(40, 16, 12, 0.4);
+    width: 660px;
+    max-width: 96%;
+    position: relative;
+  }
+  .go-global-header {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    margin-bottom: 10px;
+    font-family: "Cinzel", serif;
+  }
+  .go-global-header h2 {
+    font-size: 12px;
+    letter-spacing: 0.45em;
+    text-transform: uppercase;
+    color: #ffd98a;
+    text-shadow: 0 0 12px rgba(255, 180, 80, 0.5);
+    margin: 0;
+  }
+  .go-global-sigil {
+    color: rgba(255, 200, 120, 0.7);
+    font-size: 12px;
+    text-shadow: 0 0 8px rgba(255, 160, 60, 0.6);
+  }
+  .go-global-submit {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 10px;
+    padding: 8px 12px;
+    border: 1px dashed rgba(255, 200, 120, 0.35);
+    background: rgba(15, 6, 8, 0.55);
+    flex-wrap: wrap;
+  }
+  .go-global-submit-label {
+    font-family: "Cinzel", serif;
+    font-size: 9px;
+    letter-spacing: 0.35em;
+    text-transform: uppercase;
+    color: rgba(255, 200, 120, 0.75);
+  }
+  .go-global-name-input {
+    flex: 1 1 140px;
+    min-width: 120px;
+    background: rgba(10, 4, 6, 0.9);
+    border: 1px solid rgba(220, 160, 80, 0.5);
+    color: #ffd98a;
+    font-family: "Cinzel", serif;
+    font-size: 13px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    padding: 5px 10px;
+    outline: none;
+    transition: border-color 180ms, box-shadow 180ms;
+  }
+  .go-global-name-input:focus {
+    border-color: #ffd98a;
+    box-shadow: 0 0 16px rgba(255, 180, 80, 0.45), inset 0 0 8px rgba(60, 30, 10, 0.5);
+  }
+  .go-global-submit-btn,
+  .go-global-skip-btn {
+    font-family: "Cinzel", serif;
+    font-size: 10px;
+    letter-spacing: 0.3em;
+    text-transform: uppercase;
+    padding: 6px 14px;
+    border: 1px solid rgba(220, 160, 80, 0.55);
+    background: linear-gradient(180deg, rgba(60, 26, 14, 0.7), rgba(20, 8, 6, 0.75));
+    color: #ffe2a0;
+    cursor: pointer;
+    transition: border-color 200ms, color 200ms, background 200ms, box-shadow 200ms;
+  }
+  .go-global-submit-btn:hover:not(:disabled),
+  .go-global-skip-btn:hover:not(:disabled) {
+    border-color: #ffd98a;
+    color: #fff2d0;
+    box-shadow: 0 0 16px rgba(255, 180, 80, 0.35);
+  }
+  .go-global-submit-btn:disabled,
+  .go-global-skip-btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+  .go-global-skip-btn {
+    border-color: rgba(180, 120, 60, 0.35);
+    background: transparent;
+    color: rgba(220, 170, 100, 0.6);
+  }
+  .go-global-error {
+    color: #ff8a8a;
+    font-family: "EB Garamond", serif;
+    font-size: 12px;
+    flex-basis: 100%;
+  }
+  .go-global-submitted {
+    margin-bottom: 10px;
+    padding: 6px 12px;
+    border-left: 2px solid #ffd98a;
+    color: #ffd98a;
+    font-family: "EB Garamond", serif;
+    font-style: italic;
+    font-size: 13px;
+    text-shadow: 0 0 8px rgba(255, 180, 80, 0.4);
+  }
+  .go-global-empty {
+    text-align: center;
+    padding: 14px 10px;
+    font-family: "EB Garamond", serif;
+    font-size: 13px;
+    color: rgba(200, 140, 80, 0.6);
+    font-style: italic;
+  }
+  .go-global-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 4px 16px;
+    counter-reset: globalrank;
+  }
+  .go-global-row {
+    display: grid;
+    grid-template-columns: 28px 1fr auto auto;
+    align-items: baseline;
+    gap: 10px;
+    padding: 4px 8px;
+    border-bottom: 1px solid rgba(180, 120, 60, 0.15);
+    font-family: "Cinzel", serif;
+    font-size: 12px;
+    letter-spacing: 0.05em;
+    color: rgba(220, 170, 100, 0.85);
+    transition: background 180ms;
+  }
+  .go-global-row:hover {
+    background: rgba(40, 18, 14, 0.4);
+  }
+  .go-global-row.is-mine {
+    background: linear-gradient(90deg, rgba(80, 38, 18, 0.55), rgba(35, 16, 12, 0.4));
+    border-bottom-color: rgba(255, 200, 120, 0.7);
+    box-shadow: 0 0 18px rgba(255, 180, 80, 0.28);
+    color: #ffe9c0;
+  }
+  .go-global-rank {
+    color: rgba(255, 180, 80, 0.65);
+    font-weight: 700;
+    text-align: right;
+  }
+  .go-global-row.is-mine .go-global-rank { color: #ffd98a; }
+  .go-global-name {
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .go-global-souls {
+    color: #ffd98a;
+    font-weight: 700;
+    text-shadow: 0 0 8px rgba(255, 180, 80, 0.35);
+  }
+  .go-global-combo {
+    font-size: 10px;
+    color: rgba(200, 140, 80, 0.7);
+    letter-spacing: 0.2em;
+  }
+  @media (max-width: 700px) {
+    .go-global-list { grid-template-columns: 1fr; }
+  }
+
   /* Combo-over-time graph — banner below the columns. */
   .go-graph-frame {
     margin-top: 10px;

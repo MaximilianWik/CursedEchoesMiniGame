@@ -19,10 +19,17 @@
  * that, and the Try Again CTA anchors the bottom.
  */
 
-import {useEffect, useRef} from 'react';
+import {useEffect, useRef, useState} from 'react';
 import type {Rank} from '../graphics';
 import type {RunStats, DerivedStats} from '../game/stats';
 import {APP_VERSION} from '../version';
+import {
+  fetchLeaderboard,
+  loadLastName,
+  saveLastName,
+  submitScore,
+  type LeaderboardRow,
+} from '../game/leaderboard';
 
 export type HighScore = {souls: number; maxCombo: number};
 
@@ -47,6 +54,57 @@ export function GameOverScreen(props: GameOverScreenProps) {
   const {finalScore, maxCombo, topRank, stats, derived, zoneName, highscores,
     secretPassword, passwordError, setSecretPassword, setPasswordError, onUnlock, onTryAgain, onOpenDev} = props;
   const graphRef = useRef<HTMLCanvasElement>(null);
+
+  // ── Global leaderboard ────────────────────────────────────────
+  const [globalRows, setGlobalRows] = useState<LeaderboardRow[]>([]);
+  const [globalLoading, setGlobalLoading] = useState(true);
+  const [globalError, setGlobalError] = useState<string | null>(null);
+  const [pName, setPName] = useState<string>(() => loadLastName());
+  const [submitState, setSubmitState] =
+    useState<'idle' | 'submitting' | 'submitted' | 'skipped' | 'error'>('idle');
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  // The exact row the player just submitted — used to highlight it in the
+  // refetched list (server may sanitize the name, so trust the response).
+  const [justSubmitted, setJustSubmitted] = useState<{name: string; souls: number} | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchLeaderboard()
+      .then(rows => { if (!cancelled) { setGlobalRows(rows); setGlobalLoading(false); } })
+      .catch(err => {
+        if (!cancelled) {
+          setGlobalError(err instanceof Error ? err.message : 'fetch failed');
+          setGlobalLoading(false);
+        }
+      });
+    return () => { cancelled = true; };
+  }, []);
+
+  // Qualifies if there's room (<10 rows) or finalScore beats the 10th place.
+  const qualifies =
+    finalScore > 0 && (globalRows.length < 10 || finalScore > (globalRows[9]?.souls ?? 0));
+  const showSubmitForm =
+    !globalLoading && qualifies && submitState !== 'submitted' && submitState !== 'skipped';
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    const trimmed = pName.trim().slice(0, 20);
+    if (!trimmed) return;
+    setSubmitState('submitting');
+    setSubmitError(null);
+    try {
+      await submitScore(trimmed, finalScore, maxCombo);
+      saveLastName(trimmed);
+      setJustSubmitted({name: trimmed, souls: finalScore});
+      const rows = await fetchLeaderboard();
+      setGlobalRows(rows);
+      setSubmitState('submitted');
+    } catch (err) {
+      setSubmitError(err instanceof Error ? err.message : 'submit failed');
+      setSubmitState('error');
+    }
+  }
+
 
   // ── Combo-over-time graph — wider + prettier than before. Amber instead
   //    of red so it reads as "story of the run", not a second death cue.
@@ -247,6 +305,84 @@ export function GameOverScreen(props: GameOverScreenProps) {
             </div>
           )}
         </section>
+      </div>
+
+      {/* ─── Global Hall of Souls — submit + top 10 across all players ─── */}
+      <div className="go-global-frame slide-in" style={{animationDelay: '2400ms'}}>
+        <div className="go-global-header">
+          <span className="go-global-sigil">✦</span>
+          <h2>Hall of Souls — World</h2>
+          <span className="go-global-sigil">✦</span>
+        </div>
+
+        {showSubmitForm && (
+          <form className="go-global-submit" onSubmit={handleSubmit}>
+            <span className="go-global-submit-label">
+              {globalRows.length < 10 ? 'Inscribe your name' : 'You qualify — inscribe your name'}
+            </span>
+            <input
+              className="go-global-name-input"
+              type="text"
+              value={pName}
+              maxLength={20}
+              placeholder="ANON"
+              aria-label="Your name"
+              onChange={(e) => setPName(e.target.value)}
+              disabled={submitState === 'submitting'}
+            />
+            <button
+              type="submit"
+              className="go-global-submit-btn"
+              disabled={submitState === 'submitting' || !pName.trim()}
+            >
+              {submitState === 'submitting' ? 'Inscribing…' : 'Inscribe'}
+            </button>
+            <button
+              type="button"
+              className="go-global-skip-btn"
+              onClick={() => setSubmitState('skipped')}
+              disabled={submitState === 'submitting'}
+            >
+              Skip
+            </button>
+            {submitError && <span className="go-global-error">{submitError}</span>}
+          </form>
+        )}
+
+        {submitState === 'submitted' && (
+          <div className="go-global-submitted">Inscribed. Your name joins the dead.</div>
+        )}
+
+        {globalLoading ? (
+          <div className="go-global-empty">Summoning the ledger…</div>
+        ) : globalError ? (
+          <div className="go-global-empty go-global-error">
+            The ledger is unreachable. {globalError}
+          </div>
+        ) : globalRows.length === 0 ? (
+          <div className="go-global-empty">
+            <div className="go-records-sigil">✦</div>
+            <p>No souls inscribed yet.</p>
+            <p className="italic opacity-60">Be the first.</p>
+          </div>
+        ) : (
+          <ol className="go-global-list">
+            {globalRows.map((r, i) => {
+              const isMine =
+                justSubmitted !== null &&
+                r.souls === justSubmitted.souls &&
+                r.name === justSubmitted.name;
+              return (
+                <li key={i} className={`go-global-row ${isMine ? 'is-mine' : ''}`}>
+                  <span className="go-global-rank">{i + 1}</span>
+                  <span className="go-global-name">{r.name}</span>
+                  <span className="go-global-souls">{r.souls.toLocaleString()}</span>
+                  <span className="go-global-combo">×{r.max_combo}</span>
+                </li>
+              );
+            })}
+          </ol>
+        )}
       </div>
 
       {/* Combo-over-time graph — wider banner under the columns */}
