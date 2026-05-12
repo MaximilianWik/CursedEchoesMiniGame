@@ -2,7 +2,8 @@
 
 A gothic typing trial. Four zones. Three bosses. Banish the echoes, parry the spells, type the phrases, kindle the fading flame.
 
-**Live:** https://cursedechoes.vercel.app/
+## **Live:** https://cursedechoes.vercel.app/
+
 **Current version:** `0.3.18` — Bonfire interlude cathedral redesign: night-sky backdrop with stars + ruined-skyline silhouette, ground fog, soul wisps, a proper multi-layer bonfire centrepiece with broken-sword icon + shrine stones, and a framed "Next Trial" card. See [CHANGELOG.md](./CHANGELOG.md) for full history. Version is shown in-game on the menu, pause, settings, game-over and victory screens.
 
 https://github.com/user-attachments/assets/cc4d2332-4475-4e61-bd31-d33734f54dab
