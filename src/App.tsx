@@ -46,7 +46,7 @@ import {MenuScreen} from './screens/Menu';
 import {SettingsScreen} from './screens/Settings';
 import {PauseScreen} from './screens/Pause';
 import {BonfireInterlude, type BonfireReason} from './screens/BonfireInterlude';
-import {GameOverScreen, type HighScore} from './screens/GameOver';
+import {GameOverScreen} from './screens/GameOver';
 import {VictoryScreen} from './screens/Victory';
 import {SecretAskScreen, SecretLoveScreen, type SecretHeart} from './screens/SecretScreens';
 import {DevPanel} from './screens/DevPanel';
@@ -265,7 +265,6 @@ export default function App() {
 
   const [scale, setScale] = useState(1);
   const [isMobileFocused, setIsMobileFocused] = useState(false);
-  const [highscores, setHighscores] = useState<HighScore[]>([]);
 
   const [hudStats, setHudStats] = useState<HudStats>(() => initialHudStats());
   const [bossBarStats, setBossBarStats] = useState<BossBarStats | null>(null);
@@ -378,10 +377,8 @@ export default function App() {
   // Stable audio handle for the smooch easter egg.
   const smoochAudioRef = useRef<HTMLAudioElement | null>(null);
 
-  // ─── Init: load highscores, preload smooch, audio on mount ──
+  // ─── Init: preload smooch, audio on mount ──
   useEffect(() => {
-    const stored = localStorage.getItem('abyss_highscores');
-    if (stored) { try { setHighscores(JSON.parse(stored)); } catch { /* ignore */ } }
     const a = new Audio('/smooch.mp3');
     a.preload = 'auto';
     smoochAudioRef.current = a;
@@ -670,18 +667,6 @@ export default function App() {
     setFinalSnapshot(snapshot());
     phaseRef.current = 'gameover';
     setPhase('gameover');
-    // Persist highscore.
-    try {
-      const stored = localStorage.getItem('abyss_highscores');
-      let list: HighScore[] = stored ? JSON.parse(stored) : [];
-      if (scoreRef.current > 0) {
-        list.push({souls: scoreRef.current, maxCombo: maxComboRef.current});
-        list.sort((a, b) => b.souls - a.souls);
-        list = list.slice(0, 5);
-        localStorage.setItem('abyss_highscores', JSON.stringify(list));
-        setHighscores(list);
-      }
-    } catch { /* ignore */ }
   }, []);
 
   function snapshot(): FinalSnapshot {
@@ -815,12 +800,12 @@ export default function App() {
     setShowDevPanel(false); setPaused(false);
   }, []);
   // ─── 0.3.1 dev actions ───────────────────────────────────────
-  /** Wipe the boss-select gate + highscores. Surfaces the fork again on
-   *  the next burg clear. Does NOT touch audio/accessibility settings. */
+  /** Wipe the boss-select gate + legacy local highscores. Surfaces the
+   *  fork again on the next burg clear. Does NOT touch audio/accessibility
+   *  settings or the global leaderboard. */
   const devResetSaveData = useCallback(() => {
     resetBossSelectGate();
     resetHighscores();
-    setHighscores([]);
     setShowDevPanel(false); setPaused(false);
   }, []);
   /** Force-spawn Jessyka RIGHT NOW (no estus cost). Mirrors the Q-summon
@@ -1124,7 +1109,7 @@ export default function App() {
     secretPassword, setSecretPassword, passwordError, setPasswordError,
     hudStats, bossBarStats, bonfireInfo, finalSnapshot,
     jessykaVisible, jessykaDespawning, jessykaImgRef,
-    highscores, isMobileFocused,
+    isMobileFocused,
     bgCanvasRef, canvasRef, textCanvasRef, playerImgRef, shakeRef, screenFlashRef, mobileInputRef,
     smoochAudioRef,
     startRun, abandonRun, tryAgain, advanceFromBonfire,
@@ -4706,7 +4691,6 @@ type RenderProps = {
   jessykaDespawning: boolean;
   jessykaImgRef: React.RefObject<HTMLImageElement | null>;
   finalSnapshot: FinalSnapshot | null;
-  highscores: HighScore[];
   isMobileFocused: boolean;
   bgCanvasRef: React.RefObject<HTMLCanvasElement | null>;
   canvasRef: React.RefObject<HTMLCanvasElement | null>;
@@ -4953,7 +4937,6 @@ function renderAppTree(p: RenderProps) {
             stats={p.finalSnapshot.stats}
             derived={deriveStats(p.finalSnapshot.stats)}
             zoneName={p.finalSnapshot.zoneName}
-            highscores={p.highscores}
             secretPassword={p.secretPassword}
             passwordError={p.passwordError}
             setSecretPassword={p.setSecretPassword}

@@ -31,8 +31,6 @@ import {
   type LeaderboardRow,
 } from '../game/leaderboard';
 
-export type HighScore = {souls: number; maxCombo: number};
-
 export type GameOverScreenProps = {
   finalScore: number;
   maxCombo: number;
@@ -40,7 +38,6 @@ export type GameOverScreenProps = {
   stats: RunStats;
   derived: DerivedStats;
   zoneName: string;
-  highscores: HighScore[];
   secretPassword: string;
   passwordError: boolean;
   setSecretPassword: (v: string) => void;
@@ -51,7 +48,7 @@ export type GameOverScreenProps = {
 };
 
 export function GameOverScreen(props: GameOverScreenProps) {
-  const {finalScore, maxCombo, topRank, stats, derived, zoneName, highscores,
+  const {finalScore, maxCombo, topRank, stats, derived, zoneName,
     secretPassword, passwordError, setSecretPassword, setPasswordError, onUnlock, onTryAgain, onOpenDev} = props;
   const graphRef = useRef<HTMLCanvasElement>(null);
 
@@ -212,7 +209,8 @@ export function GameOverScreen(props: GameOverScreenProps) {
         )}
       </div>
 
-      {/* Three-column main plate */}
+      {/* Two-column main plate — Run + Trial. Hall of Records was retired
+          in favor of the global "Hall of Souls" leaderboard below. */}
       <div className="go-columns slide-in" style={{animationDelay: '2200ms'}}>
         {/* ─── Column 1 — THE RUN (featured numbers) ─── */}
         <section className="go-card go-card-run">
@@ -273,37 +271,6 @@ export function GameOverScreen(props: GameOverScreenProps) {
               accent="danger"
             />
           </div>
-        </section>
-
-        {/* ─── Column 3 — HALL OF RECORDS ─── */}
-        <section className="go-card go-card-records">
-          <GothicHeader>Hall of Records</GothicHeader>
-
-          {highscores.length === 0 ? (
-            <div className="go-records-empty">
-              <div className="go-records-sigil">◈</div>
-              <p>No legendary souls yet.</p>
-              <p className="italic opacity-60">The ledger waits.</p>
-            </div>
-          ) : (
-            <div className="go-records-list">
-              {highscores.map((hs, i) => (
-                <div
-                  key={i}
-                  className={`go-record ${finalScore > 0 && hs.souls === finalScore && hs.maxCombo === maxCombo ? 'is-current' : ''}`}
-                >
-                  <div className="go-record-rank">{romanize(i + 1)}</div>
-                  <div className="go-record-body">
-                    <div className="go-record-souls">{hs.souls.toLocaleString()}</div>
-                    <div className="go-record-meta">
-                      <span>Max combo</span>
-                      <span className="go-record-meta-value">{hs.maxCombo}</span>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
         </section>
       </div>
 
@@ -473,10 +440,4 @@ function TrialStat({label, value, accent = 'default'}: {label: string; value: st
       <span className="go-stat-value">{value}</span>
     </div>
   );
-}
-
-/** Map 1..5 to I..V — a tiny flourish on the Hall of Records ranks. */
-function romanize(n: number): string {
-  const roman: Record<number, string> = {1: 'I', 2: 'II', 3: 'III', 4: 'IV', 5: 'V'};
-  return roman[n] ?? String(n);
 }
