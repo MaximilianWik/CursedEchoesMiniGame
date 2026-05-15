@@ -4,17 +4,89 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content" />
     <meta name="theme-color" content="#050505" />
-    <meta name="description" content="Cursed Echoes — a gothic typing trial. Banish the echoes before they reach you." />
     <meta name="color-scheme" content="dark" />
+
+    <!-- ─── Primary SEO ───────────────────────────────────────── -->
+    <title>Maximilian Wikström — Cursed Echoes</title>
+    <meta name="description" content="I built Cursed Echoes, a browser-based typing trial: banish swarming letters before they reach me, parry projectiles by digit, and survive three bosses." />
+    <meta name="author" content="Maximilian Wikström" />
+    <meta name="robots" content="index, follow" />
+    <link rel="canonical" href="https://cursedechoes.vercel.app/" />
+
+    <!-- ─── Open Graph ────────────────────────────────────────── -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Cursed Echoes" />
+    <meta property="og:url" content="https://cursedechoes.vercel.app/" />
+    <meta property="og:title" content="Maximilian Wikström — Cursed Echoes" />
+    <meta property="og:description" content="A browser-based typing trial I built. Banish letters, parry projectiles, survive the bosses." />
+    <meta property="og:image" content="https://cursedechoes.vercel.app/S-removebg-preview.png" />
+
+    <!-- ─── Twitter ───────────────────────────────────────────── -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Maximilian Wikström — Cursed Echoes" />
+    <meta name="twitter:description" content="A browser-based typing trial I built. Banish letters, parry projectiles, survive the bosses." />
+    <meta name="twitter:image" content="https://cursedechoes.vercel.app/S-removebg-preview.png" />
+
+    <!-- ─── Favicons ──────────────────────────────────────────── -->
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="icon" type="image/png" href="/S-removebg-preview.png" />
+
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link rel="preload" as="image" href="/idle1.png" />
     <link rel="preload" as="image" href="/casting2.png" />
-    <title>Cursed Echoes — A Gothic Typing Trial</title>
+
+    <!-- ─── JSON-LD: WebApplication + Person creator ──────────── -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "WebApplication",
+      "name": "Cursed Echoes",
+      "url": "https://cursedechoes.vercel.app/",
+      "description": "A browser-based typing trial — banish swarming letters, parry projectiles by digit, and survive three bosses.",
+      "applicationCategory": "GameApplication",
+      "genre": "Typing Game",
+      "operatingSystem": "Web",
+      "browserRequirements": "Requires JavaScript and a modern browser.",
+      "offers": {
+        "@type": "Offer",
+        "price": "0",
+        "priceCurrency": "USD"
+      },
+      "creator": {
+        "@type": "Person",
+        "name": "Maximilian Wikström",
+        "url": "https://max-wik.com/",
+        "sameAs": [
+          "https://maximilian-wikstrom.vercel.app/",
+          "https://tessera-neon.vercel.app/",
+          "https://www.instagram.com/max_wik/",
+          "https://github.com/MaximilianWik"
+        ]
+      }
+    }
+    </script>
   </head>
   <body>
     <div id="root"></div>
+
+    <!-- ─── Indexable fallback for crawlers / JS-disabled clients ─── -->
+    <noscript>
+      <h1>Cursed Echoes — Maximilian Wikström</h1>
+      <p>
+        I'm Maximilian Wikström. Cursed Echoes is my browser-based typing
+        trial — type to banish swarming letters, parry projectiles by digit,
+        and survive three bosses. The game needs JavaScript to run.
+      </p>
+      <ul>
+        <li><a href="https://max-wik.com/">max-wik.com</a> — my personal site</li>
+        <li><a href="https://maximilian-wikstrom.vercel.app/">Portfolio</a></li>
+        <li><a href="https://tessera-neon.vercel.app/">Tessera</a> — my QR generator</li>
+        <li><a href="https://www.instagram.com/max_wik/">Instagram</a></li>
+        <li><a href="https://github.com/MaximilianWik">GitHub</a></li>
+      </ul>
+    </noscript>
+
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

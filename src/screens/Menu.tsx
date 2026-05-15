@@ -68,6 +68,21 @@ export function MenuScreen({onStart, onOpenSettings, onOpenDev}: MenuScreenProps
       </div>
 
       <p className="mt-10 text-amber-900/40 font-serif text-xs tracking-widest uppercase">The darkness waits for no one</p>
+
+      {/* Author credit — small, low-key, links out to the canonical
+          identity site so search engines can resolve "Cursed Echoes" →
+          "Maximilian Wikström". rel="author" reinforces the relationship. */}
+      <p className="mt-3 text-amber-900/35 font-serif text-[10px] tracking-[0.35em] uppercase">
+        by{' '}
+        <a
+          href="https://max-wik.com/"
+          rel="author"
+          target="_blank"
+          className="text-amber-700/60 hover:text-amber-400 transition-colors underline-offset-4 hover:underline"
+        >
+          Maximilian Wikström
+        </a>
+      </p>
     </div>
   );
 }
